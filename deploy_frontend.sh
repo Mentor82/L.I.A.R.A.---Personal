@@ -21,6 +21,13 @@ echo ""
 echo "📦 Building React Frontend..."
 cd "$FRONTEND_DIR"
 
+# DIST_DIR and DEPLOY_DIR are the same path here, and the previous run's chown to
+# www-data (step 4) leaves it un-writable for vite's own cleanup as the normal user.
+# Reset it with sudo before building so vite always starts from a clean, writable dir.
+if [ -d "$DIST_DIR" ]; then
+    sudo rm -rf "$DIST_DIR"
+fi
+
 if ! npm run build; then
     echo "❌ Build failed!"
     exit 1
