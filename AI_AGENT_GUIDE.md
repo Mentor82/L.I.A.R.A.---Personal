@@ -2,6 +2,10 @@
 
 This guide helps AI agents (like GitHub Copilot, Claude, ChatGPT) work with Liara's patch and backup system.
 
+> Need to actually **run a command** on the server (not just create a patch)?
+> See [AI_EXEC_GUIDE.md](./AI_EXEC_GUIDE.md) for the async JSON exec API
+> (`/api/admin/terminal/exec`) built for exactly that.
+
 ---
 
 ## Quick Reference
