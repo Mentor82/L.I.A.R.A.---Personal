@@ -358,20 +358,22 @@ async def full_health_check():
     resources = get_system_resources()
     
     # Services
+    # Note: no "liara-frontend" check here - that systemd unit runs a Vite *dev*
+    # server, which is deliberately disabled in production. The frontend is
+    # served as static files by nginx (see deploy_frontend.sh), whose health is
+    # already covered by the "nginx" service check and the 80/443 port checks below.
     services = {
         "liara-backend": check_service_status("liara-backend"),
         "liara-sse": check_service_status("liara-sse"),
-        "liara-frontend": check_service_status("liara-frontend"),
         "nginx": check_service_status("nginx"),
         "postgresql": check_service_status("postgresql"),
         "docker": check_service_status("docker")
     }
-    
+
     # Ports
     ports = [
         check_port(8100, "FastAPI Backend"),
         check_port(8101, "SSE Streaming Server"),
-        check_port(5173, "Vite Frontend"),
         check_port(80, "Nginx HTTP"),
         check_port(443, "Nginx HTTPS"),
         check_port(5432, "PostgreSQL"),
@@ -397,7 +399,6 @@ async def full_health_check():
         check_endpoint("http://localhost:8100/", "Backend API Root"),
         check_endpoint("http://localhost:8100/health/full", "Backend Health"),
         check_endpoint("http://localhost:8101/", "SSE Streaming Server"),
-        check_endpoint("http://localhost:5173/", "Frontend Dev Server"),
         check_endpoint("http://localhost:7474/", "Neo4j Browser")
     ]
     
@@ -422,8 +423,8 @@ async def full_health_check():
     # Add service checks
     all_checks.extend([s.get('healthy', False) for s in services.values()])
     
-    # Add critical ports (backend, SSE, frontend, db)
-    critical_ports = [p for p in ports if p['port'] in [8100, 8101, 5173, 5432]]
+    # Add critical ports (backend, SSE, db)
+    critical_ports = [p for p in ports if p['port'] in [8100, 8101, 5432]]
     all_checks.extend([p.get('healthy', False) for p in critical_ports])
     
     # Add container checks
