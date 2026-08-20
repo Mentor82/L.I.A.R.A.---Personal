@@ -29,7 +29,7 @@ from services.redis_service import get_redis_service
 
 router = APIRouter(prefix="/admin/terminal", tags=["Admin Terminal Exec"])
 
-EXEC_TIMEOUT = 3  # TEMP: lowered for live P1 process-group-kill test, revert to 300 after
+EXEC_TIMEOUT = 300  # seconds, hard cap per command
 JOB_TTL_SECONDS = 3600  # how long a finished job's result stays fetchable
 OUTPUT_CAP = 20000  # chars kept per stdout/stderr, to keep Redis entries bounded
 JOB_KEY_PREFIX = "ai_exec_job:"
