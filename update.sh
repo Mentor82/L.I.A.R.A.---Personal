@@ -32,9 +32,10 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
 fi
 
 BEFORE=$(git rev-parse HEAD)
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-echo -e "${BLUE}📥 Pulling latest changes...${NC}"
-git pull
+echo -e "${BLUE}📥 Pulling latest changes (origin/$BRANCH)...${NC}"
+git pull --ff-only origin "$BRANCH"
 echo ""
 
 AFTER=$(git rev-parse HEAD)
