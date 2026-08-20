@@ -15,14 +15,13 @@ function AdminLayout() {
   const dockRef = useRef(null)
   const { setDockNode } = useTerminalDock()
 
-  // Announce our dock spot to the app-wide persistent terminal while it's visible here,
-  // and release it again on route change / unmount so it falls back to its hidden home.
+  // Register our dock spot once, for as long as AdminLayout stays mounted (i.e. anywhere
+  // under /admin) - the div itself is never conditionally unmounted (only CSS-hidden), so
+  // the portal target stays stable across /admin/dashboard <-> /admin/terminal switches.
   useEffect(() => {
-    if (isTerminalActive) {
-      setDockNode(dockRef.current)
-      return () => setDockNode(null)
-    }
-  }, [isTerminalActive, setDockNode])
+    setDockNode(dockRef.current)
+    return () => setDockNode(null)
+  }, [setDockNode])
 
   // Logout handler
   const handleLogout = () => {
@@ -127,12 +126,14 @@ function AdminLayout() {
 
         {/* Main Content */}
         <div className="admin-main">
-          {/* Dock spot for the app-wide persistent terminal (see TerminalDockContext) */}
-          {isTerminalActive ? (
+          {/* Dock spot for the app-wide persistent terminal - always mounted, only
+              CSS-hidden, so the portal target never gets torn down (see TerminalDockContext) */}
+          <div style={{ display: isTerminalActive ? 'block' : 'none', height: '100%' }}>
             <div ref={dockRef} style={{ height: '100%' }} />
-          ) : (
+          </div>
+          <div style={{ display: isTerminalActive ? 'none' : 'block', height: '100%' }}>
             <Outlet />
-          )}
+          </div>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { BrowserRouter as Router, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
 
@@ -63,10 +63,9 @@ const PageLoader = () => (
 
 // Keeps a single <TerminalTabs/> instance alive for the whole app session, so
 // open terminal tabs/WebSocket connections survive navigating anywhere in the app.
-// Portals its output into AdminLayout's dock spot when /admin/terminal is visible,
-// otherwise into a detached, hidden node so the component (and its sockets) stays mounted.
+// Portals its output into AdminLayout's dock spot (stable for as long as /admin/* is
+// mounted), or a detached hidden node otherwise, so the component never unmounts.
 function PersistentTerminal() {
-  const location = useLocation()
   const { dockNode } = useTerminalDock()
   const hiddenHomeRef = useRef(null)
 
@@ -83,8 +82,9 @@ function PersistentTerminal() {
     }
   }, [])
 
-  const isTerminalActive = location.pathname === '/admin/terminal'
-  const target = (isTerminalActive && dockNode) ? dockNode : hiddenHomeRef.current
+  // dockNode stays stable for as long as AdminLayout is mounted (anywhere under /admin),
+  // so this only retargets when entering/leaving the admin section, never between its subpages.
+  const target = dockNode || hiddenHomeRef.current
 
   return createPortal(
     <Suspense fallback={<div>Wird geladen...</div>}>
