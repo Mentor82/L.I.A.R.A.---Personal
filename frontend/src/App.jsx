@@ -38,6 +38,7 @@ const UserManagement = lazy(() => import('./components/UserManagement'))
 const SystemConfig = lazy(() => import('./components/SystemConfig'))
 const ServiceManagement = lazy(() => import('./components/ServiceManagement'))
 const TerminalTabs = lazy(() => import('./components/TerminalTabs'))
+const UpdateChecker = lazy(() => import('./components/UpdateChecker'))
 const Neo4jBrowser = lazy(() => import('./components/Neo4jBrowser'))
 
 // Legal pages - import individual named exports
@@ -305,6 +306,7 @@ function App() {
                     <Route path="system" element={<SystemConfig />} />
                     <Route path="logs" element={<LogReader />} />
                     <Route path="health" element={<SystemHealth />} />
+                    <Route path="updates" element={<UpdateChecker />} />
                     {/* TerminalTabs lives in PersistentTerminal (app root) so sessions survive nav switches */}
                     <Route path="terminal" element={null} />
                   </Route>

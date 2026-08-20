@@ -30,6 +30,7 @@ from api.routers.public import router as public_router
 from api.routers.terminal_pty import router as terminal_pty_router
 from api.routers.vision import router as vision_router
 from api.routers.admin_logs import router as admin_logs_router
+from api.routers.updater_router import router as updater_router
 from api.routers.dashboard_activities import router as dashboard_activities_router
 from api.routers.hailo_router import router as hailo_router
 from api.routers.validation_router import router as validation_router
@@ -157,6 +158,7 @@ app.include_router(system_load_router)  # System Load (for SSE decision)
 app.include_router(public_router)  # Public endpoints (no auth required)
 app.include_router(admin_router, prefix="/admin", tags=["admin"])  # Admin Tools (Services, Terminal)
 app.include_router(admin_logs_router)  # Admin Logs - System Log Reader
+app.include_router(updater_router)  # Admin Updater - git status + patch history (read-only)
 app.include_router(dashboard_activities_router)  # Dashboard Activities Widget
 app.include_router(terminal_pty_router)  # WebSocket PTY Terminal
 app.include_router(vision_router)  # Vision API - Bildanalyse mit LLaVA

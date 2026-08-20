@@ -100,14 +100,25 @@ function AdminLayout() {
             </div>
           </NavLink>
 
-          <NavLink 
-            to="/admin/terminal" 
+          <NavLink
+            to="/admin/terminal"
             className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
           >
             <span className="admin-nav-icon">💻</span>
             <div className="admin-nav-content">
               <span className="admin-nav-title">Terminal</span>
               <span className="admin-nav-desc">System Terminal</span>
+            </div>
+          </NavLink>
+
+          <NavLink
+            to="/admin/updates"
+            className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+          >
+            <span className="admin-nav-icon">🔄</span>
+            <div className="admin-nav-content">
+              <span className="admin-nav-title">Updates</span>
+              <span className="admin-nav-desc">Git-Status & Patches</span>
             </div>
           </NavLink>
 
