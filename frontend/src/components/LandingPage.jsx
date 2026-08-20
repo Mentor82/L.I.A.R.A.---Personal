@@ -736,34 +736,8 @@ function LandingPage({ onLogin }) {
                 </div>
               </section>
 
-              {/* Social Proof Section */}
+              {/* Trust Badges */}
               <section className="social-proof-section">
-                <div className="social-proof-stats">
-                  <div className="stat-item">
-                    <div className="stat-icon">👥</div>
-                    <div className="stat-number">100+</div>
-                    <div className="stat-label">Nutzer vertrauen Liara</div>
-                  </div>
-                  
-                  <div className="stat-item">
-                    <div className="stat-icon">💬</div>
-                    <div className="stat-number">10.000+</div>
-                    <div className="stat-label">Gespräche geführt</div>
-                  </div>
-                  
-                  <div className="stat-item">
-                    <div className="stat-icon">🧠</div>
-                    <div className="stat-number">50.000+</div>
-                    <div className="stat-label">Erinnerungen gespeichert</div>
-                  </div>
-                  
-                  <div className="stat-item">
-                    <div className="stat-icon">✅</div>
-                    <div className="stat-number">5.000+</div>
-                    <div className="stat-label">Aufgaben erledigt</div>
-                  </div>
-                </div>
-                
                 <div className="trust-badges">
                   <div className="trust-badge">
                     <div className="badge-icon">🔒</div>

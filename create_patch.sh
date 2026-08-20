@@ -240,8 +240,15 @@ set -e
 
 echo "⚠️  Rolling back patch ${VERSION_TAG}..."
 
-# Restore from latest backup
-LATEST_BACKUP=\$(ls -t backups/ | head -1)
+# Restore from the backup created for this patch (pre_${VERSION_TAG}).
+# Falls back to the newest backup only if no matching one exists.
+MATCHING_BACKUP=\$(ls -t backups/ 2>/dev/null | grep -- "_pre_${VERSION_TAG}\$" | head -1)
+if [ -n "\$MATCHING_BACKUP" ]; then
+    LATEST_BACKUP="\$MATCHING_BACKUP"
+else
+    echo "⚠️  No backup tagged 'pre_${VERSION_TAG}' found, falling back to newest backup"
+    LATEST_BACKUP=\$(ls -t backups/ 2>/dev/null | head -1)
+fi
 if [ -z "\$LATEST_BACKUP" ]; then
     echo "❌ No backup found!"
     exit 1

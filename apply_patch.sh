@@ -76,7 +76,7 @@ if [[ ! $HAS_BACKUP =~ ^[Yy]$ ]]; then
     echo ""
     read -p "Create backup now? (y/n): " CREATE_BACKUP
     if [[ $CREATE_BACKUP =~ ^[Yy]$ ]]; then
-        VERSION=$(basename "$PATCH_PATH" | cut -d'_' -f2-)
+        VERSION=$(basename "$PATCH_PATH" | cut -d'_' -f3-)
         ./create_backup.sh "pre_${VERSION}" << EOF
 n
 EOF
