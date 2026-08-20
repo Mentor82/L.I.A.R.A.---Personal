@@ -225,7 +225,7 @@ function SystemConfig() {
             >
               {models.map(model => (
                 <option key={model.name} value={model.name}>
-                  {model.name} ({(model.size / 1e9).toFixed(1)}GB)
+                  {model.name} ({model.size})
                 </option>
               ))}
             </select>
