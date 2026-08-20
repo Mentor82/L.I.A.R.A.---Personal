@@ -66,21 +66,17 @@ done <<< "$CHANGED_FILES"
 BACKEND_OK=true
 FRONTEND_OK=true
 
+# Frontend goes first, backend restart last: restarting the backend drops
+# active connections (and, if this script is ever launched from a request
+# handled by that same backend - e.g. a future web "run update" button - it
+# can kill this very script's process tree). Doing the less disruptive,
+# easier-to-verify step first means a frontend build failure never leaves
+# the backend restarted for nothing, and the backend step being last means
+# it's the very last thing that could possibly cut this script off.
+#
 # Each step is guarded with `if ! ...` so a failure in one (set -e would
 # otherwise abort the whole script right here) never prevents the other,
 # unrelated step from still running.
-if [ "$BACKEND_CHANGED" = true ]; then
-    echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*) - restarte Backend...${NC}"
-    if ! ./restart_backend.sh; then
-        echo -e "${RED}❌ Backend-Restart fehlgeschlagen!${NC}"
-        BACKEND_OK=false
-    fi
-    echo ""
-else
-    echo -e "${BLUE}ℹ️  Keine Backend-Änderungen, Restart übersprungen.${NC}"
-    echo ""
-fi
-
 if [ "$FRONTEND_CHANGED" = true ]; then
     echo -e "${YELLOW}🎨 Frontend-Änderungen erkannt (frontend/*) - deploye Frontend...${NC}"
     if ! ./deploy_frontend.sh; then
@@ -90,6 +86,18 @@ if [ "$FRONTEND_CHANGED" = true ]; then
     echo ""
 else
     echo -e "${BLUE}ℹ️  Keine Frontend-Änderungen, Deploy übersprungen.${NC}"
+    echo ""
+fi
+
+if [ "$BACKEND_CHANGED" = true ]; then
+    echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*) - restarte Backend...${NC}"
+    if ! ./restart_backend.sh; then
+        echo -e "${RED}❌ Backend-Restart fehlgeschlagen!${NC}"
+        BACKEND_OK=false
+    fi
+    echo ""
+else
+    echo -e "${BLUE}ℹ️  Keine Backend-Änderungen, Restart übersprungen.${NC}"
     echo ""
 fi
 
