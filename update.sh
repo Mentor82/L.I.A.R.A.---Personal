@@ -3,7 +3,7 @@
 # Liara Auto-Update
 # ==================
 # Pulls the latest changes and only restarts/redeploys what actually needs it:
-#   - Backend (app/*.py changed)  -> ./restart_backend.sh
+#   - Backend (anything under app/ changed)  -> ./restart_backend.sh
 #   - Frontend (frontend/* changed) -> ./deploy_frontend.sh
 #
 # Usage:
@@ -55,7 +55,7 @@ FRONTEND_CHANGED=false
 
 while IFS= read -r FILE; do
     [ -z "$FILE" ] && continue
-    if [[ "$FILE" == app/*.py ]]; then
+    if [[ "$FILE" == app/* ]]; then
         BACKEND_CHANGED=true
     fi
     if [[ "$FILE" == frontend/* ]]; then
@@ -64,7 +64,7 @@ while IFS= read -r FILE; do
 done <<< "$CHANGED_FILES"
 
 if [ "$BACKEND_CHANGED" = true ]; then
-    echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*.py) - restarte Backend...${NC}"
+    echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*) - restarte Backend...${NC}"
     ./restart_backend.sh
     echo ""
 else
