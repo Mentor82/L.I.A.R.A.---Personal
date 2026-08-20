@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import AiExecTab from './AiExecTab';
 import './TerminalTabs.css';
 
 function TerminalTabs() {
@@ -39,12 +40,16 @@ function TerminalTabs() {
     }
 
     const tabId = `tab-${Date.now()}`;
+    const tabName = newTabConfig.type === 'ai'
+      ? '🤖 AI Exec'
+      : newTabConfig.type === 'local' ? 'Local Shell' : `${newTabConfig.username}@${newTabConfig.host}`;
     const newTab = {
       id: tabId,
-      name: newTabConfig.type === 'local' ? 'Local Shell' : `${newTabConfig.username}@${newTabConfig.host}`,
+      name: tabName,
       type: newTabConfig.type,
       config: { ...newTabConfig },
-      status: 'disconnected'
+      // AI tabs use plain request/response, not a persistent connection - nothing to "connect"
+      status: newTabConfig.type === 'ai' ? 'connected' : 'disconnected'
     };
     
     setTabs(prev => [...prev, newTab]);
@@ -217,6 +222,9 @@ function TerminalTabs() {
     const tab = tabs.find(t => t.id === activeTabId);
     if (!tab) return;
 
+    // AI tabs use plain HTTP request/response (AiExecTab) - no xterm/WS needed
+    if (tab.type === 'ai') return;
+
     // Skip if already initialized
     if (tabInstancesRef.current[activeTabId]?.term) {
       return;
@@ -376,8 +384,27 @@ function TerminalTabs() {
               >
                 🔐 SSH
               </button>
+              <button
+                onClick={() => setNewTabConfig({...newTabConfig, type: 'ai'})}
+                className="halo-button"
+                style={{
+                  flex: 1,
+                  backgroundColor: newTabConfig.type === 'ai' ? '#53bdfa' : 'transparent',
+                  border: `2px solid ${newTabConfig.type === 'ai' ? '#53bdfa' : 'var(--border-color)'}`,
+                  color: newTabConfig.type === 'ai' ? '#0a0e14' : 'inherit'
+                }}
+              >
+                🤖 AI
+              </button>
             </div>
           </div>
+
+          {newTabConfig.type === 'ai' && (
+            <div className="halo-mono" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: 'var(--space-md)', backgroundColor: 'rgba(83, 189, 250, 0.1)', borderRadius: '4px', marginBottom: 'var(--space-md)' }}>
+              🤖 <strong>AI Exec:</strong><br/>
+              Befehle laufen asynchron im Hintergrund, Ergebnis kommt als JSON (stdout/stderr/exit_code) statt interaktivem Terminal.
+            </div>
+          )}
 
           {newTabConfig.type === 'ssh' && (
             <div style={{ display: 'grid', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
@@ -487,7 +514,7 @@ function TerminalTabs() {
       )}
 
       {/* Active Tab Status */}
-      {activeTab && activeTab.status === 'connected' && (
+      {activeTab && activeTab.type !== 'ai' && activeTab.status === 'connected' && (
         <div className="halo-panel" style={{ 
           marginBottom: 'var(--space-sm)',
           padding: 'var(--space-sm) var(--space-md)',
@@ -555,14 +582,16 @@ function TerminalTabs() {
                 style={{
                   width: '100%',
                   height: '650px',
-                  padding: 'var(--space-md)',
-                  paddingBottom: '40px',
+                  padding: tab.type === 'ai' ? 0 : 'var(--space-md)',
+                  paddingBottom: tab.type === 'ai' ? 0 : '40px',
                   backgroundColor: '#0a0e14',
                   display: activeTabId === tab.id ? 'block' : 'none',
                   boxSizing: 'border-box',
-                  overflow: 'auto'
+                  overflow: tab.type === 'ai' ? 'hidden' : 'auto'
                 }}
-              />
+              >
+                {tab.type === 'ai' && <AiExecTab />}
+              </div>
             ))}
           </div>
         )}
