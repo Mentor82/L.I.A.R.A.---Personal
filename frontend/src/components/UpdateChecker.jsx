@@ -127,6 +127,15 @@ function UpdateChecker() {
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '2px' }}>
                     {c.author} · {formatDate(c.date)}
                   </div>
+                  <div style={{
+                    display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap',
+                    fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '4px'
+                  }}>
+                    <span>{c.frontend_affected ? '🎨 Frontend betroffen' : '⚪ Frontend nicht betroffen'}</span>
+                    <span>{c.backend_affected ? '🔧 Backend betroffen' : '⚪ Backend nicht betroffen'}</span>
+                    <span>Restart nötig: {c.backend_affected ? 'ja' : 'nein'}</span>
+                    <span>Deploy nötig: {c.frontend_affected ? 'ja' : 'nein'}</span>
+                  </div>
                 </div>
               ))}
             </div>

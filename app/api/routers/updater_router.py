@@ -27,6 +27,9 @@ class CommitInfo(BaseModel):
     author: str
     date: str
     message: str
+    files: List[str] = []
+    backend_affected: bool = False
+    frontend_affected: bool = False
 
 
 class UpdateStatus(BaseModel):
@@ -75,6 +78,19 @@ def _parse_commit_line(line: str) -> Optional[CommitInfo]:
     return CommitInfo(hash=parts[0][:7], author=parts[1], date=parts[2], message=parts[3])
 
 
+def _commit_files(full_hash: str, cwd: Path) -> List[str]:
+    """
+    Files this specific commit touched, relative to its first parent - works for
+    merge commits too (plain `git diff-tree` shows nothing for those by default).
+    Best-effort: a commit with no parent (repo root) just yields an empty list.
+    """
+    try:
+        diff_raw = _git(["diff", "--name-only", f"{full_hash}^", full_hash], cwd)
+        return [f for f in diff_raw.splitlines() if f]
+    except RuntimeError:
+        return []
+
+
 @router.get("/status", response_model=UpdateStatus)
 async def get_update_status(current_user: User = Depends(require_admin)):
     """
@@ -95,7 +111,16 @@ async def get_update_status(current_user: User = Depends(require_admin)):
                 ["log", f"HEAD..origin/{branch}", "--pretty=format:%H|%an|%ad|%s", "--date=iso"],
                 repo
             )
-            commits = [c for c in (_parse_commit_line(l) for l in log_raw.splitlines()) if c]
+            for line in log_raw.splitlines():
+                commit = _parse_commit_line(line)
+                if not commit:
+                    continue
+                full_hash = line.split("|", 1)[0]
+                files = _commit_files(full_hash, repo)
+                commit.files = files
+                commit.backend_affected = any(f.startswith("app/") for f in files)
+                commit.frontend_affected = any(f.startswith("frontend/") for f in files)
+                commits.append(commit)
 
         current_raw = _git(["log", "-1", "--pretty=format:%H|%an|%ad|%s", "--date=iso"], repo)
         current_commit = _parse_commit_line(current_raw)
