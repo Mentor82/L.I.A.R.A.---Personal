@@ -63,9 +63,18 @@ while IFS= read -r FILE; do
     fi
 done <<< "$CHANGED_FILES"
 
+BACKEND_OK=true
+FRONTEND_OK=true
+
+# Each step is guarded with `if ! ...` so a failure in one (set -e would
+# otherwise abort the whole script right here) never prevents the other,
+# unrelated step from still running.
 if [ "$BACKEND_CHANGED" = true ]; then
     echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*) - restarte Backend...${NC}"
-    ./restart_backend.sh
+    if ! ./restart_backend.sh; then
+        echo -e "${RED}❌ Backend-Restart fehlgeschlagen!${NC}"
+        BACKEND_OK=false
+    fi
     echo ""
 else
     echo -e "${BLUE}ℹ️  Keine Backend-Änderungen, Restart übersprungen.${NC}"
@@ -74,13 +83,23 @@ fi
 
 if [ "$FRONTEND_CHANGED" = true ]; then
     echo -e "${YELLOW}🎨 Frontend-Änderungen erkannt (frontend/*) - deploye Frontend...${NC}"
-    ./deploy_frontend.sh
+    if ! ./deploy_frontend.sh; then
+        echo -e "${RED}❌ Frontend-Deploy fehlgeschlagen!${NC}"
+        FRONTEND_OK=false
+    fi
     echo ""
 else
     echo -e "${BLUE}ℹ️  Keine Frontend-Änderungen, Deploy übersprungen.${NC}"
     echo ""
 fi
 
-echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   Update abgeschlossen! ✅              ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+if [ "$BACKEND_OK" = true ] && [ "$FRONTEND_OK" = true ]; then
+    echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║   Update abgeschlossen! ✅              ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+else
+    echo -e "${RED}╔════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║   Update mit Fehlern abgeschlossen! ⚠️   ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════╝${NC}"
+    exit 1
+fi
