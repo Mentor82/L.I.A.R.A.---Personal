@@ -173,18 +173,43 @@ function UserManagement() {
   const handleAddUser = async (e) => {
     e.preventDefault();
     try {
-      await fetch('/api/auth/register', {
+      const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(newUser)
       });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        alert(`Fehler: ${error.detail || 'Benutzer konnte nicht angelegt werden'}`);
+        return;
+      }
+
+      const data = await response.json();
+
+      // /auth/register is the public self-signup endpoint and always creates
+      // role=user (correct there) - it has no concept of "role" at all, so the
+      // dropdown above does nothing unless we promote afterward here.
+      if (newUser.role === 'admin' && data.user?.id) {
+        const roleResponse = await fetch(`/api/users/${data.user.id}/role?new_role=admin`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('liara_token')}`
+          }
+        });
+        if (!roleResponse.ok) {
+          alert('Benutzer wurde angelegt, aber die Admin-Rolle konnte nicht gesetzt werden. Bitte manuell in der Tabelle ändern.');
+        }
+      }
+
       setShowAddUser(false);
       setNewUser({ username: '', email: '', full_name: '', password: '', role: 'user', privacy_accepted: true });
       fetchUsers();
     } catch (error) {
       console.error('Failed to add user:', error);
+      alert('Fehler beim Anlegen des Benutzers.');
     }
   };
 
