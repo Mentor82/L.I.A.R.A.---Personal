@@ -12,6 +12,8 @@ Job state lives in Redis (not in-process memory), because gunicorn runs
 multiple worker processes - a poll request can land on a different worker
 than the one that started the job.
 """
+import os
+import signal
 import subprocess
 import uuid
 from datetime import datetime, timedelta
@@ -89,18 +91,30 @@ def _run_job(job_id: str, command: str, cwd: str):
     if not job:
         return
     try:
-        result = subprocess.run(
+        # start_new_session makes the shell the leader of its own process group,
+        # so a timeout can kill the whole tree (including anything it backgrounded)
+        # via os.killpg - plain process.kill() only kills the shell itself and
+        # would leave orphaned children running.
+        process = subprocess.Popen(
             command, shell=True, cwd=cwd,
-            capture_output=True, text=True, timeout=EXEC_TIMEOUT
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True
         )
-        job.status = "done"
-        job.exit_code = result.returncode
-        job.stdout = result.stdout[-OUTPUT_CAP:]
-        job.stderr = result.stderr[-OUTPUT_CAP:]
-    except subprocess.TimeoutExpired as e:
-        job.status = "timeout"
-        job.stdout = (e.stdout or "")[-OUTPUT_CAP:]
-        job.stderr = ((e.stderr or "") + f"\n[Abgebrochen nach {EXEC_TIMEOUT}s Timeout]")[-OUTPUT_CAP:]
+        try:
+            stdout, stderr = process.communicate(timeout=EXEC_TIMEOUT)
+            job.status = "done"
+            job.exit_code = process.returncode
+            job.stdout = stdout[-OUTPUT_CAP:]
+            job.stderr = stderr[-OUTPUT_CAP:]
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+            job.status = "timeout"
+            job.stdout = stdout[-OUTPUT_CAP:]
+            job.stderr = (stderr + f"\n[Abgebrochen nach {EXEC_TIMEOUT}s Timeout, Prozessgruppe beendet]")[-OUTPUT_CAP:]
     except Exception as e:
         job.status = "error"
         job.stderr = str(e)
