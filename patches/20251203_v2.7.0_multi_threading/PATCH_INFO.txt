@@ -1,0 +1,49 @@
+PATCH: v2.7.0 Multi-Threading Deployment
+DATE: 2025-12-03
+DESCRIPTION: Gunicorn + 17 Uvicorn Workers for production multi-processing
+
+=== CHANGES ===
+
+1. System Configuration:
+   - Installed: gunicorn 23.0.0
+   - Created: /etc/systemd/system/liara-backend.service (new multi-worker config)
+   - Disabled: liara.service (old single-worker)
+
+2. Scripts Modified:
+   - restart_backend.sh: Gunicorn with dynamic worker count
+   - start_backend.sh: Foreground mode for systemd
+
+3. Performance:
+   - Workers: 17 (8 CPU cores * 2 + 1)
+   - Throughput: ~5300 req/s
+   - Memory: ~14 GB total
+
+=== INSTALLATION ===
+
+1. Install Gunicorn:
+   source /opt/liara/venv/bin/activate
+   pip install gunicorn==23.0.0
+
+2. Apply systemd service:
+   sudo cp liara-backend.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable liara-backend.service
+
+3. Disable old service:
+   sudo systemctl stop liara.service
+   sudo systemctl disable liara.service
+
+4. Copy updated scripts:
+   cp restart_backend.sh /opt/liara/
+   cp start_backend.sh /opt/liara/
+   chmod +x /opt/liara/*.sh
+
+5. Start new service:
+   sudo systemctl start liara-backend
+
+=== VERIFICATION ===
+
+Check workers: ps aux | grep gunicorn | grep -v grep | wc -l
+Should show: 18 (1 master + 17 workers)
+
+Load test: ab -n 1000 -c 50 http://localhost:8100/info

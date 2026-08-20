@@ -1,0 +1,19 @@
+[Unit]
+Description=Liara Backend (Gunicorn + Uvicorn Workers)
+After=network.target postgresql.service docker.service
+Wants=postgresql.service docker.service
+
+[Service]
+Type=simple
+User=mirko
+Group=mirko
+WorkingDirectory=/opt/liara/app
+Environment="PATH=/opt/liara/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/bin/bash -c 'WORKERS=$$(($$(nproc) * 2 + 1)); exec /opt/liara/venv/bin/gunicorn main:app --workers $$WORKERS --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8100 --log-level info --access-logfile /var/log/liara/access.log --error-logfile /var/log/liara/error.log'
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

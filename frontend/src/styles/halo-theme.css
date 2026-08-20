@@ -1,0 +1,270 @@
+/* 
+ * LIARA - HALO/UNSC Inspired Theme
+ * Inspired by Cortana, UNSC interfaces, and Halo's futuristic aesthetic
+ */
+
+:root {
+  /* Halo Color Palette */
+  --halo-primary: #00D9FF;      /* Cortana Cyan */
+  --halo-secondary: #0A84FF;    /* Liara Blue */
+  --halo-accent: #00FFB3;       /* Energy Shield Green */
+  --halo-warning: #FFD60A;      /* Caution Yellow */
+  --halo-danger: #FF453A;       /* Critical Red */
+  
+  /* Background Layers */
+  --bg-base: #0A0E1A;           /* Deep Space */
+  --bg-surface: #121826;        /* Panel Background */
+  --bg-elevated: #1A2332;       /* Elevated Surface */
+  --bg-overlay: rgba(0, 217, 255, 0.05); /* Subtle Glow */
+  
+  /* Text Colors */
+  --text-primary: #E8F0FF;      /* High Contrast */
+  --text-secondary: #8FA3BF;    /* Muted */
+  --text-tertiary: #4A5D7C;     /* Very Muted */
+  
+  /* Borders & Dividers */
+  --border-subtle: rgba(0, 217, 255, 0.1);
+  --border-normal: rgba(0, 217, 255, 0.25);
+  --border-strong: rgba(0, 217, 255, 0.5);
+  
+  /* Glows & Shadows */
+  --glow-primary: 0 0 20px rgba(0, 217, 255, 0.3);
+  --glow-accent: 0 0 15px rgba(0, 255, 179, 0.3);
+  --shadow-deep: 0 8px 32px rgba(0, 0, 0, 0.6);
+  
+  /* Typography */
+  --font-primary: 'Rajdhani', 'Orbitron', 'Roboto Mono', monospace;
+  --font-mono: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  
+  /* Spacing - Kompakter! */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 0.75rem;
+  --space-lg: 1rem;
+  --space-xl: 1.5rem;
+  --space-2xl: 2rem;
+  
+  /* Border Radius */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.4s ease;
+}
+
+/* Hexagon Pattern Background */
+.halo-bg-pattern {
+  position: relative;
+  overflow: hidden;
+}
+
+.halo-bg-pattern::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    repeating-linear-gradient(0deg, transparent, transparent 35px, var(--border-subtle) 35px, var(--border-subtle) 36px),
+    repeating-linear-gradient(60deg, transparent, transparent 35px, var(--border-subtle) 35px, var(--border-subtle) 36px),
+    repeating-linear-gradient(120deg, transparent, transparent 35px, var(--border-subtle) 35px, var(--border-subtle) 36px);
+  opacity: 0.3;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Scan Line Effect */
+@keyframes scan-line {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+.halo-scan-line {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(to bottom, transparent, var(--halo-primary), transparent);
+  opacity: 0.3;
+  animation: scan-line 8s linear infinite;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Panel Styling */
+.halo-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  position: relative;
+  box-shadow: var(--shadow-deep);
+}
+
+.halo-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    var(--halo-primary) 20%, 
+    var(--halo-primary) 80%, 
+    transparent
+  );
+  opacity: 0.6;
+}
+
+/* Cortana Glow Button - Responsive */
+.halo-button {
+  background: linear-gradient(135deg, var(--bg-elevated), var(--bg-surface));
+  border: 1px solid var(--border-normal);
+  color: var(--halo-primary);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-family: var(--font-primary);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+  text-transform: uppercase;
+  white-space: nowrap;
+  min-width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.halo-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: var(--bg-cyan-hover);
+  transform: translate(-50%, -50%);
+  transition: width 0.4s, height 0.4s;
+}
+
+.halo-button:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--glow-primary);
+  transform: translateY(-1px);
+}
+
+.halo-button:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+.halo-button:active {
+  transform: translateY(0);
+}
+
+/* Mobile: Smaller buttons */
+@media (max-width: 640px) {
+  .halo-button {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--text-xs);
+  }
+}
+
+/* Energy Shield Badge */
+.halo-badge {
+  background: linear-gradient(135deg, 
+    rgba(0, 255, 179, 0.15), 
+    rgba(0, 217, 255, 0.15)
+  );
+  border: 1px solid var(--halo-accent);
+  color: var(--halo-accent);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 0 10px rgba(0, 255, 179, 0.2);
+  display: inline-block;
+  margin-top: var(--space-xs);
+}
+
+/* HUD-Style Headers */
+.halo-header {
+  font-family: var(--font-primary);
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--halo-primary);
+  margin-bottom: var(--space-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-2xl);
+}
+
+.halo-header::before {
+  content: '▸';
+  color: var(--halo-accent);
+  font-size: 0.8em;
+}
+
+/* Mobile: Smaller headers */
+@media (max-width: 640px) {
+  .halo-header {
+    font-size: var(--text-xl);
+    letter-spacing: 1px;
+  }
+}
+
+/* Monospace Data Display */
+.halo-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  letter-spacing: 0.3px;
+}
+
+/* Divider with Glow */
+.halo-divider {
+  height: 1px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    var(--border-strong), 
+    transparent
+  );
+  margin: var(--space-lg) 0;
+  box-shadow: 0 0 8px rgba(0, 217, 255, 0.3);
+}
+
+/* Responsive utilities */
+.hide-mobile {
+  display: block;
+}
+
+.show-mobile {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none;
+  }
+  
+  .show-mobile {
+    display: block;
+  }
+}

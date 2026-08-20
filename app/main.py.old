@@ -1,0 +1,47 @@
+from fastapi import FastAPI
+import psutil
+import platform
+import time
+
+app = FastAPI(title="Liara API", version="1.0.0")
+
+start_time = time.time()
+
+@app.get("/status")
+def status():
+    return {"status": "ok", "uptime": round(time.time() - start_time, 2)}
+
+@app.get("/health")
+def health():
+    return {"alive": True}
+
+@app.get("/version")
+def version():
+    return {
+        "backend": "Liara API",
+        "version": "1.0.0",
+        "python": platform.python_version(),
+    }
+
+@app.get("/system/info")
+def system_info():
+    return {
+        "cpu_cores": psutil.cpu_count(),
+        "cpu_usage": psutil.cpu_percent(interval=0.1),
+        "memory": psutil.virtual_memory()._asdict(),
+        "boot_time": psutil.boot_time(),
+    }
+
+@app.get("/system/cpu")
+def cpu():
+    return {"usage": psutil.cpu_percent(interval=0.2)}
+
+@app.get("/system/memory")
+def memory():
+    mem = psutil.virtual_memory()
+    return {
+        "total": mem.total,
+        "available": mem.available,
+        "used": mem.used,
+        "percent": mem.percent,
+    }

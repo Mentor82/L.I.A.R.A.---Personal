@@ -1,0 +1,234 @@
+/* Memory Indicator Styles */
+
+.memory-indicator {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(99, 102, 241, 0.1));
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  animation: memorySlideIn 0.4s ease-out;
+}
+
+@keyframes memorySlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.memory-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.memory-icon {
+  color: var(--primary-color);
+  animation: memoryPulse 2s ease-in-out infinite;
+}
+
+@keyframes memoryPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+.sparkle-icon {
+  color: var(--color-warning);
+  animation: sparkle 1.5s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    opacity: 0.6;
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(180deg) scale(1.2);
+  }
+}
+
+.memory-text {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.memory-details {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.memory-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stat-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+.memory-concepts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.memory-concept {
+  padding: 0.75rem;
+  background: var(--bg-card);
+  border-radius: 8px;
+  border-left: 3px solid var(--primary-color);
+  transition: all 0.2s ease;
+}
+
+.memory-concept:hover {
+  background: var(--bg-active);
+  transform: translateX(4px);
+}
+
+.concept-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.concept-text {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.concept-similarity {
+  font-size: 0.75rem;
+  color: var(--primary-color);
+  background: var(--bg-purple-muted);
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.concept-preview {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* Compact Badge (für Input-Area) */
+.memory-badge-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(99, 102, 241, 0.15));
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 16px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  animation: badgeFadeIn 0.3s ease-out;
+  backdrop-filter: blur(8px);
+}
+
+@keyframes badgeFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.badge-icon {
+  animation: memoryPulse 2s ease-in-out infinite;
+}
+
+.badge-text {
+  white-space: nowrap;
+}
+
+/* Dark Mode Adjustments */
+@media (prefers-color-scheme: dark) {
+  .memory-indicator {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(99, 102, 241, 0.08));
+    border-color: rgba(139, 92, 246, 0.25);
+  }
+
+  .memory-concept {
+    background: var(--bg-muted);
+  }
+
+  .memory-concept:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* Mobile Optimizations */
+@media (max-width: 768px) {
+  .memory-indicator {
+    padding: 0.75rem;
+  }
+
+  .memory-details {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .memory-stat {
+    flex: 1 1 auto;
+    min-width: calc(33.333% - 1rem);
+  }
+
+  .concept-text {
+    font-size: 0.8rem;
+  }
+
+  .concept-preview {
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .memory-badge-compact {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .badge-icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .memory-stat {
+    min-width: calc(50% - 0.5rem);
+  }
+}

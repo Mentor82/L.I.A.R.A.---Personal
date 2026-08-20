@@ -1,0 +1,343 @@
+/* Markdown Message Styling */
+
+/* Code Blocks */
+.code-block-wrapper {
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1e1e1e;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-purple-subtle);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.code-language {
+  font-size: 12px;
+  color: var(--color-purple);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.code-copy-btn {
+  background: var(--bg-purple-hover);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #a0a0b0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.code-copy-btn:hover {
+  background: var(--bg-purple-hover);
+  color: var(--color-purple);
+  border-color: var(--color-purple);
+}
+
+.code-copy-btn:active {
+  transform: scale(0.95);
+}
+
+.code-highlighter {
+  margin: 0 !important;
+  padding: 16px !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace !important;
+  overflow-x: auto;
+}
+
+.code-highlighter::-webkit-scrollbar {
+  height: 8px;
+}
+
+.code-highlighter::-webkit-scrollbar-track {
+  background: var(--bg-input);
+  border-radius: 4px;
+}
+
+.code-highlighter::-webkit-scrollbar-thumb {
+  background: var(--bg-purple-hover);
+  border-radius: 4px;
+}
+
+.code-highlighter::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.6);
+}
+
+/* Inline Code */
+.inline-code {
+  background: var(--bg-purple-muted);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  color: var(--color-purple);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  white-space: nowrap;
+}
+
+/* Tables */
+.table-wrapper {
+  margin: 16px 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.markdown-table thead {
+  background: var(--bg-purple-muted);
+}
+
+.markdown-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--color-purple);
+  border-bottom: 2px solid rgba(139, 92, 246, 0.3);
+}
+
+.markdown-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+  color: #d0d0e0;
+}
+
+.markdown-table tbody tr:hover {
+  background: var(--bg-purple-subtle);
+}
+
+.markdown-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Blockquotes */
+.markdown-blockquote {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-left: 4px solid #8b5cf6;
+  background: var(--bg-purple-subtle);
+  border-radius: 0 8px 8px 0;
+  color: #c0c0d0;
+  font-style: italic;
+}
+
+.markdown-blockquote p {
+  margin: 0;
+}
+
+/* Links */
+.markdown-link {
+  color: var(--color-purple);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.3);
+  transition: all 0.2s ease;
+}
+
+.markdown-link:hover {
+  color: var(--color-purple);
+  border-bottom-color: var(--color-purple);
+}
+
+/* Headings */
+.markdown-h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #e0e0e0;
+  margin: 24px 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid rgba(139, 92, 246, 0.3);
+}
+
+.markdown-h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #d0d0e0;
+  margin: 20px 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.markdown-h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #c0c0d0;
+  margin: 16px 0 10px 0;
+}
+
+.markdown-h4 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #b0b0c0;
+  margin: 14px 0 8px 0;
+}
+
+/* Lists */
+.markdown-ul,
+.markdown-ol {
+  margin: 12px 0;
+  padding-left: 24px;
+  color: #d0d0e0;
+  line-height: 1.8;
+}
+
+.markdown-ul li,
+.markdown-ol li {
+  margin: 6px 0;
+}
+
+.markdown-ul li::marker {
+  color: var(--color-purple);
+}
+
+.markdown-ol li::marker {
+  color: var(--color-purple);
+  font-weight: 600;
+}
+
+/* Nested Lists */
+.markdown-ul ul,
+.markdown-ul ol,
+.markdown-ol ul,
+.markdown-ol ol {
+  margin: 8px 0;
+}
+
+/* Paragraphs */
+.markdown-p {
+  margin: 12px 0;
+  line-height: 1.7;
+  color: #d0d0e0;
+}
+
+/* Images (generierte Bilder) */
+.markdown-image-wrapper {
+  margin: 16px 0;
+  text-align: center;
+}
+
+.markdown-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 2px solid rgba(139, 92, 246, 0.3);
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.markdown-image:hover {
+  border-color: var(--color-purple);
+  box-shadow: 0 8px 30px rgba(139, 92, 246, 0.4);
+  transform: scale(1.02);
+}
+
+.markdown-image-caption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #a0a0b0;
+  font-style: italic;
+}
+
+/* Strong/Bold */
+.markdown-p strong,
+.markdown-blockquote strong {
+  color: var(--color-purple);
+  font-weight: 600;
+}
+
+/* Emphasis/Italic */
+.markdown-p em,
+.markdown-blockquote em {
+  color: var(--color-purple);
+  font-style: italic;
+}
+
+/* Horizontal Rules */
+hr {
+  margin: 24px 0;
+  border: none;
+  border-top: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .code-highlighter {
+    font-size: 12px !important;
+    padding: 12px !important;
+  }
+  
+  .table-wrapper {
+    font-size: 13px;
+  }
+  
+  .markdown-table th,
+  .markdown-table td {
+    padding: 8px 12px;
+  }
+  
+  .markdown-h1 {
+    font-size: 24px;
+  }
+  
+  .markdown-h2 {
+    font-size: 20px;
+  }
+  
+  .markdown-h3 {
+    font-size: 18px;
+  }
+}
+
+/* Dark Mode Optimization */
+@media (prefers-color-scheme: dark) {
+  .code-block-wrapper {
+    background: #0d0d0d;
+  }
+  
+  .markdown-table tbody tr:hover {
+    background: rgba(139, 92, 246, 0.08);
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .code-block-wrapper {
+    border: 2px solid #8b5cf6;
+  }
+  
+  .markdown-table {
+    border: 2px solid #8b5cf6;
+  }
+  
+  .markdown-blockquote {
+    border-left: 6px solid #8b5cf6;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .code-copy-btn,
+  .markdown-link {
+    transition: none;
+  }
+  
+  .code-copy-btn:active {
+    transform: none;
+  }
+}

@@ -1,0 +1,205 @@
+.web-search-results {
+  background: linear-gradient(135deg, rgba(74, 158, 255, 0.05) 0%, rgba(74, 158, 255, 0.02) 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  padding: 16px;
+  margin: 12px 0;
+  animation: fadeIn 0.4s ease;
+}
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.results-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.results-icon {
+  font-size: 18px;
+}
+
+.results-label {
+  font-weight: 600;
+  color: #4a9eff;
+  font-size: 14px;
+}
+
+.risk-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.risk-safe {
+  background: rgba(81, 207, 102, 0.2);
+  color: #51cf66;
+  border: 1px solid rgba(81, 207, 102, 0.3);
+}
+
+.risk-caution {
+  background: var(--bg-warning-muted);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.risk-warning {
+  background: var(--bg-warning-muted);
+  color: #ff9800;
+  border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
+.risk-critical {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.results-content {
+  color: #e0e0e0;
+}
+
+/* Weather Display */
+.weather-display {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.weather-temp {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.temp-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #4a9eff;
+}
+
+.temp-feels {
+  color: #a0a0a0;
+  font-size: 14px;
+}
+
+.weather-details {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  color: #c0c0c0;
+}
+
+/* Wikipedia Display */
+.wiki-display {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wiki-title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.wiki-extract {
+  margin: 0;
+  line-height: 1.6;
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.wiki-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #4a9eff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.wiki-link:hover {
+  color: #6bb0ff;
+  text-decoration: underline;
+}
+
+/* News Display */
+.news-display {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.news-heading {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.news-abstract {
+  margin: 0;
+  line-height: 1.6;
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.news-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #4a9eff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.news-link:hover {
+  color: #6bb0ff;
+  text-decoration: underline;
+}
+
+/* Source Attribution */
+.results-source {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  color: #808080;
+}
+
+.source-label {
+  margin-right: 6px;
+}
+
+.source-name {
+  color: #a0a0a0;
+  font-weight: 500;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

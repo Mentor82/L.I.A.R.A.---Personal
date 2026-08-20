@@ -1,0 +1,351 @@
+/*
+ * LIARA - Theme Utilities v2.0 - Mobile-First
+ * Global utility classes for consistent theming + touch-optimization
+ */
+
+/* ==================== TOUCH-OPTIMIERUNG ==================== */
+
+/* Tap Targets (iOS/Android Guidelines) */
+.tap-target {
+  min-width: var(--tap-target-min);
+  min-height: var(--tap-target-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tap-target-comfortable {
+  min-width: var(--tap-target-comfortable);
+  min-height: var(--tap-target-comfortable);
+}
+
+/* Touch-Friendly Buttons */
+.btn-mobile {
+  padding: 12px 20px;
+  font-size: var(--mobile-text-base);
+  min-height: var(--tap-target-min);
+  border-radius: var(--mobile-border-radius);
+}
+
+/* Touch-Scroll Optimization */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+}
+
+/* ==================== MOBILE LAYOUTS ==================== */
+
+/* Mobile Stack (Vertikal auf Mobile) */
+.mobile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mobile-spacing);
+}
+
+/* Mobile Grid (Auto-responsive) */
+.mobile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--mobile-gap);
+}
+
+/* Full-Width auf Mobile */
+.mobile-full-width {
+  width: 100%;
+}
+
+/* Mobile Padding */
+.mobile-padding {
+  padding: var(--mobile-padding);
+}
+
+.mobile-padding-sm {
+  padding: var(--mobile-space-sm);
+}
+
+.mobile-padding-lg {
+  padding: var(--mobile-space-lg);
+}
+
+/* ==================== VISIBILITY UTILITIES ==================== */
+
+/* Desktop Only */
+.desktop-only {
+  display: block;
+}
+
+/* Mobile Only */
+.mobile-only {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none !important;
+  }
+  
+  .mobile-only {
+    display: block !important;
+  }
+  
+  .mobile-only-flex {
+    display: flex !important;
+  }
+  
+  .mobile-only-grid {
+    display: grid !important;
+  }
+}
+
+/* ==================== BACKGROUND UTILITIES ==================== */
+
+/* Hover States */
+.bg-hover:hover,
+.hover\:bg-hover:hover {
+  background: var(--bg-hover) !important;
+}
+
+.bg-active,
+.active\:bg-active.active {
+  background: var(--bg-active) !important;
+}
+
+/* Subtle Backgrounds */
+.bg-subtle {
+  background: var(--bg-subtle) !important;
+}
+
+.bg-muted {
+  background: var(--bg-muted) !important;
+}
+
+.bg-card {
+  background: var(--bg-card) !important;
+}
+
+/* Input Backgrounds */
+.bg-input {
+  background: var(--bg-input) !important;
+}
+
+.bg-input:hover,
+.bg-input-hover:hover {
+  background: var(--bg-input-hover) !important;
+}
+
+.bg-dropdown {
+  background: var(--bg-dropdown) !important;
+}
+
+/* Overlay Backgrounds */
+.overlay-dark {
+  background: var(--overlay-dark) !important;
+}
+
+.overlay-medium {
+  background: var(--overlay-medium) !important;
+}
+
+.overlay-light {
+  background: var(--overlay-light) !important;
+}
+
+/* ==================== ACCENT BACKGROUNDS ==================== */
+
+/* Primary */
+.bg-primary-subtle {
+  background: var(--bg-primary-subtle) !important;
+}
+
+.bg-primary-muted {
+  background: var(--bg-primary-muted) !important;
+}
+
+.bg-primary-hover:hover {
+  background: var(--bg-primary-hover) !important;
+}
+
+/* Purple */
+.bg-purple-subtle {
+  background: var(--bg-purple-subtle) !important;
+}
+
+.bg-purple-muted {
+  background: var(--bg-purple-muted) !important;
+}
+
+.bg-purple-hover:hover {
+  background: var(--bg-purple-hover) !important;
+}
+
+/* Cyan */
+.bg-cyan-subtle {
+  background: var(--bg-cyan-subtle) !important;
+}
+
+.bg-cyan-muted {
+  background: var(--bg-cyan-muted) !important;
+}
+
+.bg-cyan-hover:hover {
+  background: var(--bg-cyan-hover) !important;
+}
+
+/* Success */
+.bg-success-subtle {
+  background: var(--bg-success-subtle) !important;
+}
+
+.bg-success-muted {
+  background: var(--bg-success-muted) !important;
+}
+
+/* Warning */
+.bg-warning-subtle {
+  background: var(--bg-warning-subtle) !important;
+}
+
+.bg-warning-muted {
+  background: var(--bg-warning-muted) !important;
+}
+
+/* Danger */
+.bg-danger-subtle {
+  background: var(--bg-danger-subtle) !important;
+}
+
+.bg-danger-muted {
+  background: var(--bg-danger-muted) !important;
+}
+
+/* ==================== COMMON COMPONENT PATTERNS ==================== */
+
+/* Cards */
+.card-bg {
+  background: var(--bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.card-bg:hover {
+  background: var(--bg-hover);
+}
+
+/* Inputs */
+.input-bg {
+  background: var(--bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  transition: all var(--transition-fast);
+}
+
+.input-bg:hover {
+  background: var(--bg-input-hover);
+}
+
+.input-bg:focus {
+  background: var(--bg-active);
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+/* Buttons */
+.btn-subtle {
+  background: var(--bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  transition: all var(--transition-fast);
+}
+
+.btn-subtle:hover {
+  background: var(--bg-hover);
+}
+
+.btn-subtle:active {
+  background: var(--bg-active);
+}
+
+/* Modals/Overlays */
+.modal-overlay {
+  background: var(--overlay-dark);
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Dropdown Menus */
+.dropdown-menu {
+  background: var(--bg-dropdown);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(8px);
+}
+
+.dropdown-item {
+  background: transparent;
+  color: var(--color-text);
+  transition: background var(--transition-fast);
+}
+
+.dropdown-item:hover {
+  background: var(--bg-hover);
+}
+
+/* ==================== THEME-AWARE UTILITIES ==================== */
+
+/* Auto-adjust for light/dark theme */
+.theme-surface {
+  background: var(--color-bg-alt);
+  color: var(--color-text);
+}
+
+.theme-border {
+  border-color: var(--color-border);
+}
+
+.theme-text {
+  color: var(--color-text);
+}
+
+.theme-text-muted {
+  color: var(--color-text-muted);
+}
+
+/* ==================== RESPONSIVE HELPERS ==================== */
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbar for dark theme */
+.scrollbar-custom::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-track {
+  background: var(--bg-input);
+  border-radius: 4px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: 4px;
+}
+
+.scrollbar-custom::-webkit-scrollbar-thumb:hover {
+  background: var(--bg-active);
+}

@@ -1,0 +1,4 @@
+{"timestamp": "2026-03-14T17:15:28.440517", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Hey Du", "session_id": null, "message_length": 6}}
+{"timestamp": "2026-03-14T17:24:17.627688", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Wie fühlst du dich heute?", "session_id": null, "message_length": 25}}
+{"timestamp": "2026-03-14T17:30:12.770560", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Wie fühlst du dich heute?", "session_id": null, "message_length": 25}}
+{"timestamp": "2026-03-14T20:02:56.766501", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Welche erinerungen kannst du mir wiedergeben?", "session_id": null, "message_length": 45}}

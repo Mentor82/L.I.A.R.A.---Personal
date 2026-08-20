@@ -1,0 +1,7 @@
+.theme-toggle {
+  /* Defined in App.css - no additional styles needed */
+}
+
+.theme-toggle-label {
+  display: none; /* Hide label by default */
+}
