@@ -1,0 +1,89 @@
+.chat-history {
+  width: 240px;
+  background: rgba(255,255,255,0.05);
+  border-left: 1px solid var(--color-border);
+  padding: var(--space-sm);
+  position: relative;
+  overflow-y: auto;
+  min-height: 100vh;
+  transition: width 0.2s;
+}
+
+.chat-history-title {
+  font-size: var(--text-lg);
+  color: var(--color-primary);
+  margin-bottom: var(--space-md);
+  font-family: var(--font-headline);
+}
+
+.chat-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.chat-history-item {
+  margin-bottom: var(--space-xs);
+  border-radius: var(--radius-md);
+  background: rgba(56,189,248,0.04);
+  transition: background 0.2s;
+}
+.chat-history-item:hover {
+  background: rgba(56,189,248,0.18);
+  cursor: pointer;
+}
+
+.chat-history-item.active {
+  background: rgba(56,189,248,0.12);
+  border: 1px solid var(--color-primary);
+}
+
+.chat-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
+.chat-history-label {
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: 0.98em;
+}
+
+.chat-history-toggle {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.chat-history-messages {
+  list-style: none;
+  padding: 0 10px;
+  margin: 0;
+}
+
+.chat-history-message {
+  font-size: 0.92em;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.chat-history-msg-role {
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+@media (max-width: 1024px) {
+  .chat-history {
+    width: 100%;
+    min-height: 0;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    padding: var(--space-sm);
+  }
+}

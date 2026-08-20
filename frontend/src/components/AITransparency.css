@@ -1,0 +1,344 @@
+.ai-transparency-container {
+  width: 100%;
+  max-width: 100%;
+  margin: 2rem 0;
+  overflow-x: hidden;
+}
+
+/* Main Disclosure Banner */
+.ai-disclosure-banner {
+  background: linear-gradient(135deg, rgba(255, 193, 7, 0.1), rgba(255, 152, 0, 0.1));
+  border: 2px solid rgba(255, 193, 7, 0.5);
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 20px rgba(255, 193, 7, 0.2);
+}
+
+.ai-disclosure-icon {
+  font-size: 3rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.ai-disclosure-content h3 {
+  font-size: 1.3rem;
+  color: #ffc107;
+  margin: 0 0 0.75rem 0;
+  font-weight: 600;
+}
+
+.ai-disclosure-content p {
+  margin: 0.5rem 0;
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+.ai-disclosure-content strong {
+  color: #ffc107;
+}
+
+/* Risk Classification */
+.ai-risk-classification {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(0, 255, 100, 0.3);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.risk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.risk-badge.minimal-risk {
+  background: rgba(0, 255, 100, 0.15);
+  color: #00ff64;
+  border: 1px solid rgba(0, 255, 100, 0.4);
+}
+
+.risk-icon {
+  font-size: 1.2rem;
+}
+
+.risk-label {
+  font-size: 0.95rem;
+}
+
+.ai-risk-classification p {
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* AI Explainability Section */
+.ai-explainability-section {
+  margin: 2rem 0;
+}
+
+.ai-explainability-section h3 {
+  font-size: 1.6rem;
+  color: var(--color-cyan);
+  margin-bottom: 1.5rem;
+  font-family: 'Orbitron', sans-serif;
+}
+
+/* Accordion Component */
+.ai-component-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ai-component {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(0, 247, 255, 0.2);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.ai-component.expanded {
+  border-color: rgba(0, 247, 255, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 247, 255, 0.15);
+}
+
+.ai-component-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: left;
+  transition: background 0.2s ease;
+}
+
+.ai-component-header:hover {
+  background: rgba(0, 247, 255, 0.05);
+}
+
+.component-icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.component-title {
+  flex: 1;
+}
+
+.expand-icon {
+  color: var(--color-cyan);
+  font-size: 0.9rem;
+  transition: transform 0.3s ease;
+}
+
+.ai-component.expanded .expand-icon {
+  transform: rotate(90deg);
+}
+
+.ai-component-content {
+  padding: 0 1.5rem 1.5rem 4.5rem;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.component-detail {
+  margin-bottom: 0.75rem;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+
+.component-detail strong {
+  color: var(--color-text);
+  margin-right: 0.5rem;
+}
+
+.component-limitations {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: rgba(255, 152, 0, 0.05);
+  border-left: 3px solid rgba(255, 152, 0, 0.5);
+  border-radius: 4px;
+}
+
+.component-limitations strong {
+  color: #ff9800;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.component-limitations ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: var(--color-text-muted);
+}
+
+.component-limitations li {
+  margin-bottom: 0.25rem;
+}
+
+/* Ethics Section */
+.ai-ethics-section {
+  margin: 2rem 0;
+}
+
+.ai-ethics-section h3 {
+  font-size: 1.6rem;
+  color: var(--color-cyan);
+  margin-bottom: 1.5rem;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.ethics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.ethics-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(0, 255, 100, 0.2);
+  border-radius: 8px;
+}
+
+.ethics-icon {
+  font-size: 1.5rem;
+  color: #00ff64;
+  flex-shrink: 0;
+}
+
+.ethics-item strong {
+  display: block;
+  color: var(--color-text);
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+}
+
+.ethics-item p {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Content Label Example */
+.ai-content-label-example {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(0, 247, 255, 0.2);
+  border-radius: 12px;
+}
+
+.ai-content-label-example h4 {
+  font-size: 1.2rem;
+  color: var(--color-text);
+  margin: 0 0 0.5rem 0;
+}
+
+.ai-content-label-example > p {
+  color: var(--color-text-muted);
+  margin: 0 0 1rem 0;
+}
+
+.content-label-demo {
+  background: var(--bg-primary);
+  border: 1px solid rgba(0, 247, 255, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.demo-message {
+  color: var(--color-text);
+  padding: 1rem;
+  background: rgba(0, 247, 255, 0.05);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  line-height: 1.6;
+}
+
+.demo-footer {
+  text-align: center;
+  color: #ffc107;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.5rem;
+  background: rgba(255, 193, 7, 0.1);
+  border-radius: 4px;
+}
+
+/* Footer */
+.ai-transparency-footer {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(0, 247, 255, 0.2);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.ai-transparency-footer p {
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.ai-transparency-footer a {
+  color: var(--color-cyan);
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.ai-transparency-footer a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .ai-disclosure-banner {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .ai-disclosure-icon {
+    font-size: 2.5rem;
+  }
+
+  .ai-component-content {
+    padding-left: 1.5rem;
+  }
+
+  .ethics-grid {
+    grid-template-columns: 1fr;
+  }
+}

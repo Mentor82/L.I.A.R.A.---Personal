@@ -1,0 +1,47 @@
+/* Language Switcher Styles */
+.language-switcher {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.lang-btn {
+  padding: 0.4rem 0.7rem;
+  background: var(--bg-hover);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lang-btn:hover {
+  background: var(--bg-active);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.lang-btn.active {
+  background: var(--bg-purple-hover);
+  border-color: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.3);
+}
+
+.lang-btn.active:hover {
+  background: var(--bg-purple-hover);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .language-switcher {
+    gap: 0.2rem;
+  }
+  
+  .lang-btn {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+  }
+}

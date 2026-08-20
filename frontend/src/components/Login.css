@@ -1,0 +1,676 @@
+/* =============================================================================
+   🌙 Liara Login - Modern Responsive Design
+   
+   Features:
+   - Responsive: Desktop, Tablet, Mobile
+   - Browser-optimized: Safari, Chrome, Firefox, Edge
+   - Touch-friendly: 44px+ tap targets
+   - Accessibility: WCAG 2.1 AA compliant
+   - Performance: Hardware-accelerated animations
+============================================================================= */
+
+/* =============================================================================
+   Base Container & Layout
+============================================================================= */
+
+.login-container {
+  min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height for mobile browsers */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f1419 100%);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Animated background particles */
+.login-container::before {
+  content: '';
+  position: absolute;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at 20% 50%, rgba(102, 126, 234, 0.1) 0%, transparent 50%),
+              radial-gradient(circle at 80% 80%, rgba(118, 75, 162, 0.1) 0%, transparent 50%);
+  animation: backgroundFloat 20s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes backgroundFloat {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  33% { transform: translate(-5%, 5%) rotate(120deg); }
+  66% { transform: translate(5%, -5%) rotate(240deg); }
+}
+
+.login-box {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%); /* Safari */
+  border-radius: 24px;
+  padding: 40px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  position: relative;
+  z-index: 1;
+  animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =============================================================================
+   Header
+============================================================================= */
+
+.login-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.login-header h1 {
+  font-size: 2rem;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  animation: gradientShift 8s ease infinite;
+  background-size: 200% 200%;
+}
+
+@keyframes gradientShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.login-header p {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 1.05rem;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
+/* =============================================================================
+   Form Elements
+============================================================================= */
+
+.login-form {
+  margin-top: 24px;
+}
+
+.login-form h2 {
+  font-size: 1.4rem;
+  margin-bottom: 24px;
+  color: var(--color-text);
+  text-align: center;
+  font-weight: 600;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 500;
+  font-size: 0.875rem;
+  letter-spacing: 0.2px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 14px 18px;
+  background: var(--bg-active);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  color: var(--color-text);
+  font-size: 0.875rem;
+  font-family: inherit;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  -webkit-appearance: none; /* Remove iOS styling */
+  appearance: none;
+}
+
+/* Input focus state */
+.form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: var(--bg-active);
+  box-shadow: 
+    0 0 0 3px rgba(102, 126, 234, 0.15),
+    0 4px 12px rgba(102, 126, 234, 0.1);
+  transform: translateY(-1px);
+}
+
+/* Input placeholder */
+.form-group input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+}
+
+/* Autofill styling (browser-specific) */
+.form-group input:-webkit-autofill,
+.form-group input:-webkit-autofill:hover,
+.form-group input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-text);
+  -webkit-box-shadow: 0 0 0 1000px rgba(102, 126, 234, 0.15) inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Firefox autofill */
+.form-group input:-moz-autofill {
+  background-color: rgba(102, 126, 234, 0.15) !important;
+  color: var(--color-text) !important;
+}
+
+/* Checkbox styling */
+.checkbox-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 0;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  margin: 2px 0 0 0;
+  cursor: pointer;
+  accent-color: #667eea;
+}
+
+.checkbox-group a {
+  color: #667eea;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.3);
+  transition: all 0.2s ease;
+}
+
+.checkbox-group a:hover {
+  color: #764ba2;
+  border-bottom-color: rgba(118, 75, 162, 0.6);
+}
+
+/* =============================================================================
+   Error Messages
+============================================================================= */
+
+.error-message {
+  background: rgba(244, 67, 54, 0.15);
+  border: 1.5px solid rgba(244, 67, 54, 0.4);
+  color: #ff6b6b;
+  padding: 14px 18px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  font-size: 0.925rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+.error-message::before {
+  content: '⚠️';
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-10px); }
+  75% { transform: translateX(10px); }
+}
+
+/* =============================================================================
+   Buttons
+============================================================================= */
+
+.login-button {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  color: var(--color-text);
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-top: 12px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.login-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.login-button:hover:not(:disabled)::before {
+  left: 100%;
+}
+
+.login-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+}
+
+.login-button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.login-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* =============================================================================
+   Guest Mode
+============================================================================= */
+
+.guest-mode-divider {
+  text-align: center;
+  margin: 24px 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.guest-mode-divider::before,
+.guest-mode-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 42%;
+  height: 1px;
+  background: linear-gradient(
+    to right, 
+    transparent, 
+    rgba(255, 255, 255, 0.2), 
+    rgba(255, 255, 255, 0.2), 
+    transparent
+  );
+}
+
+.guest-mode-divider::before {
+  left: 0;
+}
+
+.guest-mode-divider::after {
+  right: 0;
+}
+
+.guest-mode-divider span {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.875rem;
+  padding: 6px 14px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  font-weight: 500;
+  position: relative;
+  z-index: 1;
+}
+
+.guest-mode-button {
+  width: 100%;
+  padding: 16px;
+  background: var(--bg-active);
+  border: 2px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+  color: var(--color-text);
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.guest-mode-button:hover {
+  background: var(--bg-active);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.guest-mode-button:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* =============================================================================
+   Toggle Mode
+============================================================================= */
+
+.toggle-mode {
+  text-align: center;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.toggle-mode p {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.925rem;
+  line-height: 1.6;
+}
+
+.toggle-mode button {
+  background: none;
+  border: none;
+  color: #667eea;
+  text-decoration: none;
+  cursor: pointer;
+  font-size: 0.925rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  padding: 4px 8px;
+  border-radius: 6px;
+  margin: 0 2px;
+}
+
+.toggle-mode button:hover {
+  color: #764ba2;
+  background: var(--bg-purple-subtle);
+}
+
+.toggle-mode button:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+}
+
+/* =============================================================================
+   Footer
+============================================================================= */
+
+.login-footer {
+  margin-top: 28px;
+  text-align: center;
+}
+
+.info-text {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-weight: 500;
+}
+
+.guest-info {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.825rem;
+  text-align: center;
+  margin-top: 12px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* =============================================================================
+   Responsive Design - Mobile First
+============================================================================= */
+
+/* Small Mobile (< 375px) */
+@media (max-width: 374px) {
+  .login-container {
+    padding: 12px;
+  }
+  
+  .login-box {
+    padding: 24px 18px;
+    border-radius: 20px;
+  }
+  
+  .login-header h1 {
+    font-size: 2rem;
+  }
+  
+  .login-header p {
+    font-size: 0.95rem;
+  }
+}
+
+/* Mobile (375px - 767px) */
+@media (max-width: 767px) {
+  .login-box {
+    padding: 32px 24px;
+    max-width: 100%;
+  }
+
+  .login-header h1 {
+    font-size: 2.2rem;
+  }
+  
+  .login-header p {
+    font-size: 1rem;
+  }
+  
+  /* Touch-optimized inputs - prevents iOS zoom */
+  .touch-optimized,
+  .form-group input {
+    min-height: 48px !important;
+    font-size: 16px !important; /* Magic number: prevents iOS zoom */
+    padding: 12px 16px !important;
+  }
+  
+  .login-button,
+  .guest-mode-button {
+    min-height: 48px;
+    font-size: 16px;
+    padding: 14px;
+  }
+  
+  .toggle-mode button {
+    min-height: 44px;
+    padding: 8px 12px;
+    font-size: 16px;
+  }
+  
+  .checkbox-group input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+  }
+}
+
+/* Tablet Portrait (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .login-box {
+    max-width: 520px;
+    padding: 40px 36px;
+  }
+  
+  .login-header h1 {
+    font-size: 2.4rem;
+  }
+  
+  .form-group input {
+    font-size: 1.05rem;
+    padding: 15px 20px;
+  }
+  
+  .login-button,
+  .guest-mode-button {
+    padding: 17px;
+    font-size: 1.1rem;
+  }
+}
+
+/* Desktop (> 1024px) */
+@media (min-width: 1025px) {
+  .login-box {
+    max-width: 480px;
+    padding: 44px;
+  }
+  
+  .login-header h1 {
+    font-size: 2.5rem;
+  }
+  
+  .form-group input:hover {
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+}
+
+/* =============================================================================
+   Touch Device Optimizations
+============================================================================= */
+
+/* Better tap targets for all touch devices */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  button {
+    min-height: 48px; /* WCAG 2.1 AA: Minimum 44px */
+  }
+  
+  .login-button,
+  .guest-mode-button {
+    padding: 16px 24px;
+    font-size: 17px;
+  }
+  
+  .form-group input {
+    padding: 14px 18px;
+  }
+  
+  /* Prevent iOS double-tap zoom */
+  button,
+  input,
+  a {
+    touch-action: manipulation;
+  }
+}
+
+/* =============================================================================
+   Browser-Specific Fixes
+============================================================================= */
+
+/* Safari-specific fixes */
+@supports (-webkit-appearance: none) {
+  .login-box {
+    /* Enhanced blur for Safari */
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  
+  /* Fix for Safari input focus outline */
+  .form-group input:focus {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Firefox-specific fixes */
+@-moz-document url-prefix() {
+  .login-box {
+    /* Fallback for backdrop-filter (not well supported in older Firefox) */
+    background: var(--bg-active);
+  }
+}
+
+/* Edge/IE-specific fixes */
+@supports (-ms-ime-align: auto) {
+  .login-box {
+    background: var(--bg-active);
+  }
+}
+
+/* =============================================================================
+   Dark Mode Support (if system preference changes)
+============================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  /* Already dark by default, but ensure consistency */
+  .login-container {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f1419 100%);
+  }
+}
+
+/* =============================================================================
+   Reduced Motion (Accessibility)
+============================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .login-box {
+    animation: none;
+  }
+  
+  .login-container::before {
+    animation: none;
+  }
+}
+
+/* =============================================================================
+   High Contrast Mode (Accessibility)
+============================================================================= */
+
+@media (prefers-contrast: high) {
+  .login-box {
+    border: 2px solid rgba(255, 255, 255, 0.3);
+  }
+  
+  .form-group input {
+    border: 2px solid rgba(255, 255, 255, 0.3);
+  }
+  
+  .form-group input:focus {
+    border-color: var(--color-text);
+  }
+  
+  .login-button {
+    border: 2px solid #667eea;
+  }
+}
+
+/* =============================================================================
+   Print Styles (hide login form when printing)
+============================================================================= */
+
+@media print {
+  .login-container {
+    display: none;
+  }
+}

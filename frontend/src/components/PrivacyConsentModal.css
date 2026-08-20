@@ -1,0 +1,199 @@
+.privacy-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--overlay-dark);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.3s ease;
+}
+
+.privacy-modal {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.4s ease;
+  border: 1px solid var(--color-border);
+}
+
+.privacy-modal-header {
+  padding: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.privacy-modal-header h2 {
+  margin: 0 0 8px 0;
+  color: var(--color-text);
+  font-size: 24px;
+}
+
+.privacy-subtitle {
+  margin: 0;
+  color: #a0a0a0;
+  font-size: 14px;
+}
+
+.privacy-modal-content {
+  padding: 24px;
+}
+
+.privacy-info-box {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border-left: 4px solid #4a9eff;
+}
+
+.privacy-info-box.warning {
+  border-left-color: #ff6b6b;
+}
+
+.privacy-info-box.success {
+  border-left-color: #51cf66;
+}
+
+.privacy-info-box h3 {
+  margin: 0 0 12px 0;
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.privacy-info-box ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #e0e0e0;
+}
+
+.privacy-info-box li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.privacy-info-box strong {
+  color: var(--color-text);
+}
+
+.privacy-example {
+  background: rgba(74, 158, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 16px;
+  border: 1px solid rgba(74, 158, 255, 0.3);
+}
+
+.privacy-example p {
+  margin: 0;
+  color: #b0d4ff;
+  font-size: 14px;
+}
+
+.privacy-modal-footer {
+  padding: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.privacy-modal-footer button {
+  flex: 1;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-decline {
+  background: rgba(255, 107, 107, 0.1);
+  color: #ff6b6b;
+  border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.btn-decline:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.2);
+  transform: translateY(-2px);
+}
+
+.btn-accept {
+  background: linear-gradient(135deg, #51cf66 0%, #37b24d 100%);
+  color: var(--color-text);
+  border: none;
+}
+
+.btn-accept:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(81, 207, 102, 0.4);
+}
+
+.btn-accept:disabled,
+.btn-decline:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.privacy-modal-legal {
+  padding: 16px 24px;
+  text-align: center;
+  background: var(--bg-input);
+  border-radius: 0 0 16px 16px;
+}
+
+.privacy-modal-legal p {
+  margin: 0;
+  color: #808080;
+  font-size: 12px;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scrollbar Styling */
+.privacy-modal::-webkit-scrollbar {
+  width: 8px;
+}
+
+.privacy-modal::-webkit-scrollbar-track {
+  background: var(--bg-input);
+  border-radius: 0 16px 16px 0;
+}
+
+.privacy-modal::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+  border-radius: 4px;
+}
+
+.privacy-modal::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

@@ -1,0 +1,46 @@
+Liara Patch
+===========
+Version: v2.6.1_test
+Created: Mi 3. Dez 22:45:04 CET 2025
+Description: Test patch system
+
+Files Included:
+---------------
+- app/core/scheduler.py
+
+Migrations:
+-----------
+None
+
+Scripts:
+--------
+✗ pre_install.sh
+✗ post_install.sh
+✓ rollback.sh
+
+Installation Instructions:
+--------------------------
+1. Create backup: ./create_backup.sh pre_v2.6.1_test
+2. Apply patch: ./apply_patch.sh patches/20251203_224332_v2.6.1_test.tar.gz
+3. Test the changes
+4. If issues: cd patches/20251203_224332_v2.6.1_test && ./rollback.sh
+
+Manual Installation:
+--------------------
+1. Backup current system
+2. cd patches/20251203_224332_v2.6.1_test
+3. Run pre_install.sh (if exists)
+4. Copy files: cp -r files/* /opt/liara/
+5. Apply migrations: sudo -u postgres psql liara_db < migrations/001_v2.6.1_test.sql
+6. Run post_install.sh (if exists)
+7. Test the system
+
+Rollback:
+---------
+cd patches/20251203_224332_v2.6.1_test && ./rollback.sh
+
+Notes:
+------
+- Always create a backup before applying patches
+- Test in a staging environment first if possible
+- Check logs after installation: tail -f /tmp/liara_backend.log

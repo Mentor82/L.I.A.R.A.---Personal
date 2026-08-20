@@ -1,0 +1,123 @@
+{
+  "app": {
+    "name": "Liara",
+    "tagline": "Your Intelligent AI Assistant"
+  },
+  "nav": {
+    "chat": "Chat",
+    "dashboard": "Dashboard",
+    "tasks": "Tasks",
+    "profile": "Profile",
+    "logout": "Logout",
+    "language": "Language"
+  },
+  "login": {
+    "title": "Welcome Back",
+    "subtitle": "Sign in to continue",
+    "username": "Username",
+    "password": "Password",
+    "loginButton": "Sign In",
+    "guestButton": "Continue as Guest",
+    "errors": {
+      "invalidCredentials": "Invalid credentials",
+      "serverError": "Server error. Please try again later."
+    }
+  },
+  "chat": {
+    "title": "Chat with Liara",
+    "newChat": "New Conversation",
+    "history": "Chat History",
+    "placeholder": "Type a message...",
+    "send": "Send",
+    "stop": "Stop",
+    "clear": "Clear Chat",
+    "emptyState": {
+      "title": "Start a Conversation",
+      "subtitle": "Ask Liara for help with tasks, code, or just to chat!",
+      "prompts": {
+        "capabilities": "What can you do?",
+        "tasks": "Show me my tasks"
+      }
+    },
+    "models": {
+      "auto": "Auto",
+      "selectModel": "Select Model"
+    },
+    "sender": {
+      "you": "You",
+      "liara": "Liara",
+      "system": "System"
+    },
+    "messageCount": "messages",
+    "message": "message"
+  },
+  "profile": {
+    "title": "Edit Profile",
+    "subtitle": "Manage your account settings",
+    "username": "Username",
+    "email": "Email",
+    "currentPassword": "Current Password",
+    "newPassword": "New Password",
+    "confirmPassword": "Confirm Password",
+    "changePassword": "Change Password",
+    "saveButton": "Save Changes",
+    "cancelButton": "Cancel",
+    "confirmDialog": {
+      "title": "Save Changes?",
+      "message": "Do you really want to save your profile changes?",
+      "confirm": "Yes, save",
+      "cancel": "Cancel"
+    },
+    "success": "Profile updated successfully",
+    "errors": {
+      "passwordMismatch": "Passwords do not match",
+      "weakPassword": "Password too weak (min. 8 characters)",
+      "invalidEmail": "Invalid email address",
+      "currentRequired": "Current password required",
+      "updateFailed": "Update failed"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "systemInfo": "System Information",
+    "cpu": "CPU",
+    "memory": "Memory",
+    "disk": "Disk",
+    "uptime": "Uptime"
+  },
+  "tasks": {
+    "title": "Tasks",
+    "add": "New Task",
+    "status": {
+      "pending": "Pending",
+      "inProgress": "In Progress",
+      "completed": "Completed"
+    }
+  },
+  "location": {
+    "consentTitle": "Location for Weather Queries",
+    "consentMessage": "Liara would like to save your location for more accurate weather information.",
+    "detected": "Detected Location",
+    "privacy": {
+      "title": "Privacy",
+      "point1": "Only city & country stored",
+      "point2": "IP address is not stored",
+      "point3": "Revocable at any time",
+      "point4": "No sharing with third parties"
+    },
+    "allow": "Allow",
+    "deny": "Deny",
+    "success": "Location saved"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "confirm": "Confirm"
+  }
+}

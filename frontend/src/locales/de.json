@@ -1,0 +1,123 @@
+{
+  "app": {
+    "name": "Liara",
+    "tagline": "Deine intelligente KI-Assistentin"
+  },
+  "nav": {
+    "chat": "Chat",
+    "dashboard": "Dashboard",
+    "tasks": "Tasks",
+    "profile": "Profil",
+    "logout": "Abmelden",
+    "language": "Sprache"
+  },
+  "login": {
+    "title": "Willkommen zurück",
+    "subtitle": "Melde dich an, um fortzufahren",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "loginButton": "Anmelden",
+    "guestButton": "Als Gast fortfahren",
+    "errors": {
+      "invalidCredentials": "Ungültige Anmeldedaten",
+      "serverError": "Serverfehler. Bitte versuche es später erneut."
+    }
+  },
+  "chat": {
+    "title": "Chat mit Liara",
+    "newChat": "Neue Konversation",
+    "history": "Chat-Verlauf",
+    "placeholder": "Schreibe eine Nachricht...",
+    "send": "Senden",
+    "stop": "Stoppen",
+    "clear": "Chat löschen",
+    "emptyState": {
+      "title": "Starte eine Konversation",
+      "subtitle": "Frag Liara nach Hilfe bei Aufgaben, Code, oder einfach zum Plaudern!",
+      "prompts": {
+        "capabilities": "Was kannst du alles?",
+        "tasks": "Zeige mir meine Tasks"
+      }
+    },
+    "models": {
+      "auto": "Auto",
+      "selectModel": "Model auswählen"
+    },
+    "sender": {
+      "you": "Du",
+      "liara": "Liara",
+      "system": "System"
+    },
+    "messageCount": "Nachrichten",
+    "message": "Nachricht"
+  },
+  "profile": {
+    "title": "Profil bearbeiten",
+    "subtitle": "Verwalte deine Account-Einstellungen",
+    "username": "Benutzername",
+    "email": "E-Mail",
+    "currentPassword": "Aktuelles Passwort",
+    "newPassword": "Neues Passwort",
+    "confirmPassword": "Passwort bestätigen",
+    "changePassword": "Passwort ändern",
+    "saveButton": "Änderungen speichern",
+    "cancelButton": "Abbrechen",
+    "confirmDialog": {
+      "title": "Änderungen speichern?",
+      "message": "Möchtest du deine Profil-Änderungen wirklich speichern?",
+      "confirm": "Ja, speichern",
+      "cancel": "Abbrechen"
+    },
+    "success": "Profil erfolgreich aktualisiert",
+    "errors": {
+      "passwordMismatch": "Passwörter stimmen nicht überein",
+      "weakPassword": "Passwort zu schwach (mind. 8 Zeichen)",
+      "invalidEmail": "Ungültige E-Mail-Adresse",
+      "currentRequired": "Aktuelles Passwort erforderlich",
+      "updateFailed": "Update fehlgeschlagen"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "systemInfo": "Systeminformationen",
+    "cpu": "CPU",
+    "memory": "Speicher",
+    "disk": "Festplatte",
+    "uptime": "Laufzeit"
+  },
+  "tasks": {
+    "title": "Aufgaben",
+    "add": "Neue Aufgabe",
+    "status": {
+      "pending": "Ausstehend",
+      "inProgress": "In Bearbeitung",
+      "completed": "Abgeschlossen"
+    }
+  },
+  "location": {
+    "consentTitle": "Standort für Wetter-Anfragen",
+    "consentMessage": "Liara möchte deinen Standort speichern für präzisere Wetter-Informationen.",
+    "detected": "Erkannter Standort",
+    "privacy": {
+      "title": "Datenschutz",
+      "point1": "Nur Stadt & Land gespeichert",
+      "point2": "IP-Adresse wird nicht gespeichert",
+      "point3": "Jederzeit widerrufbar",
+      "point4": "Keine Weitergabe an Dritte"
+    },
+    "allow": "Erlauben",
+    "deny": "Ablehnen",
+    "success": "Standort gespeichert"
+  },
+  "common": {
+    "loading": "Lädt...",
+    "error": "Fehler",
+    "success": "Erfolgreich",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "close": "Schließen",
+    "confirm": "Bestätigen"
+  }
+}

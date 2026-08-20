@@ -1,0 +1,2 @@
+{"timestamp": "2026-08-11T18:28:37.302143", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Wie geht es dir eigentlich?", "session_id": null, "message_length": 27}}
+{"timestamp": "2026-08-11T19:34:22.943170", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Was gibt es neues aus der deutschen Politik?", "session_id": null, "message_length": 44}}

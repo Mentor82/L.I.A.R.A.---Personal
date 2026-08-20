@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Redis - Session Memory & Short-Term Storage
+  redis:
+    image: redis:7-alpine
+    container_name: liara_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass liara_redis_2025
+    networks:
+      - liara_network
+
+  # Neo4j - Knowledge Graph & Relations
+  neo4j:
+    image: neo4j:5-community
+    container_name: liara_neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/liara_neo4j_2025
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_max__size=512M
+    networks:
+      - liara_network
+
+volumes:
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+
+networks:
+  liara_network:
+    driver: bridge

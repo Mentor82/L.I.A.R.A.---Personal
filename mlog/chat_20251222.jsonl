@@ -1,0 +1,3 @@
+{"timestamp": "2025-12-22T18:12:48.966593", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Wie viele ägyptische pharaonen gab es?", "session_id": null, "message_length": 38}}
+{"timestamp": "2025-12-22T18:47:58.902821", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Bei mir brauchst du dich nicht entschuldigen, da ich der jenige bin, der Sachen für dich implementie", "session_id": null, "message_length": 133}}
+{"timestamp": "2025-12-26T13:43:22.489271", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Hey du", "session_id": null, "message_length": 6}}

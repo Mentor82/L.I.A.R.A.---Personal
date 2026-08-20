@@ -1,0 +1,238 @@
+/* Sentiment Indicator Styles */
+
+.sentiment-indicator {
+  background: var(--bg-card);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  animation: sentimentSlideIn 0.3s ease-out;
+}
+
+@keyframes sentimentSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sentiment-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.sentiment-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sentiment-category {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text);
+}
+
+.sentiment-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+}
+
+.metric-label {
+  color: rgba(255, 255, 255, 0.7);
+  min-width: 60px;
+  font-size: 0.65rem;
+}
+
+.metric-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-hover);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.metric-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+.metric-value {
+  color: var(--color-text);
+  min-width: 35px;
+  text-align: right;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.sentiment-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.indicators-label {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-right: 0.25rem;
+}
+
+.indicator-tag {
+  background: var(--bg-hover);
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Sentiment Badge (Compact) */
+.sentiment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid;
+  font-size: 0.7rem;
+  font-weight: 600;
+  animation: badgeFadeIn 0.2s ease-out;
+}
+
+@keyframes badgeFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.badge-emoji {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.badge-text {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Sentiment Pulse Animation */
+.sentiment-pulse {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pulse-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 2px solid;
+  border-radius: 50%;
+  animation: pulse 2s ease-out infinite;
+  opacity: 0;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+.pulse-emoji {
+  font-size: 1.5rem;
+  z-index: 1;
+  animation: bounce 1s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .sentiment-indicator {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+  
+  .sentiment-icon {
+    font-size: 1.25rem;
+  }
+  
+  .sentiment-category {
+    font-size: 0.7rem;
+  }
+  
+  .metric {
+    font-size: 0.65rem;
+  }
+  
+  .metric-label {
+    min-width: 50px;
+    font-size: 0.6rem;
+  }
+  
+  .metric-value {
+    min-width: 30px;
+    font-size: 0.6rem;
+  }
+  
+  .indicator-tag {
+    font-size: 0.6rem;
+    padding: 0.1rem 0.3rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .sentiment-indicator {
+    padding: 0.4rem;
+  }
+  
+  .sentiment-metrics {
+    gap: 0.3rem;
+  }
+  
+  .metric-label {
+    display: none;  /* Hide labels on very small screens */
+  }
+}

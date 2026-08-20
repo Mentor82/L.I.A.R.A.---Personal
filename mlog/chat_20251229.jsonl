@@ -1,0 +1,3 @@
+{"timestamp": "2025-12-29T03:40:25.040685", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Huhu Liara", "session_id": null, "message_length": 10}}
+{"timestamp": "2025-12-30T14:24:07.940958", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Hey, Wie hoch wird der Zeitaufwand um ein py app zu erstellen um ein cloud ähnliches system zu ersch", "session_id": null, "message_length": 105}}
+{"timestamp": "2025-12-30T14:27:40.010486", "event": "REQUEST_START", "data": {"user_id": 7, "username": "mirko", "message": "Hey, Wie hoch wird der Zeitaufwand um ein py app zu erstellen um ein cloud ähnliches system zu ersch", "session_id": null, "message_length": 105}}
