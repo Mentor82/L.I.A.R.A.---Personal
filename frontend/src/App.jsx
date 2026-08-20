@@ -1,6 +1,8 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
 
 // Eager loaded components (needed immediately)
 import Login from './components/Login'
@@ -35,7 +37,6 @@ const AdminDashboard = lazy(() => import('./components/AdminDashboard'))
 const UserManagement = lazy(() => import('./components/UserManagement'))
 const SystemConfig = lazy(() => import('./components/SystemConfig'))
 const ServiceManagement = lazy(() => import('./components/ServiceManagement'))
-const Terminal = lazy(() => import('./components/Terminal'))
 const TerminalTabs = lazy(() => import('./components/TerminalTabs'))
 const Neo4jBrowser = lazy(() => import('./components/Neo4jBrowser'))
 
@@ -59,6 +60,39 @@ const PageLoader = () => (
     </div>
   </div>
 )
+
+// Keeps a single <TerminalTabs/> instance alive for the whole app session, so
+// open terminal tabs/WebSocket connections survive navigating anywhere in the app.
+// Portals its output into AdminLayout's dock spot when /admin/terminal is visible,
+// otherwise into a detached, hidden node so the component (and its sockets) stays mounted.
+function PersistentTerminal() {
+  const location = useLocation()
+  const { dockNode } = useTerminalDock()
+  const hiddenHomeRef = useRef(null)
+
+  if (!hiddenHomeRef.current) {
+    hiddenHomeRef.current = document.createElement('div')
+    hiddenHomeRef.current.style.display = 'none'
+  }
+
+  useEffect(() => {
+    const el = hiddenHomeRef.current
+    document.body.appendChild(el)
+    return () => {
+      document.body.removeChild(el)
+    }
+  }, [])
+
+  const isTerminalActive = location.pathname === '/admin/terminal'
+  const target = (isTerminalActive && dockNode) ? dockNode : hiddenHomeRef.current
+
+  return createPortal(
+    <Suspense fallback={<div>Wird geladen...</div>}>
+      <TerminalTabs />
+    </Suspense>,
+    target
+  )
+}
 
 function App() {
   const { t } = useTranslation()
@@ -157,12 +191,16 @@ function App() {
 
   return (
     <Router>
+      <TerminalDockProvider>
       <div className="app">
+        {/* Keeps terminal sessions alive across the whole app, not just within /admin */}
+        {isAdmin && <PersistentTerminal />}
+
         {/* Location Consent Modal */}
         {showLocationConsent && (
           <LocationConsent onComplete={handleLocationConsentComplete} />
         )}
-        
+
         {/* Header */}
         <header className="app-header">
           <div className="app-header-content">
@@ -267,7 +305,8 @@ function App() {
                     <Route path="system" element={<SystemConfig />} />
                     <Route path="logs" element={<LogReader />} />
                     <Route path="health" element={<SystemHealth />} />
-                    <Route path="terminal" element={<TerminalTabs />} />
+                    {/* TerminalTabs lives in PersistentTerminal (app root) so sessions survive nav switches */}
+                    <Route path="terminal" element={null} />
                   </Route>
                 </>
               )}
@@ -281,6 +320,7 @@ function App() {
           </Suspense>
         </main>
       </div>
+      </TerminalDockProvider>
     </Router>
   )
 }

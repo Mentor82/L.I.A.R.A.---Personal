@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useTerminalDock } from '../contexts/TerminalDockContext'
 import './AdminLayout.css'
 
 /**
@@ -10,6 +11,18 @@ function AdminLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const isRootPath = location.pathname === '/admin'
+  const isTerminalActive = location.pathname === '/admin/terminal'
+  const dockRef = useRef(null)
+  const { setDockNode } = useTerminalDock()
+
+  // Announce our dock spot to the app-wide persistent terminal while it's visible here,
+  // and release it again on route change / unmount so it falls back to its hidden home.
+  useEffect(() => {
+    if (isTerminalActive) {
+      setDockNode(dockRef.current)
+      return () => setDockNode(null)
+    }
+  }, [isTerminalActive, setDockNode])
 
   // Logout handler
   const handleLogout = () => {
@@ -114,7 +127,12 @@ function AdminLayout() {
 
         {/* Main Content */}
         <div className="admin-main">
-          <Outlet />
+          {/* Dock spot for the app-wide persistent terminal (see TerminalDockContext) */}
+          {isTerminalActive ? (
+            <div ref={dockRef} style={{ height: '100%' }} />
+          ) : (
+            <Outlet />
+          )}
         </div>
       </div>
     </div>
