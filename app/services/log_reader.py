@@ -31,6 +31,15 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
+LOG_LEVEL_SEVERITY = {
+    LogLevel.DEBUG: 0,
+    LogLevel.INFO: 1,
+    LogLevel.WARNING: 2,
+    LogLevel.ERROR: 3,
+    LogLevel.CRITICAL: 4,
+}
+
+
 class LogReaderService:
     """Service to read and parse system logs"""
     
@@ -136,11 +145,17 @@ class LogReaderService:
         except ValueError:
             timestamp = datetime.now().isoformat()
 
-        level = match.group('level').upper()
-        if level not in LogLevel.__members__:
-            level = self._detect_log_level(match.group('msg'))
+        message = match.group('msg')
+        bracket_level = match.group('level').upper()
+        bracket_level = LogLevel(bracket_level) if bracket_level in LogLevel.__members__ else LogLevel.INFO
+        detected_level = LogLevel(self._detect_log_level(message))
 
-        return {'timestamp': timestamp, 'level': level, 'message': match.group('msg')}
+        # Gunicorn/uvicorn sometimes log genuinely error-worthy messages (e.g. socket
+        # cleanup issues during shutdown) at its own INFO level even though the text
+        # clearly says "Error" - go with whichever signal is more severe.
+        level = max(bracket_level, detected_level, key=lambda lvl: LOG_LEVEL_SEVERITY[lvl])
+
+        return {'timestamp': timestamp, 'level': level, 'message': message}
 
     def _detect_log_level(self, message: str) -> str:
         """Detect log level from message content"""
