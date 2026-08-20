@@ -2,10 +2,19 @@
 Log Reader Service
 Reads and parses system logs from various services
 """
+import re
 import subprocess
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from enum import Enum
+
+
+# Gunicorn/uvicorn log line, e.g.:
+# [2026-08-20 11:14:00 +0200] [1321] [INFO] Application startup complete.
+LOG_LINE_RE = re.compile(
+    r'^\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4})\]\s*'
+    r'\[\d+\]\s*\[(?P<level>\w+)\]\s*(?P<msg>.*)$'
+)
 
 
 class ServiceType(str, Enum):
@@ -64,16 +73,18 @@ class LogReaderService:
                 error_log_path = "/var/log/liara/error.log"
                 access_log_path = "/var/log/liara/access.log"
                 
-                # Read error logs
+                # Read error logs (gunicorn writes INFO/WARNING/ERROR lines all into
+                # this one file - parse the actual level instead of assuming ERROR)
                 try:
                     with open(error_log_path, 'r') as f:
                         error_lines = f.readlines()[-200:]
                     for line in error_lines:
                         if line.strip():
+                            parsed = self._parse_log_line(line.strip())
                             logs.append({
-                                'timestamp': datetime.now().isoformat(),
-                                'level': LogLevel.ERROR.value,
-                                'message': line.strip(),
+                                'timestamp': parsed['timestamp'],
+                                'level': parsed['level'],
+                                'message': parsed['message'],
                                 'service': service.value
                             })
                 except Exception as e:
@@ -106,6 +117,31 @@ class LogReaderService:
             print(f"Error reading logs: {e}")
             return []
     
+    def _parse_log_line(self, line: str) -> Dict[str, str]:
+        """
+        Parse a gunicorn/uvicorn log line into timestamp/level/message.
+        Falls back to content-based level detection and the current time for
+        lines that don't match the bracketed format (e.g. raw tracebacks).
+        """
+        match = LOG_LINE_RE.match(line)
+        if not match:
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'level': self._detect_log_level(line),
+                'message': line
+            }
+
+        try:
+            timestamp = datetime.strptime(match.group('ts'), '%Y-%m-%d %H:%M:%S %z').isoformat()
+        except ValueError:
+            timestamp = datetime.now().isoformat()
+
+        level = match.group('level').upper()
+        if level not in LogLevel.__members__:
+            level = self._detect_log_level(match.group('msg'))
+
+        return {'timestamp': timestamp, 'level': level, 'message': match.group('msg')}
+
     def _detect_log_level(self, message: str) -> str:
         """Detect log level from message content"""
         message_upper = message.upper()
