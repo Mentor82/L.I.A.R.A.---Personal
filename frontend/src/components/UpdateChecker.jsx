@@ -6,6 +6,7 @@ function UpdateChecker() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedPatch, setExpandedPatch] = useState(null);
+  const [showFiles, setShowFiles] = useState(false);
 
   const authHeaders = () => ({
     'Authorization': `Bearer ${localStorage.getItem('liara_token')}`
@@ -38,6 +39,12 @@ function UpdateChecker() {
     if (!iso) return '';
     const d = new Date(iso);
     return isNaN(d) ? iso : d.toLocaleString('de-DE');
+  };
+
+  const fileCategory = (f) => {
+    if (f.startsWith('app/')) return { icon: '🔧', label: 'Backend' };
+    if (f.startsWith('frontend/')) return { icon: '🎨', label: 'Frontend' };
+    return { icon: '📄', label: 'Sonstige' };
   };
 
   return (
@@ -81,6 +88,27 @@ function UpdateChecker() {
             </div>
           )}
 
+          {!status.up_to_date && (
+            <div style={{ display: 'flex', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)', flexWrap: 'wrap' }}>
+              <span className="halo-mono" style={{
+                fontSize: '0.8rem', padding: '4px 10px', borderRadius: '999px',
+                background: status.backend_would_restart ? 'rgba(234,108,115,0.15)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${status.backend_would_restart ? '#ea6c73' : 'var(--border-color)'}`,
+                color: status.backend_would_restart ? '#ea6c73' : 'var(--text-secondary)'
+              }}>
+                🔧 Backend {status.backend_would_restart ? 'würde neu gestartet' : 'unverändert'}
+              </span>
+              <span className="halo-mono" style={{
+                fontSize: '0.8rem', padding: '4px 10px', borderRadius: '999px',
+                background: status.frontend_would_deploy ? 'rgba(83,189,250,0.15)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${status.frontend_would_deploy ? '#53bdfa' : 'var(--border-color)'}`,
+                color: status.frontend_would_deploy ? '#53bdfa' : 'var(--text-secondary)'
+              }}>
+                🎨 Frontend {status.frontend_would_deploy ? 'würde neu deployt' : 'unverändert'}
+              </span>
+            </div>
+          )}
+
           {status.commits.length > 0 && (
             <div style={{ display: 'grid', gap: 'var(--space-sm)' }}>
               {status.commits.map(c => (
@@ -101,6 +129,33 @@ function UpdateChecker() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {status.changed_files.length > 0 && (
+            <div style={{ marginTop: 'var(--space-md)' }}>
+              <button
+                onClick={() => setShowFiles(!showFiles)}
+                className="halo-mono"
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-secondary)', fontSize: '0.8rem', padding: 0
+                }}
+              >
+                {showFiles ? '▲' : '▼'} {status.changed_files.length} geänderte Datei{status.changed_files.length === 1 ? '' : 'en'}
+              </button>
+              {showFiles && (
+                <div style={{ marginTop: 'var(--space-sm)', display: 'grid', gap: '2px' }}>
+                  {status.changed_files.map(f => {
+                    const cat = fileCategory(f);
+                    return (
+                      <div key={f} className="halo-mono" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        {cat.icon} {f}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

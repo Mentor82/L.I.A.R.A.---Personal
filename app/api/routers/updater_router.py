@@ -35,6 +35,9 @@ class UpdateStatus(BaseModel):
     behind_count: int
     commits: List[CommitInfo]
     current_commit: Optional[CommitInfo]
+    changed_files: List[str]
+    backend_would_restart: bool
+    frontend_would_deploy: bool
 
 
 class PatchInfo(BaseModel):
@@ -97,12 +100,25 @@ async def get_update_status(current_user: User = Depends(require_admin)):
         current_raw = _git(["log", "-1", "--pretty=format:%H|%an|%ad|%s", "--date=iso"], repo)
         current_commit = _parse_commit_line(current_raw)
 
+        changed_files = []
+        if behind_count > 0:
+            diff_raw = _git(["diff", "--name-only", f"HEAD..origin/{branch}"], repo)
+            changed_files = [f for f in diff_raw.splitlines() if f]
+
+        # Mirrors update.sh's own detection (app/* -> restart, frontend/* -> deploy) -
+        # keep both in sync if that logic ever changes.
+        backend_would_restart = any(f.startswith("app/") for f in changed_files)
+        frontend_would_deploy = any(f.startswith("frontend/") for f in changed_files)
+
         return UpdateStatus(
             branch=branch,
             up_to_date=behind_count == 0,
             behind_count=behind_count,
             commits=commits,
-            current_commit=current_commit
+            current_commit=current_commit,
+            changed_files=changed_files,
+            backend_would_restart=backend_would_restart,
+            frontend_would_deploy=frontend_would_deploy
         )
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
