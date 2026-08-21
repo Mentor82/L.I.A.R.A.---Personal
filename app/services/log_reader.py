@@ -16,6 +16,13 @@ LOG_LINE_RE = re.compile(
     r'\[\d+\]\s*\[(?P<level>\w+)\]\s*(?P<msg>.*)$'
 )
 
+# journalctl's default short format, e.g.:
+# Aug 21 12:38:22 liara start_sse_server.sh[724]: INFO:     127.0.0.1 - "GET / HTTP/1.1" 200 OK
+JOURNAL_LINE_RE = re.compile(
+    r'^(?P<mon>\w{3})\s+(?P<day>\d{1,2})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+'
+    r'\S+\s+\S+?(?:\[\d+\])?:\s?(?P<msg>.*)$'
+)
+
 
 class ServiceType(str, Enum):
     BACKEND = "backend"
@@ -113,7 +120,24 @@ class LogReaderService:
                             })
                 except Exception as e:
                     print(f"Error reading access log: {e}")
-            
+
+            else:
+                # SSE and frontend aren't gunicorn-managed and don't write to
+                # /var/log/liara/*.log - they're plain systemd services, so read
+                # their journal instead. (Previously this branch didn't exist at
+                # all, so these two tabs always silently showed "no logs".)
+                unit = self.SERVICE_UNITS.get(service)
+                if unit:
+                    for line in self._read_journal(unit, count=200):
+                        if line.strip():
+                            parsed = self._parse_journal_line(line.strip())
+                            logs.append({
+                                'timestamp': parsed['timestamp'],
+                                'level': parsed['level'],
+                                'message': parsed['message'],
+                                'service': service.value
+                            })
+
             # Apply filters
             if level:
                 logs = [log for log in logs if log['level'] == level.value]
@@ -126,6 +150,53 @@ class LogReaderService:
             print(f"Error reading logs: {e}")
             return []
     
+    def _read_journal(self, unit: str, count: int = 200) -> List[str]:
+        """Last `count` lines of a systemd unit's journal, oldest first. Empty list on any failure."""
+        try:
+            result = subprocess.run(
+                ["journalctl", "-u", unit, "-n", str(count), "--no-pager", "-o", "short"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                return []
+            return result.stdout.splitlines()
+        except Exception as e:
+            print(f"Error reading journal for {unit}: {e}")
+            return []
+
+    def _parse_journal_line(self, line: str) -> Dict[str, str]:
+        """
+        Parse a journalctl short-format line into timestamp/level/message.
+        Unlike gunicorn's own log file, journald entries have no reliable
+        bracketed [LEVEL] tag, so level always comes from content detection.
+        Falls back to the current time for anything that doesn't match the
+        expected "Mon DD HH:MM:SS host unit[pid]: msg" shape.
+        """
+        match = JOURNAL_LINE_RE.match(line)
+        if not match:
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'level': self._detect_log_level(line),
+                'message': line
+            }
+
+        message = match.group('msg')
+        try:
+            # journalctl's short format has no year - assume the current one
+            ts = datetime.strptime(
+                f"{datetime.now().year} {match.group('mon')} {match.group('day')} {match.group('time')}",
+                "%Y %b %d %H:%M:%S"
+            )
+            timestamp = ts.isoformat()
+        except ValueError:
+            timestamp = datetime.now().isoformat()
+
+        return {
+            'timestamp': timestamp,
+            'level': self._detect_log_level(message),
+            'message': message
+        }
+
     def _parse_log_line(self, line: str) -> Dict[str, str]:
         """
         Parse a gunicorn/uvicorn log line into timestamp/level/message.
