@@ -51,7 +51,7 @@ async def get_recent_activities(
                 'timestamp': activity['timestamp'],
                 'type': activity['type'],
                 'user': activity.get('user'),
-                'action': activity.get('action', 'System activity'),
+                'action': activity.get('action') or 'System activity',
                 'details': activity.get('details', '')[:100],  # Truncate long details
                 'icon': icon
             })
