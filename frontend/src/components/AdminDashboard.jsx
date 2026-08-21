@@ -14,27 +14,17 @@ function AdminDashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const [healthRes] = await Promise.all([
-        fetch('/api/admin/health/summary', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('liara_token')}`
-          }
-        }),
+      const authHeader = { 'Authorization': `Bearer ${localStorage.getItem('liara_token')}` };
+      const [healthRes, statsRes] = await Promise.all([
+        fetch('/api/admin/health/summary', { headers: authHeader }),
+        fetch('/api/dashboard/stats', { headers: authHeader }),
       ]);
 
       const healthData = await healthRes.json();
       setHealth(healthData);
-      
-      // Mock stats - später durch echte API ersetzen
-      setStats({
-        totalUsers: 5,
-        activeUsers: 3,
-        totalChats: 1247,
-        todayChats: 45,
-        aiModels: 8,
-        storageUsed: 63.5,
-        storageTotal: 147.4,
-      });
+
+      const statsData = await statsRes.json();
+      setStats(statsData);
 
       setLoading(false);
     } catch (error) {

@@ -5,14 +5,56 @@ Shows recent user and system activities
 from fastapi import APIRouter, Depends, Query
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date, time
+from sqlalchemy.orm import Session
 
 from core.dependencies import require_active_user
+from core.database import get_db
 from api.models.base_models import User
+from api.models.chat_message import ChatMessage
 from services.log_reader import get_log_reader_service
+from api.routers.admin_health import check_ollama, get_system_resources
 
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
+
+class DashboardStats(BaseModel):
+    """Dashboard stat cards (users, chats, AI models, storage)"""
+    totalUsers: int
+    activeUsers: int
+    totalChats: int
+    todayChats: int
+    aiModels: int
+    storageUsed: float
+    storageTotal: float
+
+
+@router.get("/stats", response_model=DashboardStats)
+async def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_user)
+):
+    """Real numbers for the dashboard stat cards (previously hardcoded mock data)"""
+    total_users = db.query(User).count()
+    active_users = db.query(User).filter(User.is_active == True).count()
+
+    total_chats = db.query(ChatMessage).count()
+    today_start = datetime.combine(date.today(), time.min)
+    today_chats = db.query(ChatMessage).filter(ChatMessage.timestamp >= today_start).count()
+
+    ollama = check_ollama()
+    disk = get_system_resources().get('disk', {})
+
+    return DashboardStats(
+        totalUsers=total_users,
+        activeUsers=active_users,
+        totalChats=total_chats,
+        todayChats=today_chats,
+        aiModels=ollama.get('models_count', 0),
+        storageUsed=disk.get('used_gb', 0),
+        storageTotal=disk.get('total_gb', 0)
+    )
 
 
 class ActivityItem(BaseModel):
