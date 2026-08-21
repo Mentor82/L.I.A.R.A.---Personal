@@ -104,7 +104,7 @@ class PasswordResetService:
             # For now, use fallback personalized messages
             
             # Check if user has chat history
-            from api.models.base_models import ChatSession
+            from api.models.chat_session import ChatSession
             
             chat_count = db.query(ChatSession).filter(
                 ChatSession.user_id == user_id
