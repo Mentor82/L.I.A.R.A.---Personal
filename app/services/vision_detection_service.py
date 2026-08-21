@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from services.hailo_vision_service import HailoVisionService, Detection as HailoDetection
+from services.edgetpu_client import get_edgetpu_client
 
 
 class VisionDetectionService:
@@ -62,23 +63,27 @@ class VisionDetectionService:
         model: str,
         confidence_threshold: Optional[float],
     ) -> Dict[str, Any]:
-        # Placeholder Edge TPU path: replace with real TFLite + edgetpu runtime call
-        start = time.time()
-        await asyncio.sleep(0.05)
+        # edge01 (Coral USB Accelerator) only serves ssd_mobiledet right now —
+        # unlike YOLO, its detection head fully compiles to a single Edge TPU
+        # subgraph. Caller-supplied model names (e.g. "yolov8n", the Hailo
+        # default) are ignored for this backend.
+        client = await get_edgetpu_client()
+
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        result = await client.detect_objects(
+            image_base64=image_base64,
+            model_name="ssd_mobiledet",
+            confidence_threshold=confidence_threshold if confidence_threshold is not None else 0.5,
+        )
+
+        if result is None:
+            raise RuntimeError(f"edge01 Edge TPU unavailable ({client.status.value})")
+
         return {
             "backend": "edgetpu",
-            "model": model,
-            "boxes": [
-                {
-                    "x": 60,
-                    "y": 40,
-                    "width": 180,
-                    "height": 140,
-                    "score": 0.81,
-                    "label": "object",
-                }
-            ],
-            "latency_ms": (time.time() - start) * 1000,
+            "model": result.get("model", "ssd_mobiledet"),
+            "boxes": result.get("boxes", []),
+            "latency_ms": result.get("latency_ms", 0.0),
         }
 
     async def _detect_cpu_stub(

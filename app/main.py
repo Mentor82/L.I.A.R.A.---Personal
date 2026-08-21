@@ -54,6 +54,9 @@ from services.multi_backend_validator import get_validator
 # Hailo RPi5 Client
 from services.hailo_rpi5_client import initialize_rpi5_client, shutdown_rpi5_client
 
+# Edge TPU Client (edge01)
+from services.edgetpu_client import initialize_edgetpu_client, shutdown_edgetpu_client
+
 # Auth (optional)
 from core.auth import verify_credentials
 
@@ -108,7 +111,15 @@ async def startup_event():
         print("✅ Hailo RPi5 Client initialized (192.168.178.15:5000)")
     except Exception as e:
         print(f"⚠️  Hailo RPi5 Client initialization failed: {str(e)}")
-    
+
+    # Initialize Edge TPU Client (edge01)
+    print("🎬 Initializing Edge TPU Client...")
+    try:
+        await initialize_edgetpu_client()
+        print("✅ Edge TPU Client initialized (192.168.178.155:5001)")
+    except Exception as e:
+        print(f"⚠️  Edge TPU Client initialization failed: {str(e)}")
+
     # Initialize Multi-Backend Validator
     print("🔍 Initializing Multi-Backend Validator...")
     try:
@@ -140,7 +151,14 @@ async def shutdown_event():
         print("✅ Hailo RPi5 Client shutdown complete")
     except Exception as e:
         print(f"⚠️  Hailo RPi5 Client shutdown error: {str(e)}")
-    
+
+    # Shutdown Edge TPU Client
+    try:
+        await shutdown_edgetpu_client()
+        print("✅ Edge TPU Client shutdown complete")
+    except Exception as e:
+        print(f"⚠️  Edge TPU Client shutdown error: {str(e)}")
+
     print("👋 Liara API stopped")
 
 app.include_router(system_router)
