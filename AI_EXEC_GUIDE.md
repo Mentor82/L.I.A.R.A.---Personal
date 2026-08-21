@@ -57,7 +57,9 @@ already consumed.
 { "command": "git log -1 --oneline", "cwd": "frontend" }
 ```
 
-- `command` (required): shell string, runs via `subprocess.run(..., shell=True)`
+- `command` (required): shell string, runs via `subprocess.Popen(..., shell=True, start_new_session=True)`
+  in its own process group, so a timeout kills the whole tree it spawned, not
+  just the shell itself.
 - `cwd` (optional): path relative to the repo root. Must stay inside it
   (`../../etc` etc. is rejected with 400). Defaults to the repo root.
 
@@ -72,9 +74,14 @@ Returns immediately (the command runs in the background):
   "stdout": "",
   "stderr": "",
   "started_at": "2026-08-20T...",
-  "finished_at": null
+  "finished_at": null,
+  "user_id": 1,
+  "username": "admin"
 }
 ```
+
+`user_id`/`username` are whoever's token submitted the job - see **Job
+ownership** below.
 
 ### `GET /api/admin/terminal/exec/{job_id}`
 
@@ -89,14 +96,19 @@ Poll this (every ~1s is reasonable) until `status` is no longer `"running"`:
   "stdout": "6b77420 Health check: stop scoring...\n",
   "stderr": "",
   "started_at": "2026-08-20T...",
-  "finished_at": "2026-08-20T..."
+  "finished_at": "2026-08-20T...",
+  "user_id": 1,
+  "username": "admin"
 }
 ```
 
 `status` is one of: `running`, `done` (exited, check `exit_code`), `error`
-(the job itself failed to run, e.g. bad cwd), `timeout` (hit the 300s cap).
+(the job itself failed to run, e.g. bad cwd), `timeout` (hit the 300s cap,
+process group killed).
 
-404 means the job_id is unknown or its result already expired.
+404 means the job_id is unknown or its result already expired. 403 means the
+job exists but belongs to a different admin (see below). 503 means Redis
+itself is unreachable - the exec system can't function without it.
 
 ---
 
@@ -104,11 +116,42 @@ Poll this (every ~1s is reasonable) until `status` is no longer `"running"`:
 
 | | |
 |---|---|
-| Max runtime per command | 300s (`EXEC_TIMEOUT`), then `status: "timeout"` |
-| Output kept | last 20,000 chars each of stdout/stderr (`OUTPUT_CAP`) |
+| Max runtime per command | 300s (`EXEC_TIMEOUT`), then `status: "timeout"` + whole process group killed |
+| Output kept | last 20,000 bytes each of stdout/stderr (`OUTPUT_CAP`), tailed from temp files - not a RAM limit on the command itself |
 | Job result lifetime | 1h in Redis (`JOB_TTL_SECONDS`), then gone (404) |
 | Default cwd | repo root (`/opt/liara`) |
 | Concurrency | job state lives in Redis, not in-process memory, so it works correctly across gunicorn's multiple worker processes |
+| Visibility | a job is only readable by the admin who submitted it (403 otherwise) |
+
+---
+
+## Job ownership
+
+Every job records `user_id`/`username` from the submitting admin's JWT.
+`GET /exec/{job_id}` 403s if the requesting admin isn't the same one who
+called `POST /exec` for that job. Job IDs are `uuid4` (unguessable in
+practice), but this makes the access policy explicit instead of "whoever
+has a valid admin token and the ID can read it."
+
+If you're building a tool that submits a job as one identity and expects to
+poll it as another, that won't work here - poll with the same token you
+submitted with.
+
+---
+
+## Audit log
+
+Every finished job appends one JSON line to `/var/log/liara/ai_exec_audit.log`
+on the server (not exposed over the API):
+
+```json
+{"job_id": "...", "user_id": 1, "username": "admin", "command": "...", "cwd": "/opt/liara", "started_at": "...", "finished_at": "...", "status": "done", "exit_code": 0}
+```
+
+Deliberately excludes `stdout`/`stderr` (can contain secrets) and outlives
+the 1h Redis TTL on the job result itself. If you need "what did admin X run
+last week", this is where to look (via the WebSocket PTY terminal or SSH -
+not through this API).
 
 ---
 
@@ -129,9 +172,11 @@ Poll this (every ~1s is reasonable) until `status` is no longer `"running"`:
    `GET /api/admin/health/full`, or check `systemctl is-active liara-backend`
    in a fresh command) rather than trusting that job's own final poll.
 
-3. **No cancel yet.** A job killed mid-flight by a self-restart (or one that
-   hits the timeout) can stay stuck at `status: "running"` forever (up to the
-   1h TTL) — nothing ever writes its final state. Don't poll such a job
+3. **No cancel yet.** A normal timeout finalizes cleanly (`status: "timeout"`,
+   process group killed - see below). But a job killed mid-flight by a
+   self-restart (the whole worker process dies before `_run_job` finishes)
+   can stay stuck at `status: "running"` forever, up to the 1h TTL — nothing
+   ever writes its final state in that case. Don't poll such a job
    indefinitely; if a self-restart is involved, move on and verify some other
    way instead.
 
