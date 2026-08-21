@@ -12,6 +12,7 @@ from core.dependencies import require_active_user
 from core.database import get_db
 from api.models.base_models import User
 from api.models.chat_message import ChatMessage
+from api.models.chat_session import ChatSession  # noqa: F401 - needed so SQLAlchemy can resolve ChatMessage.session's string relationship
 from services.log_reader import get_log_reader_service
 from api.routers.admin_health import check_ollama, get_system_resources
 
