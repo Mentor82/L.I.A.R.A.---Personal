@@ -39,6 +39,8 @@ OUTPUT_CAP = 20000  # bytes kept per stdout/stderr (tail), to keep Redis entries
 JOB_KEY_PREFIX = "ai_exec_job:"
 AUDIT_LOG_PATH = "/var/log/liara/ai_exec_audit.log"
 
+logger = logging.getLogger(__name__)
+
 # Separate logger so this never mixes into general app logs and is easy to
 # grep/ship independently. Deliberately does NOT include stdout/stderr - those
 # can contain secrets, and this log is meant to be kept far longer than the
@@ -51,10 +53,12 @@ if not audit_logger.handlers:
         audit_logger.addHandler(_handler)
         audit_logger.setLevel(logging.INFO)
         audit_logger.propagate = False
-    except OSError:
+    except OSError as e:
         # e.g. /var/log/liara doesn't exist on this machine (local dev) -
-        # audit logging is best-effort, never worth failing a job over.
-        pass
+        # audit logging is best-effort, never worth failing a job over, but
+        # silently losing the whole audit trail shouldn't go completely
+        # unnoticed either - surface it in the normal app log.
+        logger.warning(f"AI-exec audit log disabled, could not open {AUDIT_LOG_PATH}: {e}")
 
 
 class ExecRequest(BaseModel):
@@ -138,8 +142,10 @@ def _write_audit_log(job: ExecJob, cwd: str):
             "status": job.status,
             "exit_code": job.exit_code,
         }))
-    except Exception:
-        pass  # audit logging is best-effort, never worth failing a job over
+    except Exception as e:
+        # Best-effort - never worth failing a job over - but not worth losing
+        # silently either.
+        logger.warning(f"AI-exec audit log write failed for job {job.job_id}: {e}")
 
 
 def _run_job(job_id: str, command: str, cwd: str):
