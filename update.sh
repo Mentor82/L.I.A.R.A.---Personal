@@ -3,7 +3,9 @@
 # Liara Auto-Update
 # ==================
 # Pulls the latest changes and only restarts/redeploys what actually needs it:
-#   - Backend (anything under app/ changed)  -> ./restart_backend.sh
+#   - Backend (anything under app/ changed)  -> ./reload_backend.sh + ./restart_sse.sh
+#     (liara-sse is a separate process running the same app/* code - nginx
+#     routes /api/chat/stream to it directly, so it needs restarting too)
 #   - Frontend (frontend/* changed) -> ./deploy_frontend.sh
 #
 # Usage:
@@ -65,6 +67,7 @@ done <<< "$CHANGED_FILES"
 
 BACKEND_OK=true
 FRONTEND_OK=true
+SSE_OK=true
 
 # Frontend goes first, backend restart last: restarting the backend drops
 # active connections (and, if this script is ever launched from a request
@@ -96,12 +99,23 @@ if [ "$BACKEND_CHANGED" = true ]; then
         BACKEND_OK=false
     fi
     echo ""
+
+    # liara-sse runs the same app/* code as its own separate uvicorn process
+    # (nginx routes /api/chat/stream to it directly, not to liara-backend -
+    # see restart_sse.sh) - it needs restarting too, or it keeps serving
+    # chat responses from stale, pre-update code indefinitely.
+    echo -e "${YELLOW}🔧 Restarte SSE-Server (separater Prozess, gleiche app/*-Codebasis)...${NC}"
+    if ! ./restart_sse.sh; then
+        echo -e "${RED}❌ SSE-Server-Restart fehlgeschlagen!${NC}"
+        SSE_OK=false
+    fi
+    echo ""
 else
     echo -e "${BLUE}ℹ️  Keine Backend-Änderungen, Reload übersprungen.${NC}"
     echo ""
 fi
 
-if [ "$BACKEND_OK" = true ] && [ "$FRONTEND_OK" = true ]; then
+if [ "$BACKEND_OK" = true ] && [ "$FRONTEND_OK" = true ] && [ "$SSE_OK" = true ]; then
     echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║   Update abgeschlossen! ✅              ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
