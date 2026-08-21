@@ -90,14 +90,14 @@ else
 fi
 
 if [ "$BACKEND_CHANGED" = true ]; then
-    echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*) - restarte Backend...${NC}"
-    if ! ./restart_backend.sh; then
-        echo -e "${RED}❌ Backend-Restart fehlgeschlagen!${NC}"
+    echo -e "${YELLOW}🔧 Backend-Änderungen erkannt (app/*) - reloade Backend (graceful, zero-downtime)...${NC}"
+    if ! ./reload_backend.sh; then
+        echo -e "${RED}❌ Backend-Reload fehlgeschlagen!${NC}"
         BACKEND_OK=false
     fi
     echo ""
 else
-    echo -e "${BLUE}ℹ️  Keine Backend-Änderungen, Restart übersprungen.${NC}"
+    echo -e "${BLUE}ℹ️  Keine Backend-Änderungen, Reload übersprungen.${NC}"
     echo ""
 fi
 
@@ -105,10 +105,6 @@ if [ "$BACKEND_OK" = true ] && [ "$FRONTEND_OK" = true ]; then
     echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║   Update abgeschlossen! ✅              ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
-    if [ "$BACKEND_CHANGED" = true ]; then
-        echo -e "${BLUE}ℹ️  Backend-Restart wurde nur *geplant* (siehe restart_backend.sh) -"
-        echo -e "   Erfolg separat prüfen: tail -1 /var/log/liara/restart_result.log${NC}"
-    fi
 else
     echo -e "${RED}╔════════════════════════════════════════╗${NC}"
     echo -e "${RED}║   Update mit Fehlern abgeschlossen! ⚠️   ║${NC}"

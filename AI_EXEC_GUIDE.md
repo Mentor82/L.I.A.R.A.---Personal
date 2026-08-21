@@ -163,26 +163,27 @@ not through this API).
    non-interactive pipe. If a command fails with `"a terminal is required to
    read the password"`, that's this, not a bug in the endpoint.
 
-2. **Self-restart hazard (mitigated, not eliminated).** `restart_backend.sh`
-   no longer runs `systemctl restart liara-backend` directly — that would run
-   inside `liara-backend.service`'s own cgroup when called from here, and
-   systemd's default `KillMode=control-group` would kill this very job
-   process before it could save its "done" status. Instead it schedules the
+2. **Self-restart hazard — eliminated for the normal deploy path.**
+   `update.sh` now reloads the backend instead of restarting it
+   (`reload_backend.sh` → `systemctl reload liara-backend`, i.e. `SIGHUP` to
+   the Gunicorn master). The master never stops listening — it starts new
+   workers with the updated code and only retires the old ones once they've
+   finished in-flight requests — so nginx never has a dead upstream to proxy
+   to. No 502, and no cgroup-kill risk for whatever called it (a plain
+   `reload` never stops the unit, so `KillMode=control-group` never
+   triggers). This is now the default for any `app/*` change via
+   `update.sh`.
+
+   `restart_backend.sh` still exists for the rare case a real restart is
+   needed (changed `requirements.txt`, env vars, or the unit file itself —
+   things a code reload can't pick up). That path still schedules the
    restart via `systemd-run --on-active=2s ...` (a transient unit owned by
-   PID 1, outside that cgroup), so the calling job gets ~2s to finish and
-   save its result *before* the actual kill happens. In practice this means:
-   - The `POST /exec` job for `./update.sh` / `./restart_backend.sh` itself
-     now reliably finishes with `status: "done"` (it only *schedules* the
-     restart, it doesn't wait for it).
-   - The *next unrelated poll/request*, a couple seconds later, can still hit
-     an **HTTP 502** while the scheduled restart is actually happening — that
-     part isn't eliminated, just moved slightly later and out of this job's
-     way. Still expected, not a bug.
-   - **Verify the restart itself with a separate check**: `tail -1
-     /var/log/liara/restart_result.log` (written by `scheduled_restart.sh`,
-     `OK` or `FAILED`) or `GET /api/admin/health/full` a few seconds later —
-     don't rely on `restart_backend.sh`'s own exit code for that, it only
-     confirms the restart was *scheduled*.
+   PID 1, outside `liara-backend`'s cgroup) so a caller running inside it
+   gets a couple seconds to finish and save its result first, but the actual
+   restart a moment later can still cause a brief **HTTP 502** on unrelated
+   requests — verify it separately via `tail -1
+   /var/log/liara/restart_result.log` or `GET /api/admin/health/full`, don't
+   rely on `restart_backend.sh`'s own exit code for that.
 
 3. **No cancel yet.** A normal timeout finalizes cleanly (`status: "timeout"`,
    process group killed - see below). Self-restart jobs no longer get killed
