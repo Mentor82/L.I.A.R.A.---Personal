@@ -15,6 +15,47 @@ function AiExecTab() {
     'Content-Type': 'application/json'
   });
 
+  // Mirrors services/api.js's refresh handling, which this tab's plain
+  // fetch() calls don't go through - without this, the access token (60min
+  // TTL, see core/security.py) just dies mid-session with a raw 401 and no
+  // recovery, since it's never extended by use, only by an explicit refresh.
+  const refreshAccessToken = async () => {
+    const refreshToken = localStorage.getItem('liara_refresh_token');
+    if (!refreshToken) return false;
+
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+      if (!res.ok) return false;
+
+      const data = await res.json();
+      localStorage.setItem('liara_token', data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem('liara_refresh_token', data.refresh_token);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // fetch() wrapper: on 401, refresh once and retry with the new token
+  // before giving up. authHeaders() is re-evaluated on retry so it picks up
+  // the freshly stored token.
+  const authFetch = async (url, options = {}) => {
+    let res = await fetch(url, { ...options, headers: authHeaders() });
+    if (res.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        res = await fetch(url, { ...options, headers: authHeaders() });
+      }
+    }
+    return res;
+  };
+
   useEffect(() => {
     return () => {
       Object.values(pollTimers.current).forEach(clearTimeout);
@@ -30,7 +71,7 @@ function AiExecTab() {
   const pollJob = (jobId) => {
     pollTimers.current[jobId] = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/terminal/exec/${jobId}`, { headers: authHeaders() });
+        const res = await authFetch(`/api/admin/terminal/exec/${jobId}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const job = await res.json();
         setHistory(prev => prev.map(h => h.job_id === jobId ? job : h));
@@ -53,9 +94,8 @@ function AiExecTab() {
     setCommand('');
 
     try {
-      const res = await fetch('/api/admin/terminal/exec', {
+      const res = await authFetch('/api/admin/terminal/exec', {
         method: 'POST',
-        headers: authHeaders(),
         body: JSON.stringify({ command: cmd })
       });
       if (!res.ok) {

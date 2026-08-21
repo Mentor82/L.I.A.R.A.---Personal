@@ -6,6 +6,34 @@ import '@xterm/xterm/css/xterm.css';
 import AiExecTab from './AiExecTab';
 import './TerminalTabs.css';
 
+// Silent-refreshes the access token before opening a PTY WebSocket. Unlike a
+// plain fetch() there's no way to retry a failed WS handshake with a new
+// token after the fact (see services/api.js's 401-retry pattern), so this
+// gets the freshest token available *before* connecting instead. Falls back
+// to whatever's already in localStorage if refresh isn't possible/fails.
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('liara_refresh_token');
+  if (!refreshToken) return false;
+
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    if (!res.ok) return false;
+
+    const data = await res.json();
+    localStorage.setItem('liara_token', data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem('liara_refresh_token', data.refresh_token);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function TerminalTabs() {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
@@ -99,7 +127,7 @@ function TerminalTabs() {
   };
 
   // Connect tab
-  const connectTab = (tabId) => {
+  const connectTab = async (tabId) => {
     const tab = tabs.find(t => t.id === tabId);
     if (!tab || tab.status === 'connected' || tab.status === 'connecting') return;
 
@@ -113,6 +141,7 @@ function TerminalTabs() {
     }
 
     try {
+      await refreshAccessToken();
       const token = localStorage.getItem('liara_token');
       if (!token) {
         throw new Error('Keine Authentifizierung gefunden');
