@@ -3,6 +3,7 @@
 Automatische Ausführung von Tool-Calls mit Privacy-Checks
 """
 import logging
+import requests
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -12,6 +13,22 @@ from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 
 logger = logging.getLogger(__name__)
+
+# WMO weather codes used by Open-Meteo -> German descriptions
+# https://open-meteo.com/en/docs (see "WMO Weather interpretation codes")
+_WMO_WEATHER_CODES = {
+    0: "Klarer Himmel", 1: "Überwiegend klar", 2: "Teilweise bewölkt", 3: "Bedeckt",
+    45: "Nebel", 48: "Gefrierender Nebel",
+    51: "Leichter Nieselregen", 53: "Mäßiger Nieselregen", 55: "Starker Nieselregen",
+    56: "Leichter gefrierender Nieselregen", 57: "Starker gefrierender Nieselregen",
+    61: "Leichter Regen", 63: "Mäßiger Regen", 65: "Starker Regen",
+    66: "Leichter gefrierender Regen", 67: "Starker gefrierender Regen",
+    71: "Leichter Schneefall", 73: "Mäßiger Schneefall", 75: "Starker Schneefall",
+    77: "Schneegriesel",
+    80: "Leichte Regenschauer", 81: "Mäßige Regenschauer", 82: "Heftige Regenschauer",
+    85: "Leichte Schneeschauer", 86: "Starke Schneeschauer",
+    95: "Gewitter", 96: "Gewitter mit leichtem Hagel", 99: "Gewitter mit starkem Hagel",
+}
 
 
 class ToolExecutionError(Exception):
@@ -148,21 +165,59 @@ class ToolExecutor:
         }
     
     async def _execute_weather(self, params: Dict[str, Any]) -> Dict:
-        """Führt Wetter-Abfrage aus"""
+        """
+        Führt Wetter-Abfrage aus über Open-Meteo (kostenlos, kein API-Key nötig).
+        Zwei Calls: Geocoding (Stadtname -> Koordinaten), dann die Wettervorhersage.
+        """
         city = params.get("city")
         country = params.get("country")
-        language = params.get("language", "de")
-        
-        # TODO: Implement weather service integration
-        return {
-            "city": city,
-            "country": country,
-            "temperature": 5,
-            "condition": "Bewölkt",
-            "humidity": 87,
-            "wind_speed": 15,
-            "note": "Mock data - real weather service not yet implemented"
-        }
+
+        try:
+            geo_response = requests.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": city, "count": 1, "language": "de"},
+                timeout=5
+            )
+            geo_response.raise_for_status()
+            geo_results = geo_response.json().get("results")
+
+            if not geo_results:
+                return {
+                    "city": city,
+                    "country": country,
+                    "error": f"Ort '{city}' nicht gefunden"
+                }
+
+            location = geo_results[0]
+
+            weather_response = requests.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": location["latitude"],
+                    "longitude": location["longitude"],
+                    "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
+                    "timezone": "auto"
+                },
+                timeout=5
+            )
+            weather_response.raise_for_status()
+            current = weather_response.json().get("current", {})
+
+            return {
+                "city": location.get("name", city),
+                "country": location.get("country", country),
+                "temperature": current.get("temperature_2m"),
+                "condition": _WMO_WEATHER_CODES.get(current.get("weather_code"), "Unbekannt"),
+                "humidity": current.get("relative_humidity_2m"),
+                "wind_speed": current.get("wind_speed_10m")
+            }
+        except Exception as e:
+            logger.error(f"Weather lookup failed for '{city}': {e}")
+            return {
+                "city": city,
+                "country": country,
+                "error": f"Wetterabfrage fehlgeschlagen: {e}"
+            }
     
     async def _execute_location(self, user_id: int) -> Dict:
         """Führt Standort-Erkennung aus"""
