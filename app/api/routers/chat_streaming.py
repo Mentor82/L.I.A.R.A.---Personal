@@ -85,24 +85,32 @@ def perform_web_search(query: str, intent: str, user_id: Optional[int] = None, d
             # Weather APIs sind immer sicher (open-meteo.com ist whitelisted)
             risk_score = 5  # Minimal risk
             
-            # Extract location from query - improved version
-            location = query.lower()
-            # Remove weather-related keywords more carefully
+            # Extract location from query. City names are reliably capitalized
+            # in German, so pull out whatever follows a preposition
+            # (in/für/von/bei/nach) rather than trying to strip every possible
+            # question phrasing - stripping broke on any wording the regex
+            # didn't anticipate (e.g. "aktuelle" in "das aktuelle Wetter").
             import re
-            # Remove common weather question patterns
-            location = re.sub(r'\b(wie ist das |wie ist |was ist das |was ist |wie wird das )?wetter\b', '', location)
-            location = re.sub(r'\b(in|für|von|bei)\s+', '', location)
-            location = re.sub(r'\b(morgen|heute|übermorgen|gestern)\b', '', location)  # Remove time-related words
-            location = re.sub(r'[?!.]', '', location)
-            location = location.strip()
-            
-            # If location is too short or empty, try to extract city name
-            if len(location) < 2:
-                # Try to find capitalized words (city names)
+            location = ""
+            prep_match = re.search(
+                r'\b(?:in|für|von|bei|nach)\s+([A-ZÄÖÜ][\wÀ-ÿ\'-]*(?:\s+[A-ZÄÖÜ][\wÀ-ÿ\'-]*)*)',
+                query
+            )
+            if prep_match:
+                location = prep_match.group(1).rstrip('?!., ')
+            else:
+                # Fallback: a capitalized word that isn't just the first word
+                # of the sentence (which is capitalized regardless of being a
+                # place name, e.g. "Wie ist das Wetter?").
+                non_location_words = {'wetter', 'temperatur', 'wie', 'was', 'wird'}
                 words = query.split()
-                capitalized = [w for w in words if w[0].isupper() and len(w) > 2]
+                capitalized = [
+                    w.strip('?!.,') for i, w in enumerate(words)
+                    if i > 0 and w[0].isupper() and len(w.strip('?!.,')) > 1
+                    and w.strip('?!.,').lower() not in non_location_words
+                ]
                 if capitalized:
-                    location = capitalized[0]
+                    location = capitalized[-1]
             
             # FALLBACK: Wenn keine Location aus Query extrahiert, nutze gespeicherte Location
             if len(location) < 2 and user_id and db:

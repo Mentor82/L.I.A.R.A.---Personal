@@ -12,6 +12,22 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# WMO weather codes used by Open-Meteo -> German descriptions
+# https://open-meteo.com/en/docs (see "WMO Weather interpretation codes")
+_WMO_WEATHER_CODES = {
+    0: "Klarer Himmel", 1: "Überwiegend klar", 2: "Teilweise bewölkt", 3: "Bedeckt",
+    45: "Nebel", 48: "Gefrierender Nebel",
+    51: "Leichter Nieselregen", 53: "Mäßiger Nieselregen", 55: "Starker Nieselregen",
+    56: "Leichter gefrierender Nieselregen", 57: "Starker gefrierender Nieselregen",
+    61: "Leichter Regen", 63: "Mäßiger Regen", 65: "Starker Regen",
+    66: "Leichter gefrierender Regen", 67: "Starker gefrierender Regen",
+    71: "Leichter Schneefall", 73: "Mäßiger Schneefall", 75: "Starker Schneefall",
+    77: "Schneegriesel",
+    80: "Leichte Regenschauer", 81: "Mäßige Regenschauer", 82: "Heftige Regenschauer",
+    85: "Leichte Schneeschauer", 86: "Starke Schneeschauer",
+    95: "Gewitter", 96: "Gewitter mit leichtem Hagel", 99: "Gewitter mit starkem Hagel",
+}
+
 
 class WebSearchService:
     """Privacy-focused web search service"""
@@ -214,7 +230,9 @@ URL: {search_result.get('url', 'N/A')}
 """
         
         elif result_type == 'weather':
+            condition = _WMO_WEATHER_CODES.get(search_result.get('weather_code'), 'Unbekannt')
             return f"""Wetter-Information für {search_result.get('location', 'N/A')}:
+Wetterlage: {condition}
 Temperatur: {search_result.get('temperature', 'N/A')}°C
 Luftfeuchtigkeit: {search_result.get('humidity', 'N/A')}%
 Windgeschwindigkeit: {search_result.get('wind_speed', 'N/A')} km/h
