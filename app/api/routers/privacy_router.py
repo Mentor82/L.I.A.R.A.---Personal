@@ -353,15 +353,25 @@ async def delete_all_user_data(
     try:
         # Delete location data
         db.execute(text("DELETE FROM user_location_preferences WHERE user_id = :user_id"), {"user_id": current_user.id})
-        
+
         # Delete web access logs
         db.execute(text("DELETE FROM web_access_logs WHERE user_id = :user_id"), {"user_id": current_user.id})
-        
-        # TODO: Delete chat history, tasks, notes, calendar events
-        # db.execute("DELETE FROM chat_messages WHERE user_id = :user_id", {"user_id": current_user.id})
-        # db.execute("DELETE FROM tasks WHERE user_id = :user_id", {"user_id": current_user.id})
-        # db.execute("DELETE FROM notes WHERE user_id = :user_id", {"user_id": current_user.id})
-        
+
+        # Delete chat history - messages first (FK references chat_sessions),
+        # matched via session ownership so assistant replies (which carry no
+        # user_id of their own) in the user's own sessions are removed too.
+        db.execute(
+            text("DELETE FROM chat_messages WHERE session_id IN "
+                 "(SELECT id FROM chat_sessions WHERE user_id = :user_id)"),
+            {"user_id": current_user.id}
+        )
+        db.execute(text("DELETE FROM chat_sessions WHERE user_id = :user_id"), {"user_id": current_user.id})
+
+        # Delete tasks, notes, calendar events
+        db.execute(text("DELETE FROM tasks WHERE user_id = :user_id"), {"user_id": current_user.id})
+        db.execute(text("DELETE FROM notes WHERE user_id = :user_id"), {"user_id": current_user.id})
+        db.execute(text("DELETE FROM calendar_events WHERE user_id = :user_id"), {"user_id": current_user.id})
+
         db.commit()
         
         return {
