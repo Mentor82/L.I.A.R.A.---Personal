@@ -163,22 +163,33 @@ not through this API).
    non-interactive pipe. If a command fails with `"a terminal is required to
    read the password"`, that's this, not a bug in the endpoint.
 
-2. **Self-restart hazard.** If the command restarts the backend itself
-   (`./update.sh` when `app/*` changed, or `./restart_backend.sh` directly),
-   the *next poll request* will very likely get an **HTTP 502** while
-   `systemctl restart liara-backend` is mid-flight — nginx has nowhere to
-   proxy to for a second. This is expected, not a failure of the command.
-   **Verify success with a separate check afterward** (e.g. hit
-   `GET /api/admin/health/full`, or check `systemctl is-active liara-backend`
-   in a fresh command) rather than trusting that job's own final poll.
+2. **Self-restart hazard (mitigated, not eliminated).** `restart_backend.sh`
+   no longer runs `systemctl restart liara-backend` directly — that would run
+   inside `liara-backend.service`'s own cgroup when called from here, and
+   systemd's default `KillMode=control-group` would kill this very job
+   process before it could save its "done" status. Instead it schedules the
+   restart via `systemd-run --on-active=2s ...` (a transient unit owned by
+   PID 1, outside that cgroup), so the calling job gets ~2s to finish and
+   save its result *before* the actual kill happens. In practice this means:
+   - The `POST /exec` job for `./update.sh` / `./restart_backend.sh` itself
+     now reliably finishes with `status: "done"` (it only *schedules* the
+     restart, it doesn't wait for it).
+   - The *next unrelated poll/request*, a couple seconds later, can still hit
+     an **HTTP 502** while the scheduled restart is actually happening — that
+     part isn't eliminated, just moved slightly later and out of this job's
+     way. Still expected, not a bug.
+   - **Verify the restart itself with a separate check**: `tail -1
+     /var/log/liara/restart_result.log` (written by `scheduled_restart.sh`,
+     `OK` or `FAILED`) or `GET /api/admin/health/full` a few seconds later —
+     don't rely on `restart_backend.sh`'s own exit code for that, it only
+     confirms the restart was *scheduled*.
 
 3. **No cancel yet.** A normal timeout finalizes cleanly (`status: "timeout"`,
-   process group killed - see below). But a job killed mid-flight by a
-   self-restart (the whole worker process dies before `_run_job` finishes)
-   can stay stuck at `status: "running"` forever, up to the 1h TTL — nothing
-   ever writes its final state in that case. Don't poll such a job
-   indefinitely; if a self-restart is involved, move on and verify some other
-   way instead.
+   process group killed - see below). Self-restart jobs no longer get killed
+   mid-flight (see above), but any other cause of the whole worker process
+   dying unexpectedly would still leave a job stuck at `status: "running"`
+   until the 1h TTL expires, since nothing would be left to write its final
+   state.
 
 4. **Same privilege as the PTY terminal.** This is full shell access gated
    only by `require_admin` (JWT validated → active user → role check). Don't

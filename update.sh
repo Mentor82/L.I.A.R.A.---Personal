@@ -105,6 +105,10 @@ if [ "$BACKEND_OK" = true ] && [ "$FRONTEND_OK" = true ]; then
     echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║   Update abgeschlossen! ✅              ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+    if [ "$BACKEND_CHANGED" = true ]; then
+        echo -e "${BLUE}ℹ️  Backend-Restart wurde nur *geplant* (siehe restart_backend.sh) -"
+        echo -e "   Erfolg separat prüfen: tail -1 /var/log/liara/restart_result.log${NC}"
+    fi
 else
     echo -e "${RED}╔════════════════════════════════════════╗${NC}"
     echo -e "${RED}║   Update mit Fehlern abgeschlossen! ⚠️   ║${NC}"
