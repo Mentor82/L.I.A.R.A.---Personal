@@ -27,6 +27,8 @@ function Chat() {
   const [historySidebarOpen, setHistorySidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isSending, setIsSending] = useState(false); // Mehrfachklick-Schutz
+  const [errorMessage, setErrorMessage] = useState('');
+  const [chatToDelete, setChatToDelete] = useState(null);
   const [searching, setSearching] = useState(false);
   const [searchIntent, setSearchIntent] = useState(null);
   const [models, setModels] = useState([]);
@@ -595,19 +597,25 @@ function Chat() {
     }
   }, [activeSession?.messages.length]);
 
-  const clearChat = async () => {
-    if (!confirm('Diesen Chat wirklich löschen?')) return;
-    
+  const clearChat = () => {
+    setChatToDelete(activeSession);
+  };
+
+  const confirmClearChat = async () => {
+    if (!chatToDelete) return;
+    const sessionIdToDelete = chatToDelete.id;
+    setChatToDelete(null);
+
     try {
       // Delete from database
-      await deleteChatSession(activeSessionId);
-      
+      await deleteChatSession(sessionIdToDelete);
+
       // Remove from local state
-      setChatSessions(prev => prev.filter(s => s.id !== activeSessionId));
-      
+      setChatSessions(prev => prev.filter(s => s.id !== sessionIdToDelete));
+
       // Switch to another session or create new one
       if (chatSessions.length > 1) {
-        const remaining = chatSessions.filter(s => s.id !== activeSessionId);
+        const remaining = chatSessions.filter(s => s.id !== sessionIdToDelete);
         setActiveSessionId(remaining[0].id);
       } else {
         // Create new session
@@ -615,7 +623,7 @@ function Chat() {
       }
     } catch (error) {
       console.error('Failed to delete chat:', error);
-      alert('Fehler beim Löschen des Chats');
+      setErrorMessage('Fehler beim Löschen des Chats');
     }
   };
 
@@ -673,12 +681,12 @@ function Chat() {
 
     // Validierung
     if (!file.type.startsWith('image/')) {
-      alert('Bitte nur Bilddateien hochladen (JPG, PNG, WEBP)');
+      setErrorMessage('Bitte nur Bilddateien hochladen (JPG, PNG, WEBP)');
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      alert('Bild zu groß. Maximum: 10 MB');
+      setErrorMessage('Bild zu groß. Maximum: 10 MB');
       return;
     }
 
@@ -716,7 +724,7 @@ function Chat() {
 
   const handleImageAnalysis = async () => {
     if (!selectedImage || !message.trim()) {
-      alert('Bitte Bild auswählen und Frage eingeben');
+      setErrorMessage('Bitte Bild auswählen und Frage eingeben');
       return;
     }
 
@@ -778,7 +786,7 @@ function Chat() {
 
     } catch (error) {
       console.error('Image analysis failed:', error);
-      alert('Bildanalyse fehlgeschlagen: ' + error.message);
+      setErrorMessage('Bildanalyse fehlgeschlagen: ' + error.message);
     } finally {
       setLoading(false);
       setIsSending(false);
@@ -787,7 +795,7 @@ function Chat() {
 
   const handleHailoVision = async () => {
     if (!selectedImage) {
-      alert('Bitte ein Bild auswählen');
+      setErrorMessage('Bitte ein Bild auswählen');
       return;
     }
 
@@ -862,7 +870,7 @@ function Chat() {
       removeImage();
     } catch (error) {
       console.error('Hailo Vision failed:', error);
-      alert('Hailo Vision fehlgeschlagen: ' + error.message);
+      setErrorMessage('Hailo Vision fehlgeschlagen: ' + error.message);
     } finally {
       setLoading(false);
       setIsSending(false);
@@ -871,6 +879,12 @@ function Chat() {
 
   return (
     <div className="chat-layout">
+      {errorMessage && (
+        <div className="chat-error-banner" onClick={() => setErrorMessage('')}>
+          ⚠️ {errorMessage} <span className="chat-banner-dismiss">✕</span>
+        </div>
+      )}
+
       {/* Sidebar Toggle Tab */}
       <button 
         className={`sidebar-toggle-tab ${historySidebarOpen ? 'open' : ''}`}
@@ -1278,6 +1292,33 @@ function Chat() {
         </div>
       </form>
     </div>
+
+    {/* Delete Confirmation Modal - not window.confirm(), which some
+        browsers silently suppress after repeated dialogs, leaving the
+        delete button looking like it does nothing */}
+    {chatToDelete && (
+      <div className="chat-modal-overlay" onClick={() => setChatToDelete(null)}>
+        <div className="chat-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="chat-modal-header">
+            <h3>Chat löschen?</h3>
+            <button type="button" className="chat-modal-close-btn" onClick={() => setChatToDelete(null)}>
+              ✕
+            </button>
+          </div>
+          <div className="chat-modal-body">
+            <p>Möchtest du "<strong>{chatToDelete.title}</strong>" wirklich löschen?</p>
+          </div>
+          <div className="chat-form-actions">
+            <button type="button" className="chat-btn-secondary" onClick={() => setChatToDelete(null)}>
+              Abbrechen
+            </button>
+            <button type="button" className="chat-btn-danger" onClick={confirmClearChat}>
+              Löschen
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   );
 }

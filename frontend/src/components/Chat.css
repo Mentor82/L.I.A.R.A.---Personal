@@ -1065,3 +1065,123 @@
   border-left: 3px solid #a78bfa;
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(236, 72, 153, 0.05));
 }
+
+/* Error Banner (dismissible, replaces alert()) */
+.chat-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  margin: 0 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  background: rgba(229, 62, 62, 0.15);
+  color: #ff8080;
+  border: 1px solid rgba(229, 62, 62, 0.3);
+}
+
+.chat-banner-dismiss {
+  opacity: 0.7;
+}
+
+/* Delete Confirmation Modal (replaces window.confirm()) */
+.chat-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.chat-modal {
+  background: var(--color-bg-alt, #1a1a2e);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  max-width: 500px;
+  width: 90%;
+}
+
+.chat-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chat-modal-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--color-text);
+}
+
+.chat-modal-close-btn {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: rgba(239, 68, 68, 1);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.chat-modal-close-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  transform: scale(1.05);
+}
+
+.chat-modal-body {
+  padding: 1rem 2rem;
+  color: var(--color-text);
+}
+
+.chat-form-actions {
+  display: flex;
+  gap: 1rem;
+  padding: 0 2rem 1.5rem;
+}
+
+.chat-btn-secondary,
+.chat-btn-danger {
+  flex: 1;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.chat-btn-secondary {
+  background: var(--bg-hover);
+  color: var(--color-text);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.chat-btn-secondary:hover {
+  background: var(--bg-active);
+}
+
+.chat-btn-danger {
+  background: #e53e3e;
+  color: #fff;
+}
+
+.chat-btn-danger:hover {
+  background: #c53030;
+}

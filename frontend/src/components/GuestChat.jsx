@@ -80,13 +80,21 @@ function GuestChat() {
 
     // Prüfe Nachrichtenlimit
     if (welcomeData && messageCount >= welcomeData.limitations.max_messages_per_session) {
-      alert(`Du hast das Limit von ${welcomeData.limitations.max_messages_per_session} Nachrichten erreicht. Registriere dich für unbegrenzte Gespräche!`);
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `🚫 Du hast das Limit von ${welcomeData.limitations.max_messages_per_session} Nachrichten erreicht. Registriere dich für unbegrenzte Gespräche!`,
+        timestamp: new Date().toISOString()
+      }]);
       return;
     }
 
     // Prüfe Länge
     if (welcomeData && userMessage.length > welcomeData.limitations.max_message_length) {
-      alert(`Nachricht zu lang! Maximum: ${welcomeData.limitations.max_message_length} Zeichen. Du hast ${userMessage.length} Zeichen.`);
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `⚠️ Nachricht zu lang! Maximum: ${welcomeData.limitations.max_message_length} Zeichen. Du hast ${userMessage.length} Zeichen.`,
+        timestamp: new Date().toISOString()
+      }]);
       return;
     }
 

@@ -975,6 +975,14 @@ async def chat_with_liara(
                 detail=f"Ollama error: {str(e)}"
             )
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Chat error: {str(e)}"
+        )
+
 
 @router.post("/quick")
 async def quick_ask(
