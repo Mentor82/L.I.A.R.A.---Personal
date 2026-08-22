@@ -19,6 +19,7 @@ const modelsByBackend = {
     { value: 'ssd_mobiledet', label: 'SSD MobileDet (COCO, ~70ms)' },
     { value: 'ssd_mobilenet_v2', label: 'SSD MobileNet v2 (COCO, ~65ms)' },
     { value: 'efficientdet_lite0', label: 'EfficientDet-Lite0 (COCO, genauer, ~230ms)' },
+    { value: 'yolov8n', label: 'YOLOv8n (nur CPU, ~2.3s - keine TPU-Beschleunigung möglich)' },
   ],
   cpu: [
     { value: 'stub', label: 'CPU-Stub (Platzhalter)' },

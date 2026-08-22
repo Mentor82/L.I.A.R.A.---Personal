@@ -57,7 +57,11 @@ class VisionDetectionService:
             "latency_ms": result.latency_ms,
         }
 
-    EDGETPU_MODELS = {"ssd_mobiledet", "ssd_mobilenet_v2", "efficientdet_lite0"}
+    # yolov8n also lives on edge01 but runs on CPU, not the Edge TPU -
+    # Ultralytics' generic TFLite export never fully int8-quantizes the
+    # graph (0% op coverage via edgetpu_compiler, confirmed), unlike the
+    # other three which are Google's own quantization-aware-trained models.
+    EDGETPU_MODELS = {"ssd_mobiledet", "ssd_mobilenet_v2", "efficientdet_lite0", "yolov8n"}
 
     async def _detect_edgetpu(
         self,
@@ -65,9 +69,9 @@ class VisionDetectionService:
         model: str,
         confidence_threshold: Optional[float],
     ) -> Dict[str, Any]:
-        # edge01 now serves three wired COCO detection models (see server.py
+        # edge01 now serves four wired COCO detection models (see server.py
         # on edge01). Fall back to the default if the caller passes something
-        # edge01 doesn't know (e.g. "yolov8n", the Hailo default).
+        # edge01 doesn't know (e.g. "yolov8s", the Hailo default).
         model_name = model if model in self.EDGETPU_MODELS else "ssd_mobiledet"
         client = await get_edgetpu_client()
 
