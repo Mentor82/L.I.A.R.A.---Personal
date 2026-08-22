@@ -725,6 +725,34 @@
   box-shadow: 0 6px 20px rgba(229, 62, 62, 0.5);
 }
 
+.notes-view-toggle {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 2rem 0;
+}
+
+.view-toggle-btn {
+  padding: 0.5rem 1rem;
+  background: var(--bg-hover);
+  color: var(--color-text-secondary, rgba(255, 255, 255, 0.7));
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.view-toggle-btn:hover {
+  background: var(--bg-active);
+}
+
+.view-toggle-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border-color: transparent;
+}
+
 /* View Modal */
 .view-modal {
   max-width: 900px;

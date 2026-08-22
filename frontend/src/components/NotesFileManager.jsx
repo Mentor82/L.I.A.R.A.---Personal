@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { notesAPI, moodAPI } from '../services/api';
 import LexicalEditor from './LexicalEditor';
+import NotesTree from './NotesTree';
 import './NotesFileManager.css';
 
 const NotesFileManager = () => {
+  const [viewMode, setViewMode] = useState('folder'); // 'folder' | 'tree'
   const [notes, setNotes] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -343,6 +345,24 @@ const NotesFileManager = () => {
   };
 
   return (
+    <>
+      <div className="notes-view-toggle">
+        <button
+          className={`view-toggle-btn ${viewMode === 'folder' ? 'active' : ''}`}
+          onClick={() => setViewMode('folder')}
+        >
+          📁 Ordner
+        </button>
+        <button
+          className={`view-toggle-btn ${viewMode === 'tree' ? 'active' : ''}`}
+          onClick={() => setViewMode('tree')}
+        >
+          🌳 Baum
+        </button>
+      </div>
+      {viewMode === 'tree' ? (
+        <NotesTree />
+      ) : (
     <div className="notes-file-manager">
       <div className="file-manager-header">
         <div className="header-left">
@@ -640,6 +660,8 @@ const NotesFileManager = () => {
         </div>
       )}
     </div>
+      )}
+    </>
   );
 };
 

@@ -19,6 +19,8 @@ function NotesTree() {
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [selectedNote, setSelectedNote] = useState(null);
   const [mood, setMood] = useState(null);
+  const [error, setError] = useState('');
+  const [noteToDelete, setNoteToDelete] = useState(null);
 
   useEffect(() => {
     fetchTree();
@@ -45,7 +47,7 @@ function NotesTree() {
       setExpandedNodes(new Set(rootIds));
     } catch (error) {
       console.error('Failed to fetch notes tree:', error);
-      alert('Fehler beim Laden der Notizen: ' + error.message);
+      setError('Fehler beim Laden der Notizen: ' + error.message);
     }
     setLoading(false);
   };
@@ -65,7 +67,7 @@ function NotesTree() {
       fetchTree();
     } catch (error) {
       console.error('Failed to create note:', error);
-      alert('Fehler beim Erstellen: ' + error.message);
+      setError('Fehler beim Erstellen: ' + error.message);
     }
   };
 
@@ -85,18 +87,24 @@ function NotesTree() {
       fetchTree();
     } catch (error) {
       console.error('Failed to update note:', error);
-      alert('Fehler beim Aktualisieren: ' + error.message);
+      setError('Fehler beim Aktualisieren: ' + error.message);
     }
   };
 
-  const handleDelete = async (noteId) => {
-    if (!confirm('Notiz und alle Unternotizen wirklich löschen?')) return;
-    
+  const handleDelete = (note) => {
+    setNoteToDelete(note);
+  };
+
+  const confirmDelete = async () => {
+    if (!noteToDelete) return;
     try {
-      await notesAPI.delete(noteId);
+      await notesAPI.delete(noteToDelete.id);
       fetchTree();
     } catch (error) {
       console.error('Failed to delete note:', error);
+      setError('Fehler beim Löschen: ' + error.message);
+    } finally {
+      setNoteToDelete(null);
     }
   };
 
@@ -147,7 +155,8 @@ function NotesTree() {
     
     // Prevent dropping a parent into its own child
     if (isDescendant(draggedNote, targetNote)) {
-      alert('Kann keine Notiz in ihre eigene Unternotiz verschieben!');
+      setError('Kann keine Notiz in ihre eigene Unternotiz verschieben!');
+      setDraggedNote(null);
       return;
     }
 
@@ -256,7 +265,7 @@ function NotesTree() {
             <button 
               onClick={(e) => {
                 e.stopPropagation();
-                handleDelete(note.id);
+                handleDelete(note);
               }}
               title="Löschen"
             >
@@ -274,15 +283,24 @@ function NotesTree() {
     );
   };
 
+  const MOOD_EMOJI = {
+    neutral: '😌', energetic: '⚡', calm: '🌙', supportive: '💜', focused: '🎯', playful: '🎨',
+  };
+
   return (
     <div className="notes-tree-container page-container">
+      {error && (
+        <div className="tree-error-banner" onClick={() => setError('')}>
+          ⚠️ {error} <span className="tree-error-dismiss">✕</span>
+        </div>
+      )}
       <div className="notes-tree-header page-header">
         <div className="header-left">
           <h2>📓 Notizen</h2>
           {mood && (
             <div className="mood-indicator-small">
-              <span className="mood-emoji-small">{mood.emoji}</span>
-              <span>{mood.mood}</span>
+              <span className="mood-emoji-small">{MOOD_EMOJI[mood.current_mood] || '😌'}</span>
+              <span>{mood.current_mood}</span>
             </div>
           )}
         </div>
@@ -424,6 +442,30 @@ function NotesTree() {
           )}
         </div>
       </div>
+
+      {noteToDelete && (
+        <div className="modal-overlay" onClick={() => setNoteToDelete(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Notiz löschen?</h3>
+              <button className="modal-close" onClick={() => setNoteToDelete(null)}>×</button>
+            </div>
+            <div style={{ padding: '0 2rem 1.5rem' }}>
+              <p>
+                Möchtest du "<strong>{noteToDelete.title}</strong>" und alle Unternotizen wirklich löschen?
+              </p>
+            </div>
+            <div className="modal-actions" style={{ padding: '0 2rem 2rem' }}>
+              <button type="button" className="btn-secondary" onClick={() => setNoteToDelete(null)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmDelete}>
+                Löschen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

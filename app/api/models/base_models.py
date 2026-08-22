@@ -5,7 +5,7 @@ Basis-Modelle für Tasks, Calendar, Notes, Memory und User.
 """
 
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, JSON, ForeignKey, Enum
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
 from core.database import Base
 import enum
@@ -131,10 +131,20 @@ class Note(Base):
     
     # Relationships
     user = relationship("User", back_populates="notes")
-    children = relationship("Note", 
-                          backref="parent",
-                          remote_side=[id],
-                          cascade="all")  # Removed delete-orphan for many-to-one
+    # `remote_side` must be on the "one" (parent) side of a self-referential
+    # adjacency list. Having it on `children` directly (as before) inverted
+    # the whole relationship: `.children` resolved to a single parent object
+    # and `.parent` resolved to the actual children list, and since cascade
+    # delete followed that inverted "children" attribute, deleting any note
+    # silently cascade-deleted its PARENT (and ancestors) instead of its
+    # descendants - confirmed via a rolled-back DB test. `delete-orphan` now
+    # correctly cascades downward, matching what NotesTree.jsx's delete
+    # confirmation ("... und alle Unternotizen wirklich löschen?") expects.
+    children = relationship(
+        "Note",
+        backref=backref("parent", remote_side=[id]),
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         return f"<Note(id={self.id}, title='{self.title}', parent_id={self.parent_id})>"
