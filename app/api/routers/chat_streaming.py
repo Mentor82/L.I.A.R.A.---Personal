@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, AsyncGenerator, List, Dict
 import httpx
+import requests
 import json
 import asyncio
 import logging
@@ -20,6 +21,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+from core.mirko_logger import get_mirko_logger, should_log_for_user
 from liara_engine.memory.mood_system import MoodSystem
 from liara_engine.memory.short_context import get_memory
 from liara_engine.actions.intent_detector import get_intent_detector
@@ -36,6 +38,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 router = APIRouter(prefix="/chat", tags=["Chat Streaming"])
+mlogger = get_mirko_logger()
 
 # Web search intent list
 SEARCH_INTENTS = ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']
@@ -210,7 +213,8 @@ async def stream_ollama_response(
     action_result: Optional[Dict] = None,
     memory_context: Optional[List[Dict]] = None,
     session_id: Optional[int] = None,  # NEW: Session ID for frontend
-    user_id: int = None
+    user_id: int = None,
+    username: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -351,7 +355,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                 if content:
                                     # Mirko Debug Logging
                                     try:
-                                        if should_log_for_user(current_user.username):
+                                        if username and should_log_for_user(username):
                                             mlogger.log_sse_chunk("content", content=content)
                                     except:
                                         pass  # Logging-Fehler ignorieren
@@ -363,7 +367,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             if chunk.get("done", False):
                                 # Mirko Debug Logging
                                 try:
-                                    if should_log_for_user(current_user.username):
+                                    if username and should_log_for_user(username):
                                         mlogger.log_sse_chunk("done", metadata={"mood_updated": True})
                                 except:
                                     pass  # Logging-Fehler ignorieren
@@ -388,7 +392,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         )
         yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
     
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         error = ChatError(
             error_type="connection_error",
             message="Kann nicht mit Ollama verbinden",
@@ -397,8 +401,8 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             suggestion="Prüfe ob Ollama läuft: systemctl status ollama"
         )
         yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
-    
-    except requests.exceptions.HTTPError as e:
+
+    except httpx.HTTPStatusError as e:
         error = ChatError(
             error_type="http_error",
             message=f"Ollama HTTP Error: {e.response.status_code}",
@@ -439,8 +443,6 @@ async def stream_chat(
         - error: Fehler aufgetreten
     """
     # Mirko Debug Logging
-    from core.mirko_logger import get_mirko_logger, should_log_for_user
-    mlogger = get_mirko_logger()
     if should_log_for_user(current_user.username):
         mlogger.log_request_start(
             user_id=current_user.id,
@@ -694,7 +696,8 @@ async def stream_chat(
             action_result=action_result,
             memory_context=relevant_concepts,
             session_id=session_id,  # NEW: Send session_id to frontend
-            user_id=current_user.id
+            user_id=current_user.id,
+            username=current_user.username
         ),
         media_type="text/event-stream",
         headers={
@@ -718,55 +721,6 @@ async def test_stream():
         test_generator(),
         media_type="text/event-stream"
     )
-
-
-# Error-Handling Utilities
-class ChatErrorHandler:
-    """Centralized Error-Handler für Chat-System."""
-    
-    @staticmethod
-    def handle_ollama_error(error: Exception) -> ChatError:
-        """
-        Konvertiere Exception zu ChatError.
-        
-        Returns:
-            Strukturierter ChatError
-        """
-        if isinstance(error, requests.exceptions.Timeout):
-            return ChatError(
-                error_type="timeout",
-                message="Model-Antwort dauert zu lange",
-                timestamp=datetime.now().isoformat(),
-                recoverable=True,
-                suggestion="Nutze kleineres Model oder erhöhe Timeout"
-            )
-        
-        elif isinstance(error, requests.exceptions.ConnectionError):
-            return ChatError(
-                error_type="connection_error",
-                message="Ollama Service nicht erreichbar",
-                timestamp=datetime.now().isoformat(),
-                recoverable=True,
-                suggestion="Starte Ollama: sudo systemctl start ollama"
-            )
-        
-        elif isinstance(error, requests.exceptions.HTTPError):
-            return ChatError(
-                error_type="http_error",
-                message=f"HTTP {error.response.status_code}: {error.response.reason}",
-                timestamp=datetime.now().isoformat(),
-                recoverable=False,
-                suggestion="Model nicht gefunden oder Ollama-Fehler"
-            )
-        
-        else:
-            return ChatError(
-                error_type="unknown",
-                message=str(error),
-                timestamp=datetime.now().isoformat(),
-                recoverable=False,
-                suggestion="Prüfe Logs: journalctl -u ollama -n 50"
-            )
 
 
 @router.get("/health")
