@@ -4,10 +4,13 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 import subprocess
 import json
+import logging
 from pathlib import Path
 import psutil
 import requests
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from liara_engine.memory.mood_system import MoodSystem
 from core.gpu_detection import get_gpu_detector
@@ -82,7 +85,7 @@ def parse_ollama_list():
         
         return models
     except Exception as e:
-        print(f"Ollama API error: {e}")
+        logger.error(f"Ollama API error: {e}")
         return None
 
 
@@ -726,13 +729,23 @@ async def chat_with_liara(
             
             # Führe Health Check aus (nur für Admins)
             health_result = await check_system_health(health_component)
-            
+
             if health_result['status'] == 'success':
                 # Erfolgreicher Health Check - direkt zurückgeben
                 return ChatResponse(
                     response=health_result['message'],
                     model_used="system-health",
                     intent="health_check",
+                    action_result=health_result
+                )
+            else:
+                # Health Check selbst fehlgeschlagen - Fehler zurückgeben statt
+                # stillschweigend an den normalen Chat durchzureichen, wo das
+                # LLM sonst einen erfundenen Systemstatus generieren würde
+                return ChatResponse(
+                    response=f"⚠️ Health Check fehlgeschlagen: {health_result.get('message', 'Unbekannter Fehler')}",
+                    model_used="system-health",
+                    intent="health_check_failed",
                     action_result=health_result
                 )
         
