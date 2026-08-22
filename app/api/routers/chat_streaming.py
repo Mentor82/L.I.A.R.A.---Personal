@@ -519,31 +519,35 @@ async def stream_chat(
         enhanced_context += location_context
     
     # ✨ 2. NEU: Add Semantic Context from Neo4j (Top-5 similar concepts)
+    # Gated by memory_enabled too, not just memory *creation* below - if a
+    # user turns "Erinnerung" off, retrieving old memories into context
+    # would still be using memory, just not adding to it.
     relevant_concepts = None
-    try:
-        relevant_concepts = get_relevant_context(
-            user_id=current_user.id,
-            query_text=request.message,
-            limit=5,
-            min_similarity=0.6
-        )
-        
-        if relevant_concepts:
-            enhanced_context += "\n\n### Relevante Erinnerungen (basierend auf früheren Gesprächen):\n"
-            for concept_item in relevant_concepts:
-                concept = concept_item['concept']
-                similarity = concept_item['similarity']
-                mentions = concept_item['mentions']
-                messages = concept_item['related_messages']
-                
-                enhanced_context += f"\n**Konzept: {concept}** (Similarity: {similarity:.2f}, erwähnt: {mentions}x)\n"
-                for msg in messages[:2]:  # Max 2 Messages pro Concept
-                    enhanced_context += f"  - {msg['role']}: {msg['content'][:100]}...\n"
-            
-            logger.info(f"Added {len(relevant_concepts)} relevant concepts to context")
-    except Exception as e:
-        logger.warning(f"Semantic context retrieval failed: {e}")
-        # Continue without semantic context
+    if user_prefs['memory_enabled']:
+        try:
+            relevant_concepts = get_relevant_context(
+                user_id=current_user.id,
+                query_text=request.message,
+                limit=5,
+                min_similarity=0.6
+            )
+
+            if relevant_concepts:
+                enhanced_context += "\n\n### Relevante Erinnerungen (basierend auf früheren Gesprächen):\n"
+                for concept_item in relevant_concepts:
+                    concept = concept_item['concept']
+                    similarity = concept_item['similarity']
+                    mentions = concept_item['mentions']
+                    messages = concept_item['related_messages']
+
+                    enhanced_context += f"\n**Konzept: {concept}** (Similarity: {similarity:.2f}, erwähnt: {mentions}x)\n"
+                    for msg in messages[:2]:  # Max 2 Messages pro Concept
+                        enhanced_context += f"  - {msg['role']}: {msg['content'][:100]}...\n"
+
+                logger.info(f"Added {len(relevant_concepts)} relevant concepts to context")
+        except Exception as e:
+            logger.warning(f"Semantic context retrieval failed: {e}")
+            # Continue without semantic context
     
     # 3. Check for Web Search Intent
     web_search_result = None

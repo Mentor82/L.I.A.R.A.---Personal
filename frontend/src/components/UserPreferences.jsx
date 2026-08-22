@@ -120,7 +120,14 @@ function UserPreferences() {
       })
 
       if (response.ok) {
-        setMessage({ type: 'success', text: 'Erinnerungen wurden gelöscht.' })
+        const data = await response.json()
+        if (data.complete) {
+          setMessage({ type: 'success', text: 'Erinnerungen wurden gelöscht.' })
+        } else {
+          // Partial deletion (e.g. Postgres cleared but Neo4j unreachable) -
+          // safe to just try again, deleting an already-empty store is a no-op
+          setMessage({ type: 'error', text: 'Erinnerungen wurden nur teilweise gelöscht. Bitte erneut versuchen.' })
+        }
       } else {
         setMessage({ type: 'error', text: 'Fehler beim Löschen der Erinnerungen' })
       }

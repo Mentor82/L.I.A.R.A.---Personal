@@ -10,7 +10,7 @@ against a route that was never implemented - none of these settings actually
 persisted.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel, Field
@@ -105,6 +105,7 @@ def update_preferences(
 
 @router.delete("/memories")
 def delete_memories(
+    response: Response,
     confirm: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -114,23 +115,50 @@ def delete_memories(
     nodes) and the semantic_metadata/temporal_index rows in Postgres.
     Does not touch chat_sessions/chat_messages themselves (that's the
     separate DSGVO "delete all data" action) or search history.
+
+    Postgres and Neo4j are separate stores with no shared transaction, so
+    one can succeed while the other fails. Rather than a blanket 500 that
+    would hide a real partial deletion, both outcomes are reported
+    explicitly; the call is safe to retry (deleting an already-empty store
+    is a no-op).
     """
     if not confirm:
         raise HTTPException(status_code=400, detail="Confirmation required. Set confirm=true")
 
+    postgres_deleted = False
+    postgres_error = None
     try:
         db.execute(text("DELETE FROM semantic_metadata WHERE user_id = :user_id"), {"user_id": current_user.id})
         db.execute(text("DELETE FROM temporal_index WHERE user_id = :user_id"), {"user_id": current_user.id})
         db.commit()
+        postgres_deleted = True
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete memory metadata: {str(e)}")
+        postgres_error = str(e)
 
-    neo4j_deleted = 0
+    neo4j_deleted = False
+    neo4j_nodes_deleted = 0
+    neo4j_error = None
     try:
         neo4j = get_neo4j_service()
-        neo4j_deleted = neo4j.delete_user_memory(current_user.id)
+        neo4j_nodes_deleted = neo4j.delete_user_memory(current_user.id)
+        neo4j_deleted = True
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete graph memory: {str(e)}")
+        neo4j_error = str(e)
 
-    return {"success": True, "message": "Erinnerungen wurden gelöscht", "neo4j_nodes_deleted": neo4j_deleted}
+    complete = postgres_deleted and neo4j_deleted
+    response.status_code = 200 if complete else 207
+
+    result = {
+        "success": complete,
+        "complete": complete,
+        "postgres_deleted": postgres_deleted,
+        "neo4j_deleted": neo4j_deleted,
+        "neo4j_nodes_deleted": neo4j_nodes_deleted,
+        "message": "Erinnerungen wurden gelöscht" if complete else "Erinnerungen wurden nur teilweise gelöscht - bitte erneut versuchen",
+    }
+    if postgres_error:
+        result["postgres_error"] = postgres_error
+    if neo4j_error:
+        result["neo4j_error"] = neo4j_error
+    return result
