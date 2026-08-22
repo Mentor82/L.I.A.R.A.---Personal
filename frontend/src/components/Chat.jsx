@@ -173,7 +173,16 @@ function Chat() {
           // keeps showing that account's cached sessions indefinitely,
           // since nothing else would ever clear them for an account
           // that genuinely has zero sessions of its own.
-          const freshSession = { id: Date.now(), title: 'Neue Konversation', messages: [], timestamp: new Date().toISOString() };
+          //
+          // This must be a real DB session, not a client-only Date.now()
+          // id: saveMessageToDB() posts to /chat/messages/ with the active
+          // session's id, and that endpoint 404s (silently, since the
+          // failure is only logged, never surfaced) when the id doesn't
+          // exist in chat_sessions - so a fake local id would let a user's
+          // very first conversation look fine in the UI while never
+          // actually being persisted.
+          const dbSession = await createChatSession('Neue Konversation');
+          const freshSession = { id: dbSession.id, title: dbSession.title, messages: [], timestamp: dbSession.created_at };
           setChatSessions([freshSession]);
           setActiveSessionId(freshSession.id);
         }
