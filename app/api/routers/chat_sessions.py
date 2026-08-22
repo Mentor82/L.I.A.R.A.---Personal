@@ -305,16 +305,25 @@ async def delete_chat_session(
     db: Session = Depends(get_db)
 ):
     """
-    Session löschen (inkl. aller Messages via CASCADE)
+    Session löschen (inkl. aller Messages)
     """
-    result = db.execute(text("""
-        DELETE FROM chat_sessions
-        WHERE id = :session_id AND user_id = :user_id
-        RETURNING id
-    """), {'session_id': session_id, 'user_id': current_user.id})
-    db.commit()
-    
-    if not result.first():
+    owned = db.execute(text("""
+        SELECT id FROM chat_sessions WHERE id = :session_id AND user_id = :user_id
+    """), {'session_id': session_id, 'user_id': current_user.id}).first()
+
+    if not owned:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # No ON DELETE CASCADE on chat_messages.session_id, so messages must be
+    # removed explicitly before the session, or the FK constraint rejects it.
+    db.execute(text("""
+        DELETE FROM chat_messages WHERE session_id = :session_id
+    """), {'session_id': session_id})
+
+    db.execute(text("""
+        DELETE FROM chat_sessions WHERE id = :session_id
+    """), {'session_id': session_id})
+
+    db.commit()
     
     return {"message": "Session deleted successfully"}
