@@ -24,6 +24,7 @@ const NotesFileManager = () => {
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState(null);
 
   useEffect(() => {
     fetchNotes();
@@ -229,14 +230,19 @@ const NotesFileManager = () => {
     setShowModal(true);
   };
 
-  const handleDeleteNote = async (id) => {
-    if (!confirm('Notiz wirklich löschen?')) return;
-    
+  const handleDeleteNote = (note) => {
+    setNoteToDelete(note);
+  };
+
+  const confirmDeleteNote = async () => {
+    if (!noteToDelete) return;
     try {
-      await notesAPI.delete(id);
+      await notesAPI.delete(noteToDelete.id);
       fetchNotes();
     } catch (error) {
       console.error('Error deleting note:', error);
+    } finally {
+      setNoteToDelete(null);
     }
   };
 
@@ -455,7 +461,7 @@ const NotesFileManager = () => {
                     </button>
                     <button
                       className="action-btn delete"
-                      onClick={() => handleDeleteNote(note.id)}
+                      onClick={() => handleDeleteNote(note)}
                       title="Löschen"
                     >
                       🗑️
@@ -602,6 +608,33 @@ const NotesFileManager = () => {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal - not window.confirm(), which some
+          browsers silently suppress after repeated dialogs, leaving the
+          delete button looking like it does nothing */}
+      {noteToDelete && (
+        <div className="modal-overlay" onClick={() => setNoteToDelete(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Notiz löschen?</h3>
+              <button className="modal-close" onClick={() => setNoteToDelete(null)}>
+                ×
+              </button>
+            </div>
+            <div style={{ padding: '0 2rem 1.5rem' }}>
+              <p>Möchtest du "<strong>{noteToDelete.title}</strong>" wirklich löschen?</p>
+            </div>
+            <div className="modal-actions" style={{ padding: '0 2rem 2rem' }}>
+              <button type="button" className="btn-cancel" onClick={() => setNoteToDelete(null)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmDeleteNote}>
+                Löschen
+              </button>
             </div>
           </div>
         </div>
