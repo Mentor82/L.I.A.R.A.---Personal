@@ -31,6 +31,9 @@ def create_note(
     - **category**: Kategorie (optional)
     - **tags**: Liste von Tags (optional)
     """
+    if note.parent_id is not None:
+        _get_owned_note(db, note.parent_id, current_user)  # 404s if missing/not owned
+
     db_note = Note(**note.model_dump(), user_id=current_user.id)
     db.add(db_note)
     db.commit()
@@ -232,36 +235,68 @@ def get_tags(db: Session = Depends(get_db), current_user: User = Depends(require
     return sorted(list(all_tags))
 
 
+def _get_owned_note(db: Session, note_id: int, current_user: User) -> Note:
+    """
+    Lade eine Notiz, beschränkt auf die des aktuellen Users (Admins sehen alle).
+    Wirft 404 sowohl wenn die Notiz nicht existiert als auch wenn sie einem
+    anderen User gehört - ein 403 würde stattdessen verraten, dass die ID
+    existiert, nur eben nicht einem selbst gehört.
+    """
+    query = db.query(Note).filter(Note.id == note_id)
+    if current_user.role != UserRole.ADMIN:
+        query = query.filter(Note.user_id == current_user.id)
+    note = query.first()
+    if not note:
+        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
+    return note
+
+
 @router.get("/{note_id}", response_model=NoteResponse)
 def get_note(note_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_user_or_admin)):
     """
     Hole eine einzelne Notiz per ID.
     """
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    if current_user.role != UserRole.ADMIN and note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return note
+    return _get_owned_note(db, note_id, current_user)
 
 
 @router.put("/{note_id}", response_model=NoteResponse)
 def update_note(note_id: int, note_update: NoteUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_user_or_admin)):
     """
     Update eine Notiz.
-    
+
     Alle Felder sind optional - nur angegebene Felder werden aktualisiert.
     """
-    db_note = db.query(Note).filter(Note.id == note_id).first()
-    if not db_note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    if current_user.role != UserRole.ADMIN and db_note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_note = _get_owned_note(db, note_id, current_user)
+
     update_data = note_update.model_dump(exclude_unset=True)
+
+    if "parent_id" in update_data and update_data["parent_id"] is not None:
+        new_parent_id = update_data["parent_id"]
+        if new_parent_id == note_id:
+            raise HTTPException(status_code=400, detail="Eine Notiz kann nicht ihr eigener Parent sein")
+
+        parent_note = _get_owned_note(db, new_parent_id, current_user)
+
+        # Ancestor-Kette hochlaufen: taucht note_id dabei auf, ist note_id ein
+        # Vorfahre von parent_note - der neue Parent würde einen Zyklus bilden.
+        visited = set()
+        current = parent_note
+        while current.parent_id is not None:
+            if current.parent_id == note_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ziel-Parent ist eine eigene Unternotiz - würde einen Zyklus erzeugen"
+                )
+            if current.parent_id in visited:
+                break  # Absicherung gegen eine bereits bestehende Zyklus-Altlast
+            visited.add(current.parent_id)
+            current = db.query(Note).filter(Note.id == current.parent_id).first()
+            if current is None:
+                break
+
     for field, value in update_data.items():
         setattr(db_note, field, value)
-    
+
     db.commit()
     db.refresh(db_note)
     return db_note
@@ -272,13 +307,7 @@ def delete_note(note_id: int, db: Session = Depends(get_db), current_user: User 
     """
     Lösche eine Notiz.
     """
-    db_note = db.query(Note).filter(Note.id == note_id).first()
-    if not db_note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    if current_user.role != UserRole.ADMIN and db_note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    
+    db_note = _get_owned_note(db, note_id, current_user)
     db.delete(db_note)
     db.commit()
     return None
@@ -289,14 +318,7 @@ def pin_note(note_id: int, db: Session = Depends(get_db), current_user: User = D
     """
     Pinne eine Notiz (oben in der Liste).
     """
-    db_note = db.query(Note).filter(Note.id == note_id).first()
-    if not db_note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_note = _get_owned_note(db, note_id, current_user)
     db_note.is_pinned = True
     db.commit()
     db.refresh(db_note)
@@ -308,14 +330,7 @@ def unpin_note(note_id: int, db: Session = Depends(get_db), current_user: User =
     """
     Entferne Pin von einer Notiz.
     """
-    db_note = db.query(Note).filter(Note.id == note_id).first()
-    if not db_note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_note = _get_owned_note(db, note_id, current_user)
     db_note.is_pinned = False
     db.commit()
     db.refresh(db_note)
@@ -327,14 +342,7 @@ def archive_note(note_id: int, db: Session = Depends(get_db), current_user: User
     """
     Archiviere eine Notiz.
     """
-    db_note = db.query(Note).filter(Note.id == note_id).first()
-    if not db_note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_note = _get_owned_note(db, note_id, current_user)
     db_note.is_archived = True
     db.commit()
     db.refresh(db_note)
@@ -346,14 +354,7 @@ def unarchive_note(note_id: int, db: Session = Depends(get_db), current_user: Us
     """
     Hole Notiz aus Archiv zurück.
     """
-    db_note = db.query(Note).filter(Note.id == note_id).first()
-    if not db_note:
-        raise HTTPException(status_code=404, detail=f"Note {note_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_note.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_note = _get_owned_note(db, note_id, current_user)
     db_note.is_archived = False
     db.commit()
     db.refresh(db_note)

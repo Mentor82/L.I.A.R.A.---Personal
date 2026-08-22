@@ -138,8 +138,7 @@ class Note(Base):
     # delete followed that inverted "children" attribute, deleting any note
     # silently cascade-deleted its PARENT (and ancestors) instead of its
     # descendants - confirmed via a rolled-back DB test. `delete-orphan` now
-    # correctly cascades downward, matching what NotesTree.jsx's delete
-    # confirmation ("... und alle Unternotizen wirklich löschen?") expects.
+    # correctly cascades downward to descendants instead.
     children = relationship(
         "Note",
         backref=backref("parent", remote_side=[id]),
