@@ -62,10 +62,53 @@ function CalendarView() {
     }
   };
 
+  // Date range actually visible for the current view, so fetchEvents can
+  // scope its query instead of relying on the backend's default
+  // limit=100 (ordered earliest-first) - previously the fetch never
+  // passed any date filter at all, so once a user passed ~100 total
+  // events (across all history), events in later months would silently
+  // stop appearing because they fell outside that fixed 100-event window.
+  const getVisibleRange = () => {
+    if (view === 'day') {
+      const start = new Date(currentDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(currentDate);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+
+    if (view === 'week') {
+      const start = getWeekStart(currentDate);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+
+    // Month view: matches generateCalendarDays()'s 42-cell (6-week) grid
+    // exactly, so days from the adjacent month shown in the grid are
+    // covered too.
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const firstDayOfWeek = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+    const start = new Date(year, month, 1 - firstDayOfWeek);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 41);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  };
+
   const fetchEvents = async () => {
     setLoading(true);
     try {
-      const data = await calendarAPI.getAll();
+      const { start, end } = getVisibleRange();
+      const data = await calendarAPI.getAll({
+        start_date: toLocalDateTimeInput(start),
+        end_date: toLocalDateTimeInput(end),
+        limit: 500,
+      });
       setEvents(data.events || []);
     } catch (error) {
       console.error('Failed to fetch events:', error);

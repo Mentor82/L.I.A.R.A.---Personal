@@ -96,12 +96,15 @@ def get_events(
     if current_user.role != UserRole.ADMIN:
         query = query.filter(CalendarEvent.user_id == current_user.id)
     
-    # Apply date filters
+    # Apply date filters - overlap with [start_date, end_date], not
+    # "fully contained within" it, so an event that starts before the
+    # range but extends into it (or vice versa) still matches instead of
+    # silently vanishing from the view.
     if start_date:
-        query = query.filter(CalendarEvent.start_time >= start_date)
-    
+        query = query.filter(CalendarEvent.end_time >= start_date)
+
     if end_date:
-        query = query.filter(CalendarEvent.end_time <= end_date)
+        query = query.filter(CalendarEvent.start_time <= end_date)
     
     if event_type:
         query = query.filter(CalendarEvent.event_type == event_type)
