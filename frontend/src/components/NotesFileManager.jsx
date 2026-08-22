@@ -23,6 +23,7 @@ const NotesFileManager = () => {
   const [sortBy, setSortBy] = useState('date-desc'); // date-desc, date-asc, title-asc, category
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     fetchNotes();
@@ -259,17 +260,19 @@ const NotesFileManager = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const fullCategory = formData.subcategory 
+    if (isSubmitting) return;
+
+    const fullCategory = formData.subcategory
       ? `${formData.category}/${formData.subcategory}`.replace(/^\/+|\/+$/g, '')
       : formData.category;
-    
+
     const noteData = {
       title: formData.title,
       content: formData.content,
       category: fullCategory
     };
 
+    setIsSubmitting(true);
     try {
       if (modalMode === 'create') {
         await notesAPI.create(noteData);
@@ -280,6 +283,8 @@ const NotesFileManager = () => {
       fetchNotes();
     } catch (error) {
       console.error('Error saving note:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -542,11 +547,13 @@ const NotesFileManager = () => {
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>
+                <button type="button" className="btn-cancel" onClick={() => setShowModal(false)} disabled={isSubmitting}>
                   Abbrechen
                 </button>
-                <button type="submit" className="btn-save">
-                  {modalMode === 'create' ? 'Erstellen' : 'Speichern'}
+                <button type="submit" className="btn-save" disabled={isSubmitting}>
+                  {isSubmitting
+                    ? (modalMode === 'create' ? 'Erstelle...' : 'Speichere...')
+                    : (modalMode === 'create' ? 'Erstellen' : 'Speichern')}
                 </button>
               </div>
             </form>
