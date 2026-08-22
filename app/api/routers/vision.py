@@ -3,7 +3,7 @@
 Endpoints für Bild-Upload und multimodale Analyse
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 import base64
@@ -130,9 +130,9 @@ async def analyze_image(
 @router.post("/detect", response_model=VisionDetectResponse)
 async def detect_image(
     file: UploadFile = File(...),
-    backend: str = "hailo",
-    model: str = "yolov8n",
-    score_threshold: float = 0.25,
+    backend: str = Form("hailo"),
+    model: str = Form("yolov8n"),
+    score_threshold: float = Form(0.25),
     current_user: User = Depends(require_active_user)
 ):
     """
