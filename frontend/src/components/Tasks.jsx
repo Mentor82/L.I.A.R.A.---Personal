@@ -217,6 +217,18 @@ function Tasks() {
   });
   const [mood, setMood] = useState(null);
   const [availableLists] = useState(['Allgemein', 'Arbeit', 'Privat', 'Urlaub', 'Einkaufen', 'Gesundheit']);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [taskToDelete, setTaskToDelete] = useState(null);
+
+  // Format a Date as "YYYY-MM-DDTHH:MM" using its LOCAL fields, for
+  // datetime-local inputs. toISOString() converts to UTC first, which
+  // shifts the displayed/sent time by the timezone offset (same bug
+  // already fixed in CalendarView.jsx).
+  const toLocalDateTimeInput = (date) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
 
   useEffect(() => {
     fetchTasks();
@@ -247,11 +259,23 @@ function Tasks() {
   const fetchTasks = async () => {
     setLoading(true);
     try {
-      const filters = {};
-      if (filter === 'pending') filters.completed = false;
-      if (filter === 'completed') filters.completed = true;
-      
-      const data = await tasksAPI.getAll(filters);
+      // "today"/"week" have their own server-side endpoints (already
+      // correctly filtered by due_date) - using them instead of getAll()
+      // avoids the same pagination cliff already fixed in the calendar:
+      // getAll() defaults to the 100 most-recently-created tasks, so an
+      // older-but-still-due task could silently fall outside that window
+      // and never show up in these views.
+      let data;
+      if (filter === 'today') {
+        data = await tasksAPI.getDaily();
+      } else if (filter === 'week') {
+        data = await tasksAPI.getWeekly();
+      } else {
+        const filters = { limit: 500 };
+        if (filter === 'pending') filters.completed = false;
+        if (filter === 'completed') filters.completed = true;
+        data = await tasksAPI.getAll(filters);
+      }
       setTasks(data.tasks || []);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
@@ -286,7 +310,7 @@ function Tasks() {
       fetchTasks();
     } catch (error) {
       console.error('Failed to create task:', error);
-      alert('Fehler beim Erstellen: ' + error.message);
+      setErrorMessage('Fehler beim Erstellen: ' + error.message);
     }
   };
 
@@ -308,15 +332,24 @@ function Tasks() {
     }
   };
 
-  const handleDelete = async (taskId) => {
-    if (!confirm('Aufgabe wirklich löschen?')) return;
+  const handleDelete = (taskId) => {
+    const task = tasks.find(t => t.id === taskId);
+    setTaskToDelete(task || { id: taskId, title: `Aufgabe #${taskId}` });
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!taskToDelete) return;
+    const taskId = taskToDelete.id;
     try {
       await tasksAPI.delete(taskId);
       setTasks(tasks.filter(t => t.id !== taskId));
       await fetchTasks();
     } catch (error) {
       console.error('Failed to delete task:', error);
+      setErrorMessage('Fehler beim Löschen: ' + error.message);
       await fetchTasks();
+    } finally {
+      setTaskToDelete(null);
     }
   };
 
@@ -326,7 +359,7 @@ function Tasks() {
     setEditingTask({
       ...task,
       list,
-      due_date: task.due_date ? new Date(task.due_date).toISOString().slice(0, 16) : '',
+      due_date: task.due_date ? toLocalDateTimeInput(new Date(task.due_date)) : '',
       tags: task.tags || []
     });
     setShowCreateForm(false);
@@ -352,35 +385,38 @@ function Tasks() {
       fetchTasks();
     } catch (error) {
       console.error('Failed to update task:', error);
-      alert('Fehler beim Aktualisieren: ' + error.message);
+      setErrorMessage('Fehler beim Aktualisieren: ' + error.message);
     }
   };
 
   const createCalendarEventFromTask = async (taskId) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task || !task.due_date) {
-      alert('Diese Aufgabe hat kein Fälligkeitsdatum. Bitte füge erst ein Datum hinzu.');
+      setErrorMessage('Diese Aufgabe hat kein Fälligkeitsdatum. Bitte füge erst ein Datum hinzu.');
       return;
     }
 
     try {
       const dueDate = new Date(task.due_date);
+      // Same naive-local convention CalendarView.jsx's own create flow
+      // uses - toISOString() here would convert to UTC first and shift
+      // the event by the timezone offset.
       const eventData = {
         title: `📋 ${task.title}`,
         description: task.description || '',
-        start_time: dueDate.toISOString(),
-        end_time: new Date(dueDate.getTime() + 60 * 60 * 1000).toISOString(),
+        start_time: toLocalDateTimeInput(dueDate),
+        end_time: toLocalDateTimeInput(new Date(dueDate.getTime() + 60 * 60 * 1000)),
         event_type: 'other',
         all_day: false,
         location: ''
       };
 
       await calendarAPI.create(eventData);
-      alert(`✅ Kalendereintrag "${task.title}" erstellt!`);
-      
+      setSuccessMessage(`✅ Kalendereintrag "${task.title}" erstellt!`);
+
     } catch (error) {
       console.error('Failed to create calendar event:', error);
-      alert('Fehler beim Erstellen des Kalendereintrags: ' + error.message);
+      setErrorMessage('Fehler beim Erstellen des Kalendereintrags: ' + error.message);
     }
   };
 
@@ -465,6 +501,16 @@ function Tasks() {
 
   return (
     <div className="tasks-container">
+      {errorMessage && (
+        <div className="tasks-error-banner" onClick={() => setErrorMessage('')}>
+          ⚠️ {errorMessage} <span className="tasks-banner-dismiss">✕</span>
+        </div>
+      )}
+      {successMessage && (
+        <div className="tasks-success-banner" onClick={() => setSuccessMessage('')}>
+          {successMessage} <span className="tasks-banner-dismiss">✕</span>
+        </div>
+      )}
       <div className="tasks-header">
         <div className="header-left">
           <h2>✅ Aufgaben</h2>
@@ -683,6 +729,33 @@ function Tasks() {
           <div className="stat-item">
             <span className="stat-label">Erledigt:</span>
             <span className="stat-value">{tasks.filter(t => t.completed).length}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal - not window.confirm(), which some
+          browsers silently suppress after repeated dialogs, leaving the
+          delete button looking like it does nothing */}
+      {taskToDelete && (
+        <div className="task-modal-overlay" onClick={() => setTaskToDelete(null)}>
+          <div className="task-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Aufgabe löschen?</h3>
+              <button type="button" className="modal-close-btn" onClick={() => setTaskToDelete(null)}>
+                ✕
+              </button>
+            </div>
+            <div style={{ padding: '0 1.5rem 1.5rem' }}>
+              <p>Möchtest du "<strong>{taskToDelete.title}</strong>" wirklich löschen?</p>
+            </div>
+            <div className="form-actions" style={{ padding: '0 1.5rem 1.5rem' }}>
+              <button type="button" className="btn-secondary" onClick={() => setTaskToDelete(null)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmDeleteTask}>
+                Löschen
+              </button>
+            </div>
           </div>
         </div>
       )}

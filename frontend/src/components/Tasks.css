@@ -321,6 +321,51 @@
   background: var(--bg-active);
 }
 
+.btn-danger {
+  flex: 1;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  background: #e53e3e;
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: #c53030;
+}
+
+.tasks-error-banner,
+.tasks-success-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.tasks-error-banner {
+  background: rgba(229, 62, 62, 0.15);
+  color: #ff8080;
+  border: 1px solid rgba(229, 62, 62, 0.3);
+}
+
+.tasks-success-banner {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.tasks-banner-dismiss {
+  opacity: 0.7;
+}
+
 /* Modern Task Cards List */
 .tasks-list-modern {
   flex: 1;

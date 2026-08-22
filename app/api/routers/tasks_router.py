@@ -196,47 +196,48 @@ def get_weekly_tasks(
     }
 
 
+def _get_owned_task(db: Session, task_id: int, current_user: User) -> Task:
+    """
+    Lade eine Aufgabe, beschränkt auf die des aktuellen Users (Admins sehen
+    alle). Wirft 404 sowohl wenn die Aufgabe nicht existiert als auch wenn
+    sie einem anderen User gehört - ein 403 würde stattdessen verraten,
+    dass die ID existiert, nur eben nicht einem selbst gehört.
+    """
+    query = db.query(Task).filter(Task.id == task_id)
+    if current_user.role != UserRole.ADMIN:
+        query = query.filter(Task.user_id == current_user.id)
+    task = query.first()
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return task
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_user_or_admin)):
     """
     Hole eine einzelne Aufgabe per ID.
     """
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    # Check ownership (admins can access all)
-    if current_user.role != UserRole.ADMIN and task.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return task
+    return _get_owned_task(db, task_id, current_user)
 
 
 @router.put("/{task_id}", response_model=TaskResponse)
 def update_task(
-    task_id: int, 
-    task_update: TaskUpdate, 
+    task_id: int,
+    task_update: TaskUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user_or_admin)
 ):
     """
     Update eine Aufgabe.
-    
+
     Alle Felder sind optional - nur angegebene Felder werden aktualisiert.
     """
-    db_task = db.query(Task).filter(Task.id == task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_task.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Update nur die angegebenen Felder
+    db_task = _get_owned_task(db, task_id, current_user)
+
     update_data = task_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_task, field, value)
-    
+
     db.commit()
     db.refresh(db_task)
     return db_task
@@ -244,21 +245,14 @@ def update_task(
 
 @router.delete("/{task_id}", status_code=204)
 def delete_task(
-    task_id: int, 
+    task_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_user_or_admin)
 ):
     """
     Lösche eine Aufgabe.
     """
-    db_task = db.query(Task).filter(Task.id == task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_task.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_task = _get_owned_task(db, task_id, current_user)
     db.delete(db_task)
     db.commit()
     return None
@@ -269,14 +263,7 @@ def complete_task(task_id: int, db: Session = Depends(get_db), current_user: Use
     """
     Markiere eine Aufgabe als erledigt.
     """
-    db_task = db.query(Task).filter(Task.id == task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_task.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_task = _get_owned_task(db, task_id, current_user)
     db_task.completed = True
     db.commit()
     db.refresh(db_task)
@@ -288,14 +275,7 @@ def uncomplete_task(task_id: int, db: Session = Depends(get_db), current_user: U
     """
     Markiere eine erledigte Aufgabe als offen.
     """
-    db_task = db.query(Task).filter(Task.id == task_id).first()
-    if not db_task:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
-    # Check ownership
-    if current_user.role != UserRole.ADMIN and db_task.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_task = _get_owned_task(db, task_id, current_user)
     db_task.completed = False
     db.commit()
     db.refresh(db_task)
