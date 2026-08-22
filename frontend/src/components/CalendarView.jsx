@@ -20,6 +20,8 @@ function CalendarView() {
     all_day: false
   });
   const [mood, setMood] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [eventToDelete, setEventToDelete] = useState(null);
 
   useEffect(() => {
     fetchEvents();
@@ -97,13 +99,17 @@ function CalendarView() {
       fetchEvents();
     } catch (error) {
       console.error('Failed to save event:', error);
-      alert('Fehler beim Speichern: ' + error.message);
+      setErrorMessage('Fehler beim Speichern: ' + error.message);
     }
   };
 
-  const handleDelete = async (eventId) => {
-    if (!confirm('Event wirklich löschen?')) return;
-    
+  const handleDelete = (event) => {
+    setEventToDelete(event);
+  };
+
+  const confirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
+    const eventId = eventToDelete.id;
     try {
       await calendarAPI.delete(eventId);
       setEvents(events.filter(e => e.id !== eventId));
@@ -112,6 +118,9 @@ function CalendarView() {
       setEditingEvent(null);
     } catch (error) {
       console.error('Failed to delete event:', error);
+      setErrorMessage('Fehler beim Löschen: ' + error.message);
+    } finally {
+      setEventToDelete(null);
     }
   };
 
@@ -432,6 +441,11 @@ function CalendarView() {
 
   return (
     <div className="calendar-view-container">
+      {errorMessage && (
+        <div className="calendar-error-banner" onClick={() => setErrorMessage('')}>
+          ⚠️ {errorMessage} <span className="calendar-error-dismiss">✕</span>
+        </div>
+      )}
       {/* Header */}
       <div className="calendar-header">
         <div className="calendar-title">
@@ -873,7 +887,7 @@ function CalendarView() {
                       ✏️ Bearbeiten
                     </button>
                     <button
-                      onClick={() => handleDelete(event.id)}
+                      onClick={() => handleDelete(event)}
                       className="btn-delete-event"
                       title="Löschen"
                     >
@@ -890,6 +904,33 @@ function CalendarView() {
       {loading && (
         <div className="loading-overlay">
           <div className="spinner"></div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal - not window.confirm(), which some
+          browsers silently suppress after repeated dialogs, leaving the
+          delete button looking like it does nothing */}
+      {eventToDelete && (
+        <div className="event-modal-overlay" onClick={() => setEventToDelete(null)}>
+          <div className="event-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Termin löschen?</h3>
+              <button type="button" className="modal-close-btn" onClick={() => setEventToDelete(null)}>
+                ✕
+              </button>
+            </div>
+            <div style={{ padding: '0 1.5rem 1.5rem' }}>
+              <p>Möchtest du "<strong>{eventToDelete.title}</strong>" wirklich löschen?</p>
+            </div>
+            <div className="form-actions" style={{ padding: '0 1.5rem 1.5rem' }}>
+              <button type="button" className="btn-cancel" onClick={() => setEventToDelete(null)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmDeleteEvent}>
+                Löschen
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

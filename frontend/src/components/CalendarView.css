@@ -308,6 +308,37 @@
   cursor: pointer;
 }
 
+.btn-danger {
+  padding: 0.75rem 1.5rem;
+  background: #e53e3e;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-danger:hover {
+  background: #c53030;
+}
+
+.calendar-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: rgba(229, 62, 62, 0.15);
+  color: #ff8080;
+  border-bottom: 1px solid rgba(229, 62, 62, 0.3);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.calendar-error-dismiss {
+  opacity: 0.7;
+}
+
 /* Calendar Grid Container */
 .calendar-grid-container {
   flex: 1;

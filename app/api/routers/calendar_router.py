@@ -306,42 +306,53 @@ def get_free_slots(
     }
 
 
+def _get_owned_event(db: Session, event_id: int, current_user: User) -> CalendarEvent:
+    """
+    Lade ein Event, beschränkt auf die des aktuellen Users (Admins sehen alle).
+    Wirft 404 sowohl wenn das Event nicht existiert als auch wenn es einem
+    anderen User gehört - ein 403 würde stattdessen verraten, dass die ID
+    existiert, nur eben nicht einem selbst gehört.
+    """
+    query = db.query(CalendarEvent).filter(CalendarEvent.id == event_id)
+    if current_user.role != UserRole.ADMIN:
+        query = query.filter(CalendarEvent.user_id == current_user.id)
+    event = query.first()
+    if not event:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
+    return event
+
+
 @router.get("/{event_id}", response_model=CalendarEventResponse)
 def get_event(event_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_user_or_admin)):
     """
     Hole ein einzelnes Event per ID.
     """
-    event = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
-    if not event:
-        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
-    if current_user.role != UserRole.ADMIN and event.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    return event
+    return _get_owned_event(db, event_id, current_user)
 
 
 @router.put("/{event_id}", response_model=CalendarEventResponse)
 def update_event(event_id: int, event_update: CalendarEventUpdate, db: Session = Depends(get_db), current_user: User = Depends(require_user_or_admin)):
     """
     Update ein Kalenderevent.
-    
+
     Alle Felder sind optional - nur angegebene Felder werden aktualisiert.
     """
-    db_event = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
-    if not db_event:
-        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
-    if current_user.role != UserRole.ADMIN and db_event.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+    db_event = _get_owned_event(db, event_id, current_user)
+
     update_data = event_update.model_dump(exclude_unset=True)
-    
-    # Validate time relationship if both are being updated
-    if "start_time" in update_data and "end_time" in update_data:
-        if update_data["end_time"] <= update_data["start_time"]:
-            raise HTTPException(status_code=400, detail="end_time must be after start_time")
-    
+
+    # Validate the resulting start/end relationship against whichever of the
+    # two fields isn't part of this update (not just when both are present -
+    # updating only end_time to before the existing, unchanged start_time
+    # previously passed with no validation at all).
+    new_start = update_data.get("start_time", db_event.start_time)
+    new_end = update_data.get("end_time", db_event.end_time)
+    if ("start_time" in update_data or "end_time" in update_data) and new_end <= new_start:
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+
     for field, value in update_data.items():
         setattr(db_event, field, value)
-    
+
     db.commit()
     db.refresh(db_event)
     return db_event
@@ -352,13 +363,7 @@ def delete_event(event_id: int, db: Session = Depends(get_db), current_user: Use
     """
     Lösche ein Kalenderevent.
     """
-    db_event = db.query(CalendarEvent).filter(CalendarEvent.id == event_id).first()
-    if not db_event:
-        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
-    if current_user.role != UserRole.ADMIN and db_event.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    
+    db_event = _get_owned_event(db, event_id, current_user)
     db.delete(db_event)
     db.commit()
     return None
