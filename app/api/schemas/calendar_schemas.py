@@ -14,7 +14,7 @@ class CalendarEventBase(BaseModel):
     start_time: datetime = Field(..., description="Event start time")
     end_time: datetime = Field(..., description="Event end time")
     location: Optional[str] = Field(None, max_length=255, description="Event location")
-    event_type: str = Field("meeting", pattern="^(meeting|reminder|appointment)$", description="Event type")
+    event_type: str = Field("meeting", pattern="^(meeting|private|other)$", description="Event type")
     all_day: bool = Field(False, description="All-day event flag")
     recurrence: Optional[dict] = Field(None, description="Recurrence rules")
     
@@ -39,7 +39,7 @@ class CalendarEventUpdate(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     location: Optional[str] = Field(None, max_length=255)
-    event_type: Optional[str] = Field(None, pattern="^(meeting|reminder|appointment)$")
+    event_type: Optional[str] = Field(None, pattern="^(meeting|private|other)$")
     all_day: Optional[bool] = None
     recurrence: Optional[dict] = None
 

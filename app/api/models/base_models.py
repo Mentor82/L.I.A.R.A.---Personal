@@ -98,7 +98,7 @@ class CalendarEvent(Base):
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)
     location = Column(String(255), nullable=True)
-    event_type = Column(String(50), default="meeting")  # meeting, reminder, appointment
+    event_type = Column(String(50), default="meeting")  # meeting, private, other
     all_day = Column(Boolean, default=False)
     recurrence = Column(JSON, nullable=True)  # {"frequency": "weekly", "interval": 1}
     created_at = Column(DateTime, server_default=func.now())

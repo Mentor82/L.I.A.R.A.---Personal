@@ -35,7 +35,7 @@ def create_event(
     - **end_time**: Endzeit (erforderlich, muss nach start_time sein)
     - **description**: Beschreibung (optional)
     - **location**: Ort (optional)
-    - **event_type**: meeting, reminder, appointment (default: meeting)
+    - **event_type**: meeting, private, other (default: meeting)
     - **all_day**: Ganztägiges Event (default: false)
     - **recurrence**: Wiederholungsregeln (optional)
     """
@@ -74,7 +74,7 @@ def create_event(
 def get_events(
     start_date: Optional[datetime] = Query(None, description="Filter events from this date"),
     end_date: Optional[datetime] = Query(None, description="Filter events until this date"),
-    event_type: Optional[str] = Query(None, pattern="^(meeting|reminder|appointment)$", description="Filter by type"),
+    event_type: Optional[str] = Query(None, pattern="^(meeting|private|other)$", description="Filter by type"),
     search: Optional[str] = Query(None, description="Search in title/description/location"),
     limit: int = Query(100, ge=1, le=500, description="Max results"),
     offset: int = Query(0, ge=0, description="Skip N results"),
@@ -87,7 +87,7 @@ def get_events(
     Filter-Optionen:
     - **start_date**: Events ab diesem Datum
     - **end_date**: Events bis zu diesem Datum
-    - **event_type**: meeting/reminder/appointment
+    - **event_type**: meeting/private/other
     - **search**: Suche in Titel/Beschreibung/Ort
     - **limit**: Anzahl der Ergebnisse (max 500)
     - **offset**: Pagination-Offset
