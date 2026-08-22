@@ -20,7 +20,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-from liara_engine.memory.mood_system import get_mood_system
+from liara_engine.memory.mood_system import MoodSystem
 from liara_engine.memory.short_context import get_memory
 from liara_engine.actions.intent_detector import get_intent_detector
 from liara_engine.actions.action_executor import ActionExecutor
@@ -209,18 +209,20 @@ async def stream_ollama_response(
     web_search_risk_score: Optional[int] = None,
     action_result: Optional[Dict] = None,
     memory_context: Optional[List[Dict]] = None,
-    session_id: Optional[int] = None  # NEW: Session ID for frontend
+    session_id: Optional[int] = None,  # NEW: Session ID for frontend
+    user_id: int = None
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
-    
+
     Yields:
         Server-Sent Event formatted strings
     """
-    # Mood-Detection und System-Prompt
-    mood_system = get_mood_system()
-    interaction_type = mood_system.detect_interaction_type(message)
-    mood_modifier = mood_system.get_system_prompt_modifier()
+    # Mood-Detection und System-Prompt (per-user, DB-backed)
+    mood_system = MoodSystem(user_id)
+    interaction_type = MoodSystem.detect_interaction_type(message)
+    mood_snapshot = mood_system.get_snapshot()
+    mood_modifier = mood_snapshot["modifier"]
     
     # System Prompt mit Mood
     system_prompt = f"""Du bist Liara, eine warmherzige Digitalbegleiterin.
@@ -299,9 +301,9 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
     try:
         # Sende Metadata Event with session_id
         metadata = {
-            'type': 'metadata', 
-            'model': model, 
-            'mood': mood_system.context.current_mood.value
+            'type': 'metadata',
+            'model': model,
+            'mood': mood_snapshot["mood"]
         }
         if session_id:
             metadata['session_id'] = session_id
@@ -367,7 +369,8 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                     pass  # Logging-Fehler ignorieren
                                 
                                 # Update Mood nach Antwort
-                                mood_system.update_mood(interaction_type, intensity=0.5)
+                                if user_id is not None:
+                                    mood_system.update_mood(interaction_type, intensity=0.5)
                                 
                                 yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
                                 break
@@ -448,9 +451,10 @@ async def stream_chat(
     
     # Store user message in 4D Memory BEFORE streaming response
     session_id = f"chat_{current_user.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    mood_system = get_mood_system()
-    current_mood = mood_system.context.current_mood.value
-    energy = getattr(mood_system.context, 'energy_level', 0.7)  # Default if not exists
+    mood_system = MoodSystem(current_user.id)
+    mood_snapshot = mood_system.get_snapshot()
+    current_mood = mood_snapshot["mood"]
+    energy = mood_snapshot["intensity"]
     
     # OPTIMIZATION: Run intent detection in parallel (non-blocking)
     message_lower = request.message.lower()
@@ -689,7 +693,8 @@ async def stream_chat(
             web_search_risk_score=web_search_risk_score,
             action_result=action_result,
             memory_context=relevant_concepts,
-            session_id=session_id  # NEW: Send session_id to frontend
+            session_id=session_id,  # NEW: Send session_id to frontend
+            user_id=current_user.id
         ),
         media_type="text/event-stream",
         headers={
@@ -784,10 +789,15 @@ async def chat_health():
     except:
         pass
     
-    # Check Mood System
-    mood_system = get_mood_system()
-    mood_status = mood_system.get_mood_status()
-    
+    # Check Mood System (system-wide count only - mood itself is per-user now)
+    from core.database import SessionLocal
+    from api.models.mood_state import MoodHistoryEntry
+    db = SessionLocal()
+    try:
+        mood_history_total = db.query(MoodHistoryEntry).count()
+    finally:
+        db.close()
+
     # Check Memory System
     memory = get_memory()
     memory_status = memory.get_summary()
@@ -802,8 +812,8 @@ async def chat_health():
             },
             "mood_system": {
                 "available": True,
-                "current_mood": mood_status["current_mood"],
-                "history_entries": mood_status["history_size"]
+                "scope": "per_user",
+                "history_entries_total": mood_history_total
             },
             "memory_system": {
                 "available": True,

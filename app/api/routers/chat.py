@@ -9,7 +9,7 @@ import psutil
 import requests
 from sqlalchemy.orm import Session
 
-from liara_engine.memory.mood_system import get_mood_system
+from liara_engine.memory.mood_system import MoodSystem
 from core.gpu_detection import get_gpu_detector
 from liara_engine.actions.intent_detector import get_intent_detector
 from liara_engine.actions.action_executor import ActionExecutor
@@ -579,6 +579,7 @@ class ChatResponse(BaseModel):
     backend_fallback_reason: Optional[str] = None  # "vllm_unavailable", etc.
     backend_latency_ms: Optional[float] = None  # Inferenz-Zeit
     backend_power_w: Optional[float] = None  # Geschätzte Power
+    mood: Optional[str] = None  # Aktueller Mood nach dieser Antwort
 
 
 @router.get("/backend-status")
@@ -766,10 +767,10 @@ async def chat_with_liara(
                 elif intent == 'list_notes':
                     action_result = await executor.execute_list_notes(current_user.id)
         
-        # 3. Mood-Detection und Update
-        mood_system = get_mood_system()
-        interaction_type = mood_system.detect_interaction_type(request.message)
-        mood_system.update_mood(interaction_type, intensity=0.5)
+        # 3. Mood-Detection und Update (per-user, DB-backed)
+        mood_system = MoodSystem(current_user.id)
+        interaction_type = MoodSystem.detect_interaction_type(request.message)
+        new_mood = mood_system.update_mood(interaction_type, intensity=0.5)
         
         # 4. Wenn Aktion erfolgreich: Bestätigungsnachricht
         if action_result and action_result.get('success'):
@@ -777,7 +778,8 @@ async def chat_with_liara(
                 response=action_result['message'],
                 model_used=request.model or "llama3.2:3b",
                 intent=intent,
-                action_result=action_result
+                action_result=action_result,
+                mood=new_mood.value
             )
         
         # === 4b. HAILO BACKEND ROUTER INTEGRATION ===
@@ -932,7 +934,8 @@ async def chat_with_liara(
             backend_fallback=backend_fallback,
             backend_fallback_reason="primary_unavailable" if backend_fallback else None,
             backend_latency_ms=selection_result.latency_ms if selection_result else None,
-            backend_power_w=selection_result.estimated_power_w if selection_result else None
+            backend_power_w=selection_result.estimated_power_w if selection_result else None,
+            mood=new_mood.value
         )
         
     except ImportError:

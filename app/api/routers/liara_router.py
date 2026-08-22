@@ -8,7 +8,7 @@ import platform
 import requests
 import time
 
-from liara_engine.memory.mood_system import get_mood_system
+from liara_engine.memory.mood_system import default_mood_snapshot
 
 router = APIRouter(
     prefix="/liara",
@@ -167,12 +167,13 @@ def liara_persona():
     
     Exponiert Liara's vollständige Identität mit:
     - Versionierung & Changelog
-    - Live Mood-Status Integration
+    - Baseline Mood-Status (Mood ist jetzt pro User - dieser Endpoint ist
+      unauthentifiziert und zeigt daher nur die neutrale Baseline, keine
+      Live-Mood eines bestimmten Users)
     - Trait-Modifiers
     """
-    mood_system = get_mood_system()
-    mood_status = mood_system.get_mood_status()
-    
+    mood_status = default_mood_snapshot()
+
     return {
         "name": "Liara",
         "identity": "Digitalbegleiterin & Persönliche Assistentin",
