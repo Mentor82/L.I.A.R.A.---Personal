@@ -125,6 +125,26 @@ class Neo4jGraphService:
             session.run(query, user_id=user_id, content_id=content_id, properties=properties)
             logger.debug(f"Created {content_type} node: {content_id}")
     
+    def delete_user_memory(self, user_id: int) -> int:
+        """
+        Delete all graph memory for a user (Concept/Message/Task/Note/Event/
+        Mood/User nodes and their relationships) - used by the "Erinnerungen
+        löschen" preference action. All node types created by this service
+        carry a user_id property regardless of label, so a single property
+        match covers them without needing to enumerate every label.
+
+        Returns the number of nodes deleted.
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (n {user_id: $user_id})
+                DETACH DELETE n
+                RETURN count(n) as deleted
+            """, user_id=user_id)
+            deleted = result.single()["deleted"]
+            logger.info(f"Deleted {deleted} Neo4j nodes for user {user_id}")
+            return deleted
+
     def create_mood_node(self, user_id: int, timestamp: str, mood: str, energy_level: int,
                         properties: Optional[Dict] = None):
         """Create mood node and link to user"""

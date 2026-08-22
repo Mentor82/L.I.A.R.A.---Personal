@@ -34,6 +34,8 @@ from services.embedding_service import get_embedding_service
 from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
+from services.user_preferences_service import get_user_preferences
+from liara_engine.personality import get_personality_prompt
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -214,7 +216,9 @@ async def stream_ollama_response(
     memory_context: Optional[List[Dict]] = None,
     session_id: Optional[int] = None,  # NEW: Session ID for frontend
     user_id: int = None,
-    username: Optional[str] = None
+    username: Optional[str] = None,
+    personality: Optional[str] = None,
+    custom_instructions: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -238,6 +242,8 @@ Deine Art zu kommunizieren:
 - Ruhig und stabilisierend
 
 Aktueller Mood-Modifier: {mood_modifier}
+
+Persönlichkeit: {get_personality_prompt(personality)}
 
 WICHTIG - Formatierung deiner Antworten (Markdown):
 Formatiere deine Antworten automatisch je nach Inhalt:
@@ -285,6 +291,8 @@ WICHTIG - Bei fehlenden Standort-Daten:
 Wenn ein User nach Wetter fragt aber KEIN Standort verfügbar ist (weder in der Frage noch gespeichert),
 frage freundlich nach: "Für welchen Ort möchtest du die Wettervorhersage wissen?" 
 Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (mit Consent).
+
+{f"Individuelle Anweisungen von {username}:" + chr(10) + custom_instructions if custom_instructions else ''}
 
 {context or ''}
 """
@@ -451,6 +459,9 @@ async def stream_chat(
             session_id=request.session_id
         )
     
+    # Per-User Preferences: Personality, Individuelle Anweisungen, Memory-Opt-in
+    user_prefs = get_user_preferences(db, current_user.id)
+
     # Store user message in 4D Memory BEFORE streaming response
     session_id = f"chat_{current_user.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     mood_system = MoodSystem(current_user.id)
@@ -633,52 +644,60 @@ async def stream_chat(
         db.commit()
         
         logger.info(f"Created message {message_id} for user {current_user.id} in session {session_id}")
-        
-        # ✨ NEU: Store in Neo4j with auto-concept extraction (sync für Testing)
-        try:
-            store_message_with_concepts(
-                user_id=current_user.id,
-                message_id=message_id,
-                content=request.message,
-                role='user',
-                timestamp=datetime.utcnow()
-            )
-            logger.info(f"Stored concepts for message {message_id}")
-        except Exception as e:
-            logger.error(f"Concept extraction failed: {e}")
-        
-        # Store in 4D Memory ASYNC (non-blocking) - don't wait for completion
-        import threading
-        
-        def store_memory_async():
-            """Async Memory Storage mit eigener DB-Session"""
-            from core.database import SessionLocal
-            db_async = SessionLocal()
+
+        # Memory creation opt-in/out (Präferenzen > Erinnerung): tool-assisted
+        # messages (web search or an executed action) are separately gated by
+        # tool_memory_enabled, since that content is more likely to include
+        # third-party/external data the user may not want remembered.
+        used_tools = bool(web_search_result) or bool(action_result)
+        should_store_memory = user_prefs['memory_enabled'] and (not used_tools or user_prefs['tool_memory_enabled'])
+
+        if should_store_memory:
+            # ✨ NEU: Store in Neo4j with auto-concept extraction (sync für Testing)
             try:
-                store_in_4d_memory(
-                    db=db_async,
+                store_message_with_concepts(
                     user_id=current_user.id,
-                    content_type='message',
-                    content_id=message_id,
-                    content_text=request.message,
-                    session_id=session_id,
-                    mood=current_mood,
-                    energy_level=energy,
-                    additional_context={
-                        'model': request.model,
-                        'temperature': request.temperature,
-                        'search_intent': search_intent,
-                        'action_intent': action_intent,
-                        'web_search_used': web_search_result is not None
-                    }
+                    message_id=message_id,
+                    content=request.message,
+                    role='user',
+                    timestamp=datetime.utcnow()
                 )
+                logger.info(f"Stored concepts for message {message_id}")
             except Exception as e:
-                logger.error(f"4D Memory async storage failed: {e}")
-            finally:
-                db_async.close()
-        
-        threading.Thread(target=store_memory_async, daemon=True).start()
-        
+                logger.error(f"Concept extraction failed: {e}")
+
+            # Store in 4D Memory ASYNC (non-blocking) - don't wait for completion
+            import threading
+
+            def store_memory_async():
+                """Async Memory Storage mit eigener DB-Session"""
+                from core.database import SessionLocal
+                db_async = SessionLocal()
+                try:
+                    store_in_4d_memory(
+                        db=db_async,
+                        user_id=current_user.id,
+                        content_type='message',
+                        content_id=message_id,
+                        content_text=request.message,
+                        session_id=session_id,
+                        mood=current_mood,
+                        energy_level=energy,
+                        additional_context={
+                            'model': request.model,
+                            'temperature': request.temperature,
+                            'search_intent': search_intent,
+                            'action_intent': action_intent,
+                            'web_search_used': web_search_result is not None
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"4D Memory async storage failed: {e}")
+                finally:
+                    db_async.close()
+
+            threading.Thread(target=store_memory_async, daemon=True).start()
+
     except Exception as e:
         logger.error(f"Message storage failed: {e}")
         # Continue with chat even if message storage fails
@@ -697,7 +716,9 @@ async def stream_chat(
             memory_context=relevant_concepts,
             session_id=session_id,  # NEW: Send session_id to frontend
             user_id=current_user.id,
-            username=current_user.username
+            username=current_user.username,
+            personality=user_prefs['personality'],
+            custom_instructions=user_prefs['custom_instructions']
         ),
         media_type="text/event-stream",
         headers={

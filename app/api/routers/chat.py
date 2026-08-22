@@ -22,6 +22,8 @@ from services.tool_registry import get_tool_registry
 from services.tool_parser import get_tool_parser
 from services.tool_executor import get_tool_executor
 from services.image_generation import get_image_generation_service
+from services.user_preferences_service import get_user_preferences
+from liara_engine.personality import get_personality_prompt
 
 # === Hailo-8L Backend Router Integration ===
 from services.backend_router import get_backend_router, BackendRouter, BackendType
@@ -820,20 +822,29 @@ async def chat_with_liara(
         with get_db_context() as db:
             config_service = get_config_service(db)
             global_system_prompt = config_service.get_system_prompt()
-        
+
+            # 7b. Per-User Preferences: Personality-Preset + Individuelle Anweisungen
+            user_prefs = get_user_preferences(db, current_user.id)
+
+        personality_prompt = get_personality_prompt(user_prefs["personality"])
+        custom_instructions_block = (
+            f"\n\nIndividuelle Anweisungen von {current_user.username}:\n{user_prefs['custom_instructions']}"
+            if user_prefs.get("custom_instructions") else ""
+        )
+
         # 8. Normaler Chat wenn keine Aktion oder Aktion fehlgeschlagen
         from liara_engine.nlp.ollama_client import ask_liara, LIARA_SYSTEM_PROMPT
-        
+
         # Tool-aware System-Prompt abrufen
         tool_system_prompt = _get_tool_aware_system_prompt()
-        
+
         # Kombiniere: Global Prompt (falls vorhanden) + User Context + Time + Mood + Tools
         if global_system_prompt:
             # Global Prompt überschreibt Default, aber User-Context wird angehängt
-            combined_prompt = f"{global_system_prompt}\n\n{personalized_context}{temporal_context}\n\n{tool_system_prompt}"
+            combined_prompt = f"{global_system_prompt}\n\n{personalized_context}{temporal_context}\n\n{personality_prompt}{custom_instructions_block}\n\n{tool_system_prompt}"
         else:
             # Fallback auf Default Prompt
-            combined_prompt = f"{LIARA_SYSTEM_PROMPT}{temporal_context}\n\n{tool_system_prompt}"
+            combined_prompt = f"{LIARA_SYSTEM_PROMPT}{temporal_context}\n\n{personality_prompt}{custom_instructions_block}\n\n{tool_system_prompt}"
         
         mood_modifier = mood_system.get_system_prompt_modifier()
         context_with_mood = f"Mood: {mood_modifier}"

@@ -17,6 +17,7 @@ from api.routers.ollama_router import router as ollama_router
 from api.routers.auth_router import router as auth_router
 from api.routers.users_router import router as users_router
 from api.routers.profile_router import router as profile_router
+from api.routers.user_preferences_router import router as user_preferences_router
 from api.routers.memory import router as memory_router
 from api.routers.external_router import router as external_router
 from api.routers.web_safety_router import router as web_safety_router
@@ -166,6 +167,7 @@ app.include_router(dashboard_router)
 app.include_router(auth_router)  # Authentication endpoints
 app.include_router(users_router)  # User management (admin only)
 app.include_router(profile_router)  # User profile management
+app.include_router(user_preferences_router)  # User preferences (settings page, custom instructions, memory, personality)
 app.include_router(memory_router)  # 4D Memory endpoints
 app.include_router(external_router)  # Web Search & Location (Privacy-focused)
 app.include_router(web_safety_router)  # Web Safety - 4-Layer Security

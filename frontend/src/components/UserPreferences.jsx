@@ -3,16 +3,26 @@ import './SettingsSection.css'
 
 function UserPreferences() {
   const [preferences, setPreferences] = useState({
-    ai_model: 'llama3.2',
+    ai_model: 'llama3.2:3b',
     language: 'de',
     theme: 'dark',
     notifications: true,
-    sound_effects: false
+    sound_effects: false,
+    custom_instructions: '',
+    personality: 'warmherzig',
+    memory_enabled: true,
+    tool_memory_enabled: true
   })
+  const [models, setModels] = useState([])
+  const [personalityOptions, setPersonalityOptions] = useState([])
   const [message, setMessage] = useState(null)
+  const [memoriesToDelete, setMemoriesToDelete] = useState(false)
+  const [deletingMemories, setDeletingMemories] = useState(false)
 
   useEffect(() => {
     loadPreferences()
+    loadModels()
+    loadPersonalityOptions()
   }, [])
 
   const loadPreferences = async () => {
@@ -26,10 +36,37 @@ function UserPreferences() {
 
       if (response.ok) {
         const data = await response.json()
-        setPreferences(data)
+        setPreferences(prev => ({ ...prev, ...data, custom_instructions: data.custom_instructions || '' }))
       }
     } catch (error) {
       console.error('Failed to load preferences:', error)
+    }
+  }
+
+  const loadModels = async () => {
+    try {
+      const token = localStorage.getItem('liara_token')
+      const response = await fetch('/api/chat/models', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setModels(data.models || [])
+      }
+    } catch (error) {
+      console.error('Failed to load models:', error)
+    }
+  }
+
+  const loadPersonalityOptions = async () => {
+    try {
+      const response = await fetch('/api/user/preferences/personality-options')
+      if (response.ok) {
+        const data = await response.json()
+        setPersonalityOptions(data.options || [])
+      }
+    } catch (error) {
+      console.error('Failed to load personality options:', error)
     }
   }
 
@@ -70,6 +107,30 @@ function UserPreferences() {
     }))
   }
 
+  const confirmDeleteMemories = async () => {
+    setMemoriesToDelete(false)
+    setDeletingMemories(true)
+    setMessage(null)
+
+    try {
+      const token = localStorage.getItem('liara_token')
+      const response = await fetch('/api/user/memories?confirm=true', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Erinnerungen wurden gelöscht.' })
+      } else {
+        setMessage({ type: 'error', text: 'Fehler beim Löschen der Erinnerungen' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Netzwerkfehler' })
+    } finally {
+      setDeletingMemories(false)
+    }
+  }
+
   return (
     <div className="settings-section">
       <div className="settings-section-header">
@@ -96,17 +157,105 @@ function UserPreferences() {
             value={preferences.ai_model}
             onChange={(e) => setPreferences(prev => ({ ...prev, ai_model: e.target.value }))}
           >
-            <option value="llama3.2">Llama 3.2 (Schnell & Effizient)</option>
-            <option value="qwen2.5:7b">Qwen 2.5 7B (Balanced)</option>
-            <option value="qwen2.5:14b">Qwen 2.5 14B (Leistungsstark)</option>
-            <option value="deepseek-r1:8b">DeepSeek R1 8B (Reasoning)</option>
-            <option value="mistral">Mistral (Vielseitig)</option>
-            <option value="codellama">Code Llama (Programmierung)</option>
+            {models.map(model => (
+              <option key={model.name} value={model.name}>
+                {model.name} {model.speed} {model.recommended ? '⭐' : ''}
+              </option>
+            ))}
           </select>
           <span className="form-hint">
             Wähle das AI-Modell für deine Chat-Konversationen
           </span>
         </div>
+      </div>
+
+      {/* Individuelle Anweisungen */}
+      <div className="settings-card">
+        <h3 className="settings-card-title">📝 Individuelle Anweisungen</h3>
+        <div className="form-group">
+          <textarea
+            className="input"
+            rows={4}
+            maxLength={4000}
+            placeholder="z.B. 'Antworte immer auf Deutsch und duze mich' oder 'Ich arbeite als Entwickler, erkläre technische Themen gerne detailliert'"
+            value={preferences.custom_instructions}
+            onChange={(e) => setPreferences(prev => ({ ...prev, custom_instructions: e.target.value }))}
+          />
+          <span className="form-hint">
+            Diese Anweisungen werden in jedes Gespräch mit Liara eingebunden.
+          </span>
+        </div>
+      </div>
+
+      {/* Persönlichkeit */}
+      <div className="settings-card">
+        <h3 className="settings-card-title">🎭 Persönlichkeit</h3>
+        <div className="personality-options">
+          {personalityOptions.map(option => (
+            <label
+              key={option.value}
+              className={`personality-option ${preferences.personality === option.value ? 'active' : ''}`}
+            >
+              <input
+                type="radio"
+                name="personality"
+                value={option.value}
+                checked={preferences.personality === option.value}
+                onChange={() => setPreferences(prev => ({ ...prev, personality: option.value }))}
+              />
+              <span className="personality-option-label">{option.label}</span>
+              <span className="personality-option-desc">{option.description}</span>
+            </label>
+          ))}
+        </div>
+        <span className="form-hint">
+          Legt Liaras grundlegenden Kommunikationsstil fest, unabhängig von der automatischen Stimmung.
+        </span>
+      </div>
+
+      {/* Erinnerung */}
+      <div className="settings-card">
+        <h3 className="settings-card-title">🧠 Erinnerung</h3>
+
+        <div className="switch-group">
+          <div className="switch-label">
+            <span className="switch-title">Erinnerungserstellung erlauben</span>
+            <span className="switch-desc">
+              Liara merkt sich Themen aus euren Gesprächen für zukünftigen Kontext
+            </span>
+          </div>
+          <div
+            className={`switch ${preferences.memory_enabled ? 'active' : ''}`}
+            onClick={() => togglePreference('memory_enabled')}
+          >
+            <div className="switch-toggle"></div>
+          </div>
+        </div>
+
+        <div className="switch-group">
+          <div className="switch-label">
+            <span className="switch-title">Erinnerungen aus toolgestützten Chats</span>
+            <span className="switch-desc">
+              Erinnerungen auch aus Chats erstellen, in denen Tools oder die Websuche genutzt wurden
+            </span>
+          </div>
+          <div
+            className={`switch ${preferences.tool_memory_enabled ? 'active' : ''} ${!preferences.memory_enabled ? 'disabled' : ''}`}
+            onClick={() => preferences.memory_enabled && togglePreference('tool_memory_enabled')}
+          >
+            <div className="switch-toggle"></div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="btn-danger"
+          style={{ marginTop: 'var(--space-md)' }}
+          onClick={() => setMemoriesToDelete(true)}
+          disabled={deletingMemories}
+        >
+          {deletingMemories ? 'Lösche...' : '🗑️ Erinnerungen löschen'}
+        </button>
       </div>
 
       {/* Language & Theme */}
@@ -190,6 +339,28 @@ function UserPreferences() {
       <button onClick={savePreferences} className="btn btn-primary">
         Präferenzen speichern
       </button>
+
+      {/* Delete Memories Confirmation Modal - not window.confirm(), which
+          some browsers silently suppress after repeated dialogs */}
+      {memoriesToDelete && (
+        <div className="prefs-modal-overlay" onClick={() => setMemoriesToDelete(false)}>
+          <div className="prefs-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Erinnerungen löschen?</h3>
+            <p>
+              Alle von Liara gespeicherten Konzepte und Zusammenhänge aus euren Gesprächen werden
+              unwiderruflich gelöscht. Deine Chat-Verläufe selbst bleiben davon unberührt.
+            </p>
+            <div className="prefs-modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => setMemoriesToDelete(false)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmDeleteMemories}>
+                Löschen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

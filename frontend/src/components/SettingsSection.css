@@ -237,6 +237,112 @@ select.input {
   flex-shrink: 0;
 }
 
+/* Textarea (Individuelle Anweisungen) */
+textarea.input {
+  resize: vertical;
+  min-height: 90px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* Switch disabled (e.g. tool-memory toggle when memory is off) */
+.switch.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Personality Presets */
+.personality-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-sm);
+}
+
+.personality-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.personality-option:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.personality-option.active {
+  border-color: var(--color-primary);
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: 0 0 8px var(--color-primary-glow);
+}
+
+.personality-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.personality-option-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.personality-option-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* Delete Memories Confirmation Modal */
+.prefs-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.prefs-modal {
+  background: var(--bg-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.prefs-modal h3 {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-text);
+}
+
+.prefs-modal p {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  margin-bottom: var(--space-md);
+}
+
+.prefs-modal-actions {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.prefs-modal-actions button {
+  flex: 1;
+}
+
 /* Danger Zone */
 .danger-zone {
   background: rgba(239, 68, 68, 0.05);
