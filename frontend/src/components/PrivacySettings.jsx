@@ -27,6 +27,11 @@ function PrivacySettings() {
   const [loading, setLoading] = useState(true)
   const [showConsentModal, setShowConsentModal] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
+  const [locationRevokeConfirm, setLocationRevokeConfirm] = useState(false)
+  const [deleteAllConfirm, setDeleteAllConfirm] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
 
   useEffect(() => {
     loadSettings()
@@ -48,25 +53,25 @@ function PrivacySettings() {
     }
   }
 
-  const handleLocationToggle = async () => {
+  const handleLocationToggle = () => {
     if (locationData?.consent_given) {
-      // Revoke consent
-      if (!confirm('Standort-Daten wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.')) {
-        return
-      }
-      
-      try {
-        setSaving(true)
-        await revokeLocationConsent()
-        await loadSettings()
-      } catch (error) {
-        alert('Fehler beim Widerrufen: ' + error.message)
-      } finally {
-        setSaving(false)
-      }
+      setLocationRevokeConfirm(true)
     } else {
       // Show consent modal
       setShowConsentModal(true)
+    }
+  }
+
+  const confirmRevokeLocation = async () => {
+    setLocationRevokeConfirm(false)
+    try {
+      setSaving(true)
+      await revokeLocationConsent()
+      await loadSettings()
+    } catch (error) {
+      setErrorMessage('Fehler beim Widerrufen: ' + error.message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -76,7 +81,7 @@ function PrivacySettings() {
       setShowConsentModal(false)
       await loadSettings()
     } catch (error) {
-      alert('Fehler bei der Standort-Erkennung: ' + error.message)
+      setErrorMessage('Fehler bei der Standort-Erkennung: ' + error.message)
       throw error
     }
   }
@@ -92,7 +97,7 @@ function PrivacySettings() {
       await updatePrivacySettings({ web_search_history: newValue })
       setSettings({ ...settings, web_search_history: newValue })
     } catch (error) {
-      alert('Fehler beim Speichern: ' + error.message)
+      setErrorMessage('Fehler beim Speichern: ' + error.message)
     } finally {
       setSaving(false)
     }
@@ -104,7 +109,7 @@ function PrivacySettings() {
       await updatePrivacySettings({ auto_delete_days: parseInt(days) })
       setSettings({ ...settings, auto_delete_days: parseInt(days) })
     } catch (error) {
-      alert('Fehler beim Speichern: ' + error.message)
+      setErrorMessage('Fehler beim Speichern: ' + error.message)
     } finally {
       setSaving(false)
     }
@@ -121,33 +126,25 @@ function PrivacySettings() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (error) {
-      alert('Fehler beim Daten-Export: ' + error.message)
+      setErrorMessage('Fehler beim Daten-Export: ' + error.message)
     }
   }
 
-  const handleDeleteAllData = async () => {
-    const confirmed = confirm(
-      '⚠️ ACHTUNG: Alle deine Daten werden gelöscht!\n\n' +
-      'Dies umfasst:\n' +
-      '- Standort-Daten\n' +
-      '- Web-Suchen\n' +
-      '- Chat-Verlauf\n' +
-      '- Aufgaben, Notizen, Termine\n\n' +
-      'Diese Aktion kann NICHT rückgängig gemacht werden!\n\n' +
-      'Fortfahren?'
-    )
-    
-    if (!confirmed) return
-    
-    const doubleConfirm = confirm('Wirklich ALLE Daten unwiderruflich löschen?')
-    if (!doubleConfirm) return
-    
+  const handleDeleteAllData = () => {
+    setDeleteAllConfirm(true)
+  }
+
+  const confirmDeleteAllData = async () => {
+    setDeleteAllConfirm(false)
+    setDeletingAll(true)
     try {
       await deleteAllUserData()
-      alert('✅ Alle Daten wurden erfolgreich gelöscht.')
+      setSuccessMessage('Alle Daten wurden erfolgreich gelöscht.')
       await loadSettings()
     } catch (error) {
-      alert('Fehler beim Löschen: ' + error.message)
+      setErrorMessage('Fehler beim Löschen: ' + error.message)
+    } finally {
+      setDeletingAll(false)
     }
   }
 
@@ -170,6 +167,19 @@ function PrivacySettings() {
           Verwalte deine Privatsphäre-Einstellungen. Alle Daten werden DSGVO-konform behandelt.
         </p>
       </div>
+
+      {errorMessage && (
+        <div className="settings-message error" onClick={() => setErrorMessage('')} style={{ cursor: 'pointer' }}>
+          <span>⚠</span>
+          <span>{errorMessage}</span>
+        </div>
+      )}
+      {successMessage && (
+        <div className="settings-message success" onClick={() => setSuccessMessage('')} style={{ cursor: 'pointer' }}>
+          <span>✓</span>
+          <span>{successMessage}</span>
+        </div>
+      )}
 
       {/* Location Tracking */}
       <div className="privacy-section">
@@ -267,8 +277,8 @@ function PrivacySettings() {
             <span className="btn-subtitle">Alle Daten als JSON herunterladen</span>
           </button>
           
-          <button className="btn-delete-all" onClick={handleDeleteAllData}>
-            🗑️ Alle Daten löschen
+          <button className="btn-delete-all" onClick={handleDeleteAllData} disabled={deletingAll}>
+            🗑️ {deletingAll ? 'Lösche...' : 'Alle Daten löschen'}
             <span className="btn-subtitle">Recht auf Vergessenwerden (NICHT rückgängig!)</span>
           </button>
         </div>
@@ -293,6 +303,48 @@ function PrivacySettings() {
           onAccept={handleConsentAccept}
           onDecline={handleConsentDecline}
         />
+      )}
+
+      {/* Revoke Location Consent Confirmation - not window.confirm(), which
+          some browsers silently suppress after repeated dialogs */}
+      {locationRevokeConfirm && (
+        <div className="prefs-modal-overlay" onClick={() => setLocationRevokeConfirm(false)}>
+          <div className="prefs-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Standort-Daten löschen?</h3>
+            <p>Diese Aktion kann nicht rückgängig gemacht werden.</p>
+            <div className="prefs-modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => setLocationRevokeConfirm(false)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmRevokeLocation}>
+                Löschen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete All Data Confirmation - previously a chained double
+          window.confirm(), which is exactly the fragile pattern this
+          project replaces everywhere else with a single explicit modal */}
+      {deleteAllConfirm && (
+        <div className="prefs-modal-overlay" onClick={() => setDeleteAllConfirm(false)}>
+          <div className="prefs-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>⚠️ Alle Daten wirklich löschen?</h3>
+            <p>
+              Dies umfasst Standort-Daten, Web-Suchen, Chat-Verlauf sowie Aufgaben, Notizen und Termine.
+              Diese Aktion kann <strong>NICHT</strong> rückgängig gemacht werden!
+            </p>
+            <div className="prefs-modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => setDeleteAllConfirm(false)}>
+                Abbrechen
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmDeleteAllData}>
+                Endgültig löschen
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
