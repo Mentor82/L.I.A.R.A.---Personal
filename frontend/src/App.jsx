@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
+import liaraLogo from './assets/LIARA-LOGO.png'
 
 // Eager loaded components (needed immediately)
 import Login from './components/Login'
@@ -206,7 +207,7 @@ function App() {
         <header className="app-header">
           <div className="app-header-content">
             <NavLink to="/chat" className="app-logo">
-              <span className="app-logo-icon">🌙</span>
+              <img src={liaraLogo} alt="LIARA" className="app-logo-icon" />
               <span className="app-logo-text">LIARA</span>
             </NavLink>
             

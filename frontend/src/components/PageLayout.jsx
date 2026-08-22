@@ -1,5 +1,6 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
+import liaraLogo from '../assets/LIARA-LOGO.png';
 import './PageLayout.css';
 
 function PageLayout({ children, showGuestCTA = false }) {
@@ -30,7 +31,7 @@ function PageLayout({ children, showGuestCTA = false }) {
       <header className="layout-header">
         <div className="layout-header-content">
           <NavLink to="/" className="layout-logo">
-            <span className="layout-logo-icon">🌙</span>
+            <img src={liaraLogo} alt="LIARA" className="layout-logo-icon" />
             <span className="layout-logo-text">LIARA</span>
             <span className="layout-logo-tagline">Digitalbegleiterin</span>
           </NavLink>
@@ -114,7 +115,7 @@ function PageLayout({ children, showGuestCTA = false }) {
         <div className="footer-content">
           <div className="footer-section">
             <div className="footer-logo">
-              <span className="footer-logo-icon">🌙</span>
+              <img src={liaraLogo} alt="LIARA" className="footer-logo-icon" />
               <span className="footer-logo-text">LIARA</span>
             </div>
             <p className="footer-description">

@@ -42,7 +42,10 @@
 }
 
 .layout-logo-icon {
-  font-size: 1.5rem;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 6px;
   filter: drop-shadow(0 0 15px rgba(0, 247, 255, 0.5));
 }
 
@@ -268,7 +271,10 @@
 }
 
 .footer-logo-icon {
-  font-size: 1.5rem;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 6px;
   filter: drop-shadow(0 0 10px rgba(0, 247, 255, 0.5));
 }
 
