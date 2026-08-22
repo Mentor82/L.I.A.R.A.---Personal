@@ -17,6 +17,7 @@ from datetime import datetime
 
 from core.database import SessionLocal
 from api.models.mood_state import UserMoodState, MoodHistoryEntry
+from liara_engine.nlp.sentiment_analyzer import get_sentiment_analyzer, SentimentCategory
 
 
 class MoodState(str, Enum):
@@ -266,11 +267,30 @@ class MoodSystem:
 
     @staticmethod
     def detect_interaction_type(message: str) -> InteractionType:
-        """Erkenne Interaktions-Typ aus User-Message (Heuristik)."""
+        """
+        Erkenne Interaktions-Typ aus User-Message.
+
+        Themen-Erkennung (Work/Help/Task-Completed) bleibt keyword-basiert -
+        das sind Intent-Kategorien, die reine Sentiment-Analyse nicht
+        erkennen kann. Für die emotionale Einordnung (gestresst/positiv)
+        wird zusätzlich der schon vorhandene, robustere SentimentAnalyzer
+        herangezogen (Emoji-/Pattern-Erkennung) - der lief bisher nur fürs
+        Live-Sentiment beim Tippen. Die festen Keyword-Listen bleiben aber
+        als zweite Bedingung bestehen: der Analyzer verlangt intern min.
+        ~2 Signale bevor eine Kategorie den Neutral-Schwellenwert (0.3)
+        übersteigt, ein einzelnes Wort wie "danke" oder "gestresst" reicht
+        ihm allein oft nicht - die Keyword-Liste fängt genau diese Fälle
+        weiterhin zuverlässig ab, der Analyzer ergänzt nur zusätzliche
+        Fälle (Emojis, Formulierungen ohne die exakten Wörter).
+        """
         message_lower = message.lower()
+        sentiment = get_sentiment_analyzer().analyze_sentiment(message)
+        category = sentiment["category"]
 
         stress_keywords = ["gestresst", "stress", "überforderung", "zu viel", "schaffe es nicht"]
-        if any(keyword in message_lower for keyword in stress_keywords):
+        if any(keyword in message_lower for keyword in stress_keywords) or category in (
+            SentimentCategory.ANXIOUS.value, SentimentCategory.VERY_NEGATIVE.value
+        ):
             return InteractionType.STRESSED_USER
 
         work_keywords = ["meeting", "deadline", "projekt", "code", "review"]
@@ -286,8 +306,19 @@ class MoodSystem:
             return InteractionType.TASK_COMPLETED
 
         positive_keywords = ["danke", "super", "perfekt", "gut", "toll"]
-        if any(keyword in message_lower for keyword in positive_keywords):
+        if any(keyword in message_lower for keyword in positive_keywords) or category in (
+            SentimentCategory.VERY_POSITIVE.value,
+            SentimentCategory.POSITIVE.value,
+            SentimentCategory.EXCITED.value,
+        ):
             return InteractionType.POSITIVE_FEEDBACK
+
+        # Vorher komplett unerreichbar über die Heuristik - jetzt via Analyzer.
+        if category == SentimentCategory.NEGATIVE.value:
+            return InteractionType.NEGATIVE_FEEDBACK
+
+        if category == SentimentCategory.CONFUSED.value:
+            return InteractionType.SEEKING_HELP
 
         return InteractionType.CASUAL_CHAT
 
