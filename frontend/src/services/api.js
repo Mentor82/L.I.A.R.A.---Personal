@@ -7,6 +7,16 @@
 const API_BASE = '/api';
 
 /**
+ * Parst eine Response als JSON, ohne bei leerem Body (z.B. 204 No Content
+ * von DELETE-Endpoints) mit "Unexpected end of JSON input" zu crashen.
+ */
+async function parseJsonSafe(response) {
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+/**
  * Generic fetch wrapper mit Error Handling und Authentication
  */
 async function apiFetch(endpoint, options = {}) {
@@ -46,7 +56,7 @@ async function apiFetch(endpoint, options = {}) {
         });
         
         if (retryResponse.ok) {
-          return await retryResponse.json();
+          return await parseJsonSafe(retryResponse);
         }
       }
       
@@ -64,7 +74,7 @@ async function apiFetch(endpoint, options = {}) {
       throw new Error(errorData.detail || `API Error: ${response.status} ${response.statusText}`);
     }
 
-    return await response.json();
+    return await parseJsonSafe(response);
   } catch (error) {
     console.error('API Fetch Error:', error);
     throw error;
