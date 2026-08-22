@@ -124,10 +124,20 @@ function CalendarView() {
     }
   };
 
+  // Format a Date as "YYYY-MM-DDTHH:MM" using its LOCAL fields, for
+  // datetime-local inputs. toISOString() converts to UTC first, which
+  // shifts the displayed time by the timezone offset (e.g. 19:00 CEST
+  // showed as 17:00) every time an event was edited or a new one created
+  // by clicking a time slot.
+  const toLocalDateTimeInput = (date) => {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
   const handleEditEvent = (event) => {
     // Convert ISO strings to datetime-local format
-    const startTime = new Date(event.start_time).toISOString().slice(0, 16);
-    const endTime = new Date(event.end_time).toISOString().slice(0, 16);
+    const startTime = toLocalDateTimeInput(new Date(event.start_time));
+    const endTime = toLocalDateTimeInput(new Date(event.end_time));
     
     setNewEvent({
       title: event.title || '',
@@ -157,11 +167,11 @@ function CalendarView() {
     }
     
     selectedDateTime.setHours(startHour, startMinute, 0, 0);
-    const startTime = selectedDateTime.toISOString().slice(0, 16);
-    
+    const startTime = toLocalDateTimeInput(selectedDateTime);
+
     const endDateTime = new Date(selectedDateTime);
     endDateTime.setMinutes(endDateTime.getMinutes() + 30);
-    const endTime = endDateTime.toISOString().slice(0, 16);
+    const endTime = toLocalDateTimeInput(endDateTime);
     
     // Reset form with fresh data (don't spread old newEvent)
     setNewEvent({
@@ -572,8 +582,8 @@ function CalendarView() {
                         setNewEvent({
                           ...newEvent,
                           all_day: true,
-                          start_time: startOfDay.toISOString().slice(0, 16),
-                          end_time: endOfDay.toISOString().slice(0, 16)
+                          start_time: toLocalDateTimeInput(startOfDay),
+                          end_time: toLocalDateTimeInput(endOfDay)
                         });
                       } else {
                         setNewEvent({...newEvent, all_day: false});
@@ -612,8 +622,8 @@ function CalendarView() {
                       const endOfDay = new Date(dateStr + 'T23:59:00');
                       setNewEvent({
                         ...newEvent,
-                        start_time: startOfDay.toISOString().slice(0, 16),
-                        end_time: endOfDay.toISOString().slice(0, 16)
+                        start_time: toLocalDateTimeInput(startOfDay),
+                        end_time: toLocalDateTimeInput(endOfDay)
                       });
                     }}
                     required
