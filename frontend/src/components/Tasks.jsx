@@ -76,8 +76,8 @@ function TaskCard({ task, onComplete, onEdit, onDelete, onCreateEvent }) {
   const categoryColor = '#667eea'; // Default blue for category
 
   return (
-    <div 
-      className={`task-card ${task.completed ? 'task-card-completed' : ''} ${dueInfo?.isOverdue ? 'task-card-overdue' : ''}`}
+    <div
+      className={`task-card ${task.completed ? 'task-card-completed' : ''} ${dueInfo?.isOverdue ? 'task-card-overdue' : ''} ${showMenu ? 'task-card-menu-active' : ''}`}
       style={{ '--priority-color': getPriorityColor(task.priority) }}
     >
       {/* Left Zone: Checkbox + Content */}
