@@ -9,6 +9,52 @@ const backends = [
 
 const defaultModel = 'yolov8n'
 
+// Same pattern as AiExecTab.jsx: this page's plain fetch() never went
+// through services/api.js's 401-refresh handling, and previously didn't
+// even send an Authorization header at all, so every request failed with
+// "Not authenticated" regardless of token state.
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('liara_refresh_token');
+  if (!refreshToken) return false;
+
+  try {
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    if (!res.ok) return false;
+
+    const data = await res.json();
+    localStorage.setItem('liara_token', data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem('liara_refresh_token', data.refresh_token);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function authFetch(url, options = {}) {
+  const withAuth = () => ({
+    ...options,
+    headers: {
+      ...options.headers,
+      'Authorization': `Bearer ${localStorage.getItem('liara_token')}`
+    }
+  });
+
+  let res = await fetch(url, withAuth());
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      res = await fetch(url, withAuth());
+    }
+  }
+  return res;
+}
+
 function VisionDetect() {
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
@@ -62,7 +108,7 @@ function VisionDetect() {
     form.append('score_threshold', scoreThreshold)
 
     try {
-      const resp = await fetch('/api/vision/detect', {
+      const resp = await authFetch('/api/vision/detect', {
         method: 'POST',
         body: form,
       })
