@@ -57,22 +57,24 @@ class VisionDetectionService:
             "latency_ms": result.latency_ms,
         }
 
+    EDGETPU_MODELS = {"ssd_mobiledet", "ssd_mobilenet_v2", "efficientdet_lite0"}
+
     async def _detect_edgetpu(
         self,
         image_bytes: bytes,
         model: str,
         confidence_threshold: Optional[float],
     ) -> Dict[str, Any]:
-        # edge01 (Coral USB Accelerator) only serves ssd_mobiledet right now —
-        # unlike YOLO, its detection head fully compiles to a single Edge TPU
-        # subgraph. Caller-supplied model names (e.g. "yolov8n", the Hailo
-        # default) are ignored for this backend.
+        # edge01 now serves three wired COCO detection models (see server.py
+        # on edge01). Fall back to the default if the caller passes something
+        # edge01 doesn't know (e.g. "yolov8n", the Hailo default).
+        model_name = model if model in self.EDGETPU_MODELS else "ssd_mobiledet"
         client = await get_edgetpu_client()
 
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
         result = await client.detect_objects(
             image_base64=image_base64,
-            model_name="ssd_mobiledet",
+            model_name=model_name,
             confidence_threshold=confidence_threshold if confidence_threshold is not None else 0.5,
         )
 

@@ -7,6 +7,24 @@ const backends = [
   { value: 'cpu', label: 'CPU-Stub' },
 ]
 
+// Mirrors what each backend actually has wired up server-side:
+// hailo_vision_service.MODELS_CONFIG and edge01's server.py MODEL_PATHS.
+const modelsByBackend = {
+  hailo: [
+    { value: 'yolov8n', label: 'YOLOv8n (schnell)' },
+    { value: 'yolov8s', label: 'YOLOv8s (genauer)' },
+    { value: 'yolov8s-pose', label: 'YOLOv8s-Pose' },
+  ],
+  edgetpu: [
+    { value: 'ssd_mobiledet', label: 'SSD MobileDet (COCO, ~70ms)' },
+    { value: 'ssd_mobilenet_v2', label: 'SSD MobileNet v2 (COCO, ~65ms)' },
+    { value: 'efficientdet_lite0', label: 'EfficientDet-Lite0 (COCO, genauer, ~230ms)' },
+  ],
+  cpu: [
+    { value: 'stub', label: 'CPU-Stub (Platzhalter)' },
+  ],
+}
+
 const defaultModel = 'yolov8n'
 
 // Same pattern as AiExecTab.jsx: this page's plain fetch() never went
@@ -150,7 +168,14 @@ function VisionDetect() {
           <div className="form-grid">
             <div>
               <label className="form-label">Backend</label>
-              <select value={backend} onChange={(e) => setBackend(e.target.value)}>
+              <select
+                value={backend}
+                onChange={(e) => {
+                  const newBackend = e.target.value
+                  setBackend(newBackend)
+                  setModel(modelsByBackend[newBackend][0].value)
+                }}
+              >
                 {backends.map((b) => (
                   <option key={b.value} value={b.value}>{b.label}</option>
                 ))}
@@ -158,12 +183,11 @@ function VisionDetect() {
             </div>
             <div>
               <label className="form-label">Modell</label>
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="z.B. yolov8n"
-              />
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                {modelsByBackend[backend].map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="form-label">Score Threshold</label>
