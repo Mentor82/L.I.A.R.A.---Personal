@@ -2,7 +2,13 @@
 Edge TPU REST API Client
 
 Service for communicating with the edge TPU inference server on edge01
-(Coral USB Accelerator via Proxmox USB-Passthrough, 192.168.178.155:5001).
+(Coral USB Accelerator via Proxmox USB-Passthrough on astraeus, VMID 150).
+edge01 has no static/DHCP-reserved address - its actual current IP was
+found via ARP/MAC lookup (bc:24:11:2d:9f:76) on the astraeus host, since
+the hardcoded 192.168.178.155 this file previously pointed at didn't
+match any real device. Reachability also requires port 5001 to be
+allowed through edge01's nftables ruleset (/etc/nftables.conf), which
+defaults to deny and didn't have this port open until now.
 Mirrors the structure of hailo_rpi5_client.py so both accelerator backends
 can be swapped through the same VisionDetectionService interface.
 """
@@ -17,7 +23,7 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 # Configuration
-EDGETPU_API_URL = "http://192.168.178.155:5001"
+EDGETPU_API_URL = "http://192.168.178.40:5001"
 EDGETPU_HEALTH_TIMEOUT = 5.0  # seconds
 EDGETPU_INFERENCE_TIMEOUT = 15.0  # seconds
 
