@@ -150,6 +150,13 @@ function App() {
     localStorage.removeItem('liara_refresh_token')
     localStorage.removeItem('liara_user')
     localStorage.removeItem('liara_guest_mode')
+    // Chat state is cached per-browser, not per-account - without this,
+    // the next account to log in on this browser sees the previous
+    // account's cached chat sessions until it has sessions of its own.
+    localStorage.removeItem('liara_chat_sessions')
+    localStorage.removeItem('liara_active_session')
+    localStorage.removeItem('liara_selected_model')
+    localStorage.removeItem('liara_auto_model')
     setUser(null)
   }
 

@@ -146,26 +146,36 @@ function Chat() {
             lastMessage: s.last_message || null
           }));
           setChatSessions(sessions);
-          
+
           // Set active session to most recent and load its messages
           const savedActiveId = localStorage.getItem('liara_active_session');
-          const activeId = (savedActiveId && sessions.find(s => s.id === parseInt(savedActiveId))) 
-            ? parseInt(savedActiveId) 
+          const activeId = (savedActiveId && sessions.find(s => s.id === parseInt(savedActiveId)))
+            ? parseInt(savedActiveId)
             : sessions[0].id;
-          
+
           setActiveSessionId(activeId);
-          
+
           // Load messages for active session
           if (activeId && sessions.find(s => s.id === activeId)?.messageCount > 0) {
             try {
               const messages = await getSessionMessages(activeId);
-              setChatSessions(prev => prev.map(s => 
+              setChatSessions(prev => prev.map(s =>
                 s.id === activeId ? { ...s, messages } : s
               ));
             } catch (error) {
               console.error('Failed to load active session messages:', error);
             }
           }
+        } else {
+          // The DB is the source of truth. An empty result here must
+          // replace whatever local/localStorage state we started with -
+          // otherwise a browser previously used by a different account
+          // keeps showing that account's cached sessions indefinitely,
+          // since nothing else would ever clear them for an account
+          // that genuinely has zero sessions of its own.
+          const freshSession = { id: Date.now(), title: 'Neue Konversation', messages: [], timestamp: new Date().toISOString() };
+          setChatSessions([freshSession]);
+          setActiveSessionId(freshSession.id);
         }
       } catch (error) {
         console.error('Failed to load sessions from DB, using localStorage:', error);

@@ -7,7 +7,7 @@ import './AdminLayout.css'
  * Admin Layout
  * Manages admin panel, users, system settings and logs
  */
-function AdminLayout() {
+function AdminLayout({ onLogout }) {
   const location = useLocation()
   const navigate = useNavigate()
   const isRootPath = location.pathname === '/admin'
@@ -23,10 +23,13 @@ function AdminLayout() {
     return () => setDockNode(null)
   }, [setDockNode])
 
-  // Logout handler
+  // Logout handler - delegates to App.jsx's onLogout, which clears the
+  // real liara_* auth/session keys and resets the app's user state.
+  // This component used to clear its own (wrong, unused) 'token'/'user'
+  // keys and navigate to /login without ever calling onLogout, so the
+  // real session (liara_token/liara_user) stayed logged in.
   const handleLogout = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    onLogout?.()
     navigate('/login')
   }
 
