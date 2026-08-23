@@ -38,6 +38,7 @@ from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
 from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions
 from services.session_workspace import build_workspace_manifest
+from services.thinking_splitter import ThinkingSplitter
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -360,8 +361,13 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type, 'risk_score': web_search_risk_score or 0})}\n\n"
         
         # Accumulate the full reply so it can be persisted once streaming
-        # finishes - individual SSE chunks are never stored anywhere.
+        # finishes - individual SSE chunks are never stored anywhere. Only
+        # the actual answer is accumulated here, not a <think> block (see
+        # thinking_splitter) - conversation history re-injects this text on
+        # later turns, and old reasoning traces have no business polluting
+        # future context or concept extraction.
         full_response_text = ""
+        thinking_splitter = ThinkingSplitter()
 
         # Streaming Request zu Ollama via httpx (NO buffering)
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -381,19 +387,33 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             if "message" in chunk:
                                 content = chunk["message"].get("content", "")
                                 if content:
-                                    full_response_text += content
-                                    # Mirko Debug Logging
-                                    try:
-                                        if username and should_log_for_user(username):
-                                            mlogger.log_sse_chunk("content", content=content)
-                                    except:
-                                        pass  # Logging-Fehler ignorieren
-                                    
-                                    # SSE Format: data: {json}\n\n
-                                    yield f"data: {json.dumps({'type': 'content', 'text': content})}\n\n"
-                            
+                                    thinking_part, content_part = thinking_splitter.feed(content)
+
+                                    if thinking_part:
+                                        yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
+
+                                    if content_part:
+                                        full_response_text += content_part
+                                        # Mirko Debug Logging
+                                        try:
+                                            if username and should_log_for_user(username):
+                                                mlogger.log_sse_chunk("content", content=content_part)
+                                        except:
+                                            pass  # Logging-Fehler ignorieren
+
+                                        # SSE Format: data: {json}\n\n
+                                        yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
+
                             # Check if done
                             if chunk.get("done", False):
+                                # Flush anything the splitter is still holding
+                                # (e.g. a <think> block that never closed).
+                                leftover_thinking, leftover_content = thinking_splitter.flush()
+                                if leftover_thinking:
+                                    yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
+                                if leftover_content:
+                                    full_response_text += leftover_content
+                                    yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
                                 # Mirko Debug Logging
                                 try:
                                     if username and should_log_for_user(username):
@@ -1087,19 +1107,30 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
         
         response = requests.post(ollama_url, json=payload, stream=True, timeout=60)
         response.raise_for_status()
-        
+
+        guest_thinking_splitter = ThinkingSplitter()
+
         for line in response.iter_lines():
             if line:
                 try:
                     chunk = json.loads(line)
                     if chunk.get('done'):
+                        leftover_thinking, leftover_content = guest_thinking_splitter.flush()
+                        if leftover_thinking:
+                            yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
+                        if leftover_content:
+                            yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
                         break
-                    
+
                     content = chunk.get('response', '')
                     if content:
-                        yield f"data: {json.dumps({'type': 'content', 'text': content})}\n\n"
-                        
+                        thinking_part, content_part = guest_thinking_splitter.feed(content)
+                        if thinking_part:
+                            yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
+                        if content_part:
+                            yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
+
                 except json.JSONDecodeError:
                     continue
                     

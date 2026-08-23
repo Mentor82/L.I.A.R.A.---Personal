@@ -5,6 +5,34 @@ import WebSearchResults from './WebSearchResults';
 import MarkdownMessage from './MarkdownMessage';
 import './Chat.css';
 
+// Collapsible display for reasoning-model output, kept separate from the
+// answer by the backend's thinking_splitter. See Chat.jsx for the same
+// component (duplicated rather than shared, matching this file's existing
+// pattern of standalone guest-mode logic).
+function ThinkingBlock({ thinking, isAnswering }) {
+  const [expanded, setExpanded] = useState(true);
+  const autoCollapsedRef = useRef(false);
+
+  useEffect(() => {
+    if (isAnswering && !autoCollapsedRef.current) {
+      autoCollapsedRef.current = true;
+      setExpanded(false);
+    }
+  }, [isAnswering]);
+
+  if (!thinking) return null;
+
+  return (
+    <div className="thinking-block">
+      <button type="button" className="thinking-toggle" onClick={() => setExpanded((e) => !e)}>
+        <span>🧠 {isAnswering ? 'Denkprozess' : 'Denkt nach…'}</span>
+        <span className="thinking-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && <div className="thinking-content">{thinking}</div>}
+    </div>
+  );
+}
+
 function GuestChat() {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
@@ -144,6 +172,16 @@ function GuestChat() {
                 ? { ...msg, webSearchResults: data.results, searchType: data.search_type }
                 : msg
             ));
+          } else if (data.type === 'thinking') {
+            if (!firstContentReceived) {
+              firstContentReceived = true;
+              setLoading(false);
+            }
+            setMessages(prev => prev.map(msg =>
+              msg.id === assistantMsgId
+                ? { ...msg, thinking: (msg.thinking || '') + data.text }
+                : msg
+            ));
           } else if (data.type === 'content') {
             // Erster Chunk: Loading-Indikator ausblenden, sonst läuft die
             // "denkt nach..."-Bubble parallel zur bereits sichtbaren,
@@ -260,6 +298,9 @@ function GuestChat() {
                   </button>
                 </span>
               </div>
+              {msg.role === 'assistant' && (
+                <ThinkingBlock thinking={msg.thinking} isAnswering={!!msg.content} />
+              )}
               <div className="bubble-text">
                 <MarkdownMessage content={msg.content} />
               </div>

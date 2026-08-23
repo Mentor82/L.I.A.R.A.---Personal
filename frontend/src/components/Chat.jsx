@@ -10,6 +10,34 @@ import SentimentIndicator, { SentimentBadge } from './SentimentIndicator';
 import { MemoryIndicator, MemoryBadge } from './MemoryIndicator';
 import './Chat.css';
 
+// Collapsible display for reasoning-model output (deepseek-r1 etc.), kept
+// separate from the answer by the backend's thinking_splitter. Auto-expanded
+// while the answer hasn't started yet (so the user sees it "thinking" live),
+// then auto-collapses once - after that, the user's own toggle sticks.
+function ThinkingBlock({ thinking, isAnswering }) {
+  const [expanded, setExpanded] = useState(true);
+  const autoCollapsedRef = useRef(false);
+
+  useEffect(() => {
+    if (isAnswering && !autoCollapsedRef.current) {
+      autoCollapsedRef.current = true;
+      setExpanded(false);
+    }
+  }, [isAnswering]);
+
+  if (!thinking) return null;
+
+  return (
+    <div className="thinking-block">
+      <button type="button" className="thinking-toggle" onClick={() => setExpanded((e) => !e)}>
+        <span>🧠 {isAnswering ? 'Denkprozess' : 'Denkt nach…'}</span>
+        <span className="thinking-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && <div className="thinking-content">{thinking}</div>}
+    </div>
+  );
+}
+
 function Chat() {
   const [message, setMessage] = useState('');
   const [chatSessions, setChatSessions] = useState(() => {
@@ -509,10 +537,31 @@ function Chat() {
                 liaraMessage.webSearchResults = parsed.results;
                 liaraMessage.searchType = parsed.search_type;
                 liaraMessage.riskScore = parsed.risk_score;
+              } else if (parsed.type === 'thinking') {
+                // Reasoning-model output (deepseek-r1 etc.) - kept separate
+                // from liaraMessage.content so it renders as its own
+                // collapsible block instead of leaking into the answer text.
+                liaraMessage.thinking = (liaraMessage.thinking || '') + parsed.text;
+
+                if (!messageAdded) {
+                  messageAdded = true;
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages, liaraMessage] }
+                      : session
+                  ));
+                } else {
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                      : session
+                  ));
+                }
               } else if (parsed.type === 'content') {
                 // Append content chunk
                 liaraMessage.content += parsed.text;
-                
+
                 // Beim ersten Content: Message hinzufügen und Loading-Indikator
                 // ausblenden - sonst läuft die "denkt nach..."-Bubble parallel
                 // zur bereits sichtbaren, live wachsenden Antwort weiter, bis
@@ -527,8 +576,8 @@ function Chat() {
                   ));
                 } else {
                   // Update: Ersetze die LETZTE Message im Array
-                  setChatSessions(prev => prev.map(session => 
-                    session.id === activeSessionId 
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
                       ? {
                           ...session,
                           messages: [
@@ -1161,6 +1210,9 @@ function Chat() {
                   backend puts the identical message in msg.content too
                   (chat.py: response=action_result['message']), so showing
                   both duplicated the same line twice in the same bubble. */}
+              {msg.role === 'assistant' && (
+                <ThinkingBlock thinking={msg.thinking} isAnswering={!!msg.content} />
+              )}
               {!msg.actionResult?.success && (
                 <div className="bubble-text">
                   <MarkdownMessage content={msg.content} sessionId={activeSessionId} />

@@ -476,6 +476,48 @@
   line-height: 1.6;
 }
 
+/* Thinking Block (reasoning-model output, e.g. deepseek-r1) */
+.thinking-block {
+  margin: 0.5rem 0;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-purple-subtle);
+  border: none;
+  color: var(--color-text-muted);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  cursor: pointer;
+}
+
+.thinking-toggle:hover {
+  color: var(--color-purple);
+}
+
+.thinking-caret {
+  font-style: normal;
+}
+
+.thinking-content {
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(139, 92, 246, 0.15);
+}
+
 /* Action Result Badge */
 .action-result {
   display: flex;
