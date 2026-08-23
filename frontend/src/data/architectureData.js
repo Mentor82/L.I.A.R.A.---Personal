@@ -85,7 +85,7 @@ export const architectureNodes = [
     status: 'implemented', boundary: 'client',
     description: 'Die Person, die Liara über den Browser nutzt - eingeloggt oder als Gast. Startpunkt und Endpunkt jeder Anfrage.',
     responsibilities: ['Anfrage stellen', 'Antwort, Diagramme und Dateien empfangen'],
-    paths: [], views: ['system', 'chat'], x: 20, y: 290,
+    paths: [], views: ['system', 'chat'], x: 20, y: 150,
   },
   {
     id: 'native-apps', title: 'Native Apps', subtitle: 'iOS · Android · Windows', layer: 'Interface',
