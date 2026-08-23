@@ -54,17 +54,30 @@ function ArchitectureMap() {
     [view]
   );
 
-  // The local/self-hosted perimeter is drawn from ALL local-boundary nodes'
-  // positions (not just the ones visible in the current view), so it reads
-  // as a stable backdrop across tabs instead of jumping around.
+  // The local/self-hosted perimeter is drawn from the LOCAL-boundary nodes
+  // actually visible in the current view (not every local node across all
+  // tabs) - each tab gets a canvas sized to what it actually shows, instead
+  // of the System tab (8 nodes) carrying dead space reserved for Chat &
+  // Agent's much larger node set.
   const boundaryRect = useMemo(() => {
-    const localNodes = architectureNodes.filter((node) => node.boundary === 'local');
+    const localNodes = visibleNodes.filter((node) => node.boundary === 'local');
     const minX = Math.min(...localNodes.map((n) => n.x)) - NODE_WIDTH / 2 - BOUNDARY_PADDING;
     const maxX = Math.max(...localNodes.map((n) => n.x)) + NODE_WIDTH / 2 + BOUNDARY_PADDING;
     const minY = Math.min(...localNodes.map((n) => n.y)) - NODE_HEIGHT / 2 - BOUNDARY_PADDING;
     const maxY = Math.max(...localNodes.map((n) => n.y)) + NODE_HEIGHT / 2 + BOUNDARY_PADDING;
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-  }, []);
+  }, [visibleNodes]);
+
+  // Canvas viewBox likewise fits the current view's own nodes (local, client
+  // and cloud alike) instead of a single fixed size shared by all tabs.
+  const viewBox = useMemo(() => {
+    const CANVAS_PADDING = 70;
+    const minX = Math.min(...visibleNodes.map((n) => n.x)) - NODE_WIDTH / 2 - CANVAS_PADDING;
+    const maxX = Math.max(...visibleNodes.map((n) => n.x)) + NODE_WIDTH / 2 + CANVAS_PADDING;
+    const minY = Math.min(...visibleNodes.map((n) => n.y)) - NODE_HEIGHT / 2 - CANVAS_PADDING - 20;
+    const maxY = Math.max(...visibleNodes.map((n) => n.y)) + NODE_HEIGHT / 2 + CANVAS_PADDING;
+    return `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+  }, [visibleNodes]);
 
   const searchMatches = useMemo(() => {
     if (!query.trim()) return [];
@@ -196,7 +209,7 @@ function ArchitectureMap() {
 
       <div className="arch-workspace">
         <div className="arch-diagram" aria-label={`${architectureViews.find((v) => v.id === view)?.label} Diagramm`}>
-          <svg viewBox="-80 0 1800 620" role="img" aria-labelledby="architecture-title">
+          <svg viewBox={viewBox} role="img" aria-labelledby="architecture-title">
             <title id="architecture-title">Architektur-Diagramm: {view}</title>
 
             <defs>

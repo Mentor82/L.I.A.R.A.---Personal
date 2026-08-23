@@ -213,7 +213,7 @@ export const architectureNodes = [
     description: 'Standard-Pfad für Inferenz - Modelle laufen vollständig auf eigener Hardware, nichts verlässt das System.',
     responsibilities: ['Lokale Modelle ausführen', 'Streaming-Tokens liefern'],
     paths: ['app/services/ollama_capabilities.py'],
-    views: ['system', 'chat'], x: 790, y: 460,
+    views: ['system', 'chat'], x: 790, y: 430,
   },
   {
     id: 'hailo-npu', title: 'Hailo-8L NPU', subtitle: 'RPi5 · Edge-Vision', layer: 'Edge',
@@ -228,7 +228,7 @@ export const architectureNodes = [
     status: 'implemented', boundary: 'cloud',
     description: 'Wird ausschließlich erreicht, wenn ein Nutzer bewusst ein Modell mit ":cloud"-Kennzeichnung auswählt. Die lokale Infrastruktur, Persistenz und alle Nutzerdaten bleiben davon unberührt - nur der Inferenz-Aufruf für dieses eine Modell verlässt das System.',
     responsibilities: ['Inferenz für explizit gewählte :cloud-Modelle ausführen'],
-    paths: [], views: ['system', 'chat'], x: 1600, y: 460,
+    paths: [], views: ['system', 'chat'], x: 1600, y: 430,
   },
 ];
 
