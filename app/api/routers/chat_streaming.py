@@ -78,7 +78,7 @@ def get_location_context(db: Session, user_id: int) -> Optional[str]:
         return None
 
 
-def perform_web_search(query: str, intent: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> tuple[Optional[str], Optional[Dict], Optional[str], Optional[int]]:
+async def perform_web_search(query: str, intent: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> tuple[Optional[str], Optional[Dict], Optional[str], Optional[int]]:
     """
     Führt Web-Suche basierend auf Intent aus mit Safety-Check
     
@@ -172,7 +172,7 @@ def perform_web_search(query: str, intent: str, user_id: Optional[int] = None, d
         elif intent in ['SEARCH_NEWS', 'SEARCH_WEB']:
             # DuckDuckGo Instant Answer
             logger.info(f"Searching DuckDuckGo for: {query}")
-            result = web_search.search_instant_answer(query)
+            result = await web_search.search_instant_answer(query)
             logger.info(f"DuckDuckGo result: {result}")
             if result.get('abstract') or result.get('answer'):
                 formatted = web_search.format_for_llm(result, 'search')
@@ -874,8 +874,8 @@ async def stream_chat(
     web_search_risk_score = None
     
     if search_intent in ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']:
-        web_search_result, web_search_data, web_search_type, web_search_risk_score = perform_web_search(
-            request.message, 
+        web_search_result, web_search_data, web_search_type, web_search_risk_score = await perform_web_search(
+            request.message,
             search_intent,
             user_id=current_user.id,
             db=db
@@ -1240,7 +1240,7 @@ async def stream_guest_response(
         
         if intent in SEARCH_INTENTS:
             yield f"data: {json.dumps({'type': 'web_search', 'intent': intent})}\n\n"
-            web_search_result, web_search_data, web_search_type = perform_web_search(query, intent)
+            web_search_result, web_search_data, web_search_type, _ = await perform_web_search(query, intent)
             
             if web_search_data:
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type})}\n\n"
