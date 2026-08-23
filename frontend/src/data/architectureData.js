@@ -223,10 +223,10 @@ export const architectureNodes = [
     views: ['system', 'chat'], x: 790, y: 430,
   },
   {
-    id: 'hailo-npu', title: 'Hailo-8L NPU', subtitle: 'RPi5 · Edge-Vision', layer: 'Edge',
+    id: 'hailo-npu', title: 'Hailo-8L NPU', subtitle: 'Vision-Offload, kein Chat-Modell', layer: 'Edge',
     status: 'implemented', boundary: 'local',
-    description: 'Eigenständiges Edge-Gerät (Raspberry Pi 5 + Hailo-8L) für Objekterkennung/Pose/Gesichter - ein optionaler Seitenpfad, unabhängig vom Text-Modell-Pfad, bleibt aber immer lokal.',
-    responsibilities: ['Bilderkennung auf der NPU ausführen', 'Ergebnisse an das Backend zurückgeben'],
+    description: 'Reines Vision-/Bilderkennungs-Inference-Offload auf einem Edge-Gerät (Raspberry Pi 5 + Hailo-8L) - Objekterkennung/Pose/Gesichter. Kein Chat-Sprachmodell und kein Ersatz für Ollama: ein separater, optionaler Seitenpfad, der immer lokal bleibt.',
+    responsibilities: ['Bilderkennung auf der NPU ausführen (nicht: Text-Chat)', 'Ergebnisse an das Backend zurückgeben'],
     paths: ['app/services/hailo_rpi5_client.py', 'app/api/routers/hailo_router.py'],
     views: ['chat'], x: 1150, y: 110,
   },
@@ -249,7 +249,7 @@ export const architectureEdges = [
   { from: 'frontend', to: 'backend', label: 'REST + SSE', kind: 'request', views: ['system', 'chat'] },
   { from: 'backend', to: 'auth-privacy-consent', label: 'Consent-Gate', kind: 'auth-consent', views: ['chat'] },
   { from: 'backend', to: 'admin-functions', label: 'Admin-API', kind: 'request', views: ['persistence'] },
-  { from: 'backend', to: 'hailo-npu', label: 'Vision-Anfrage', kind: 'tool-call', views: ['chat'] },
+  { from: 'backend', to: 'hailo-npu', label: 'Bilderkennung (Vision-Offload)', kind: 'tool-call', views: ['chat'] },
 
   { from: 'backend', to: 'context-memory', label: 'Kontext anfordern', kind: 'request', views: ['system', 'chat'] },
   { from: 'context-memory', to: 'model-inference', label: 'Kontext', kind: 'context', views: ['system', 'chat'] },
@@ -270,7 +270,7 @@ export const architectureEdges = [
   { from: 'code-runner', to: 'workspace-artifacts', label: 'Dateien ablegen', kind: 'memory-write', views: ['chat', 'persistence'] },
 
   { from: 'model-inference', to: 'ollama-local', label: 'lokale Inferenz', kind: 'model-inference', views: ['system', 'chat'] },
-  { from: 'model-inference', to: 'ollama-cloud', label: 'nur bei :cloud-Modell', kind: 'optional-cloud', views: ['system', 'chat'] },
+  { from: 'model-inference', to: 'ollama-cloud', label: 'Inferenz-Aufruf: nur bei :cloud-Modell', kind: 'optional-cloud', views: ['system', 'chat'], bow: true, bowDir: -1, bowAmount: 150 },
 
   { from: 'backend', to: 'persistence', label: 'Sessions/Nutzer', kind: 'memory-write', views: ['persistence'] },
   { from: 'persistence', to: 'context-memory', label: 'Verlauf laden', kind: 'memory-read', views: ['persistence'] },

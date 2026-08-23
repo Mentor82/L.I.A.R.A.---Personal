@@ -280,16 +280,25 @@ function ArchitectureMap() {
               const ex = to.x - ux * inset;
               const ey = to.y - uy * inset;
 
+              // Most edges just use the flow-role's default bow behaviour,
+              // but a specific edge can override it (direction/amount) when
+              // its default path happens to graze an unrelated node's box -
+              // e.g. the long Model->Ollama Cloud hop crossing right through
+              // the Chat & Agent tool-branch column.
+              const useBow = edge.bow !== undefined ? edge.bow : style.bow;
+              const bowDir = edge.bowDir || 1;
+              const bowAmount = edge.bowAmount || FEEDBACK_BOW;
+
               let d;
               let labelX;
               let labelY;
-              if (style.bow) {
+              if (useBow) {
                 // Perpendicular offset from the straight line, bowing the
                 // return path out and around the forward one.
-                const px = -uy;
-                const py = ux;
-                const midX = (sx + ex) / 2 + px * FEEDBACK_BOW;
-                const midY = (sy + ey) / 2 + py * FEEDBACK_BOW;
+                const px = -uy * bowDir;
+                const py = ux * bowDir;
+                const midX = (sx + ex) / 2 + px * bowAmount;
+                const midY = (sy + ey) / 2 + py * bowAmount;
                 d = `M ${sx},${sy} Q ${midX},${midY} ${ex},${ey}`;
                 labelX = midX;
                 labelY = midY;
