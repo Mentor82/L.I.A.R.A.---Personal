@@ -127,13 +127,27 @@ const MermaidDiagram = memo(({ code }) => {
     setSvg(null);
     setError(null);
 
-    import('mermaid').then(({ default: mermaid }) => {
-      if (!active) return;
+    import('mermaid').then(async ({ default: mermaid }) => {
+      if (!active) return null;
       const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
       mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'strict' });
+
+      // mermaid.render() resolves with a rendered "bomb" error SVG for
+      // invalid syntax instead of rejecting - which fires on every partial
+      // code block while the message is still streaming in. Validate first
+      // so an incomplete/invalid block quietly falls back to plain text
+      // (retried automatically as `code` grows) instead of flashing an
+      // alarming error graphic mid-stream.
+      const valid = await mermaid.parse(code, { suppressErrors: true });
+      if (!valid) return null;
+
       return mermaid.render(idRef.current, code);
     }).then((result) => {
-      if (!active || !result) return;
+      if (!active) return;
+      if (!result) {
+        setError('pending');
+        return;
+      }
       setSvg(result.svg);
     }).catch((err) => {
       if (!active) return;
