@@ -177,6 +177,20 @@
   letter-spacing: 0.02em;
 }
 
+.arch-zone-rect {
+  fill: rgba(192, 132, 252, 0.05);
+  stroke: rgba(192, 132, 252, 0.45);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+}
+
+.arch-zone-label {
+  fill: #c084fc;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
 .arch-edge-label {
   fill: var(--text-secondary, #cbd5e1);
   font-size: 11px;

@@ -108,7 +108,7 @@ export const architectureNodes = [
     description: 'Zentraler API-Server. Prüft Auth/Consent, lädt Kontext und übergibt an die Modell-Inferenz.',
     responsibilities: ['Request validieren', 'Auth/Consent durchsetzen', 'Kontext-Ladung anstoßen', 'An Modell-Inferenz übergeben'],
     paths: ['app/main.py', 'app/api/routers'],
-    views: ['system', 'chat', 'persistence'], x: 430, y: 430,
+    views: ['system', 'chat', 'persistence'], x: 430, y: 530,
   },
   {
     id: 'auth-privacy-consent', title: 'Auth, Privacy & Consent', subtitle: 'Login · Consent-Gates', layer: 'Governance',
@@ -124,7 +124,7 @@ export const architectureNodes = [
     description: 'Verwaltungsoberfläche für Admin-Nutzer: Benutzerverwaltung, Systemkonfiguration, Log-Einsicht, Service-Terminal, Update-Check.',
     responsibilities: ['Nutzer verwalten', 'Dienste neu starten/beobachten', 'Logs einsehen', 'Updates prüfen'],
     paths: ['app/api/routers/admin_router.py', 'frontend/src/components/AdminLayout.jsx'],
-    views: ['persistence'], x: 430, y: 580,
+    views: ['persistence'], x: 430, y: 680,
   },
   {
     id: 'context-memory', title: 'Context & Memory', subtitle: 'Konzept-Graph · Verlauf', layer: 'Knowledge',
@@ -215,12 +215,19 @@ export const architectureNodes = [
     views: ['persistence'], x: 970, y: 480,
   },
   {
+    id: 'provider-layer', title: 'Runtime Adapter / Provider Layer', subtitle: 'Geplant: Provider-Abstraktion', layer: 'Runtime',
+    status: 'planned', boundary: 'local',
+    description: 'Geplante Abstraktionsschicht zwischen Modell-Inferenz und dem tatsächlichen Runtime-Provider - heute ruft die Modell-Inferenz Ollama direkt auf. Ziel: austauschbare Provider (Ollama, OpenAI-kompatible APIs, lokales OpenVINO, entfernte LiNeP-Compute-Knoten, künftige Runtimes), ohne dass "Ollama" fest in die Architektur gegossen ist.',
+    responsibilities: ['Provider je nach Verfügbarkeit/Auswahl wählen (geplant)', 'Einheitliche Schnittstelle für Ollama und künftige Provider (geplant)'],
+    paths: [], views: ['system', 'chat'], x: 790, y: 390,
+  },
+  {
     id: 'ollama-local', title: 'Ollama (lokal)', subtitle: 'Lokale Modelle', layer: 'Runtime',
     status: 'implemented', boundary: 'local',
     description: 'Standard-Pfad für Inferenz - Modelle laufen vollständig auf eigener Hardware, nichts verlässt das System.',
     responsibilities: ['Lokale Modelle ausführen', 'Streaming-Tokens liefern'],
     paths: ['app/services/ollama_capabilities.py'],
-    views: ['system', 'chat'], x: 790, y: 430,
+    views: ['system', 'chat'], x: 790, y: 530,
   },
   {
     id: 'hailo-npu', title: 'Hailo-8L NPU', subtitle: 'Vision-Offload, kein Chat-Modell', layer: 'Edge',
@@ -228,7 +235,7 @@ export const architectureNodes = [
     description: 'Reines Vision-/Bilderkennungs-Inference-Offload auf einem Edge-Gerät (Raspberry Pi 5 + Hailo-8L) - Objekterkennung/Pose/Gesichter. Kein Chat-Sprachmodell und kein Ersatz für Ollama: ein separater, optionaler Seitenpfad, der immer lokal bleibt.',
     responsibilities: ['Bilderkennung auf der NPU ausführen (nicht: Text-Chat)', 'Ergebnisse an das Backend zurückgeben'],
     paths: ['app/services/hailo_rpi5_client.py', 'app/api/routers/hailo_router.py'],
-    views: ['chat'], x: 1150, y: 110,
+    views: ['chat'], x: 1150, y: 110, zone: 'resources',
   },
   {
     id: 'coral-tpu', title: 'Coral Edge TPU', subtitle: 'edge01 · Vision-Offload', layer: 'Edge',
@@ -236,35 +243,35 @@ export const architectureNodes = [
     description: 'Zweiter, austauschbarer Vision-Backend-Pfad neben Hailo-8L: ein Coral USB Accelerator auf einem separaten Edge-Host (edge01), per REST angesprochen. Wie Hailo kein Chat-Sprachmodell - reines Objekterkennungs-Offload (SSD MobileDet).',
     responsibilities: ['Objekterkennung auf der Coral-TPU ausführen', 'Health/Model-Status an das Backend melden'],
     paths: ['app/services/edgetpu_client.py', 'app/services/vision_detection_service.py'],
-    views: ['chat'], x: 1330, y: 110,
+    views: ['chat'], x: 1330, y: 110, zone: 'resources',
   },
   {
     id: 'linep', title: 'LiNeP / LiNeP-SL', subtitle: 'Geplant: Accelerator-Netzwerkprotokoll', layer: 'Edge',
     status: 'planned', boundary: 'local',
     description: 'Geplant: eigenständiges Protokoll (separates Projekt, Mentor82/LiNeP) für Worker-Registrierung, Heartbeat und Streaming zwischen KI-Engines - LiNeP-SL ergänzt Authentifizierung/Autorisierung darüber. Würde Hailo-8L und Coral Edge TPU über einen einheitlichen Kanal anbinden statt über separate REST-Clients wie heute.',
     responsibilities: ['Worker-Slot/Heartbeat-Registrierung (geplant)', 'Hailo-8L und Coral TPU über einen Kanal bündeln (geplant)'],
-    paths: [], views: ['chat'], x: 1180, y: 20,
+    paths: [], views: ['chat'], x: 1180, y: 20, zone: 'resources',
   },
   {
     id: 'liara-plugin', title: 'LIARA-Core-Plugin', subtitle: 'Geplant: eigene Erweiterung', layer: 'Edge',
     status: 'planned', boundary: 'local',
     description: 'Geplant als eigenständiges, optionales Plugin/Erweiterung für LIARA Personal - kapselt die Anbindung an LIARA (Core) über LiNeP, statt die Core-Kopplung fest ins Backend einzubauen. Nur aktiv, wenn installiert/aktiviert; ohne das Plugin bleibt Personal komplett unabhängig von Core.',
     responsibilities: ['LiNeP-Verbindung zu LIARA Core kapseln (geplant)', 'Optional aktivierbar, ohne das Kernsystem zu koppeln (geplant)'],
-    paths: [], views: ['chat'], x: 1360, y: 20,
+    paths: [], views: ['chat'], x: 1360, y: 20, zone: 'resources',
   },
   {
     id: 'liara-core', title: 'LIARA (Core)', subtitle: 'Separates Projekt', layer: 'Edge',
     status: 'planned', boundary: 'local',
     description: 'Das separate LIARA-Core-Projekt (Mentor82/L.I.A.R.A.) - geplante Anbindung ausschließlich über das LIARA-Core-Plugin, nicht direkt aus dem Personal-Kernsystem heraus.',
     responsibilities: ['Ressourcen/Erkenntnisse mit LIARA Personal teilen (geplant, nur über Plugin)'],
-    paths: [], views: ['chat'], x: 1540, y: 20,
+    paths: [], views: ['chat'], x: 1540, y: 20, zone: 'resources',
   },
   {
     id: 'ollama-cloud', title: 'Ollama Cloud', subtitle: 'Nur bei :cloud-Modell', layer: 'Runtime',
     status: 'implemented', boundary: 'cloud',
     description: 'Wird ausschließlich erreicht, wenn ein Nutzer bewusst ein Modell mit ":cloud"-Kennzeichnung auswählt. Die lokale Infrastruktur, Persistenz und alle Nutzerdaten bleiben davon unberührt - nur der Inferenz-Aufruf für dieses eine Modell verlässt das System.',
     responsibilities: ['Inferenz für explizit gewählte :cloud-Modelle ausführen'],
-    paths: [], views: ['system', 'chat'], x: 1600, y: 430,
+    paths: [], views: ['system', 'chat'], x: 1600, y: 530,
   },
 ];
 
@@ -303,8 +310,9 @@ export const architectureEdges = [
   { from: 'tool-executor', to: 'code-runner', label: 'Code ausführen', kind: 'request', views: ['chat'] },
   { from: 'code-runner', to: 'workspace-artifacts', label: 'Dateien ablegen', kind: 'memory-write', views: ['chat', 'persistence'] },
 
-  { from: 'model-inference', to: 'ollama-local', label: 'lokale Inferenz', kind: 'model-inference', views: ['system', 'chat'] },
-  { from: 'model-inference', to: 'ollama-cloud', label: 'Inferenz-Aufruf: nur bei :cloud-Modell', kind: 'optional-cloud', views: ['system', 'chat'], bow: true, bowDir: -1, bowAmount: 150 },
+  { from: 'model-inference', to: 'provider-layer', label: 'Runtime wählen', kind: 'model-inference', views: ['system', 'chat'] },
+  { from: 'provider-layer', to: 'ollama-local', label: 'lokale Inferenz', kind: 'model-inference', views: ['system', 'chat'] },
+  { from: 'provider-layer', to: 'ollama-cloud', label: 'Inferenz-Aufruf: nur bei :cloud-Modell', kind: 'optional-cloud', views: ['system', 'chat'], bow: true, bowDir: -1, bowAmount: 150 },
 
   { from: 'backend', to: 'persistence', label: 'Sessions/Nutzer', kind: 'memory-write', views: ['persistence'] },
   { from: 'persistence', to: 'context-memory', label: 'Verlauf laden', kind: 'memory-read', views: ['persistence'] },

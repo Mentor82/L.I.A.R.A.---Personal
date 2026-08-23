@@ -68,6 +68,20 @@ function ArchitectureMap() {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }, [visibleNodes]);
 
+  // Second, inner zone: hardware accelerators + the LiNeP/Core integration
+  // layer - components Personal talks to as SHARED/EXTERNAL capability
+  // rather than owning them outright. Only nodes tagged `zone: 'resources'`
+  // count, and only when at least one is actually visible in this view.
+  const resourceZoneRect = useMemo(() => {
+    const zoneNodes = visibleNodes.filter((node) => node.zone === 'resources');
+    if (zoneNodes.length === 0) return null;
+    const minX = Math.min(...zoneNodes.map((n) => n.x)) - NODE_WIDTH / 2 - BOUNDARY_PADDING;
+    const maxX = Math.max(...zoneNodes.map((n) => n.x)) + NODE_WIDTH / 2 + BOUNDARY_PADDING;
+    const minY = Math.min(...zoneNodes.map((n) => n.y)) - NODE_HEIGHT / 2 - BOUNDARY_PADDING;
+    const maxY = Math.max(...zoneNodes.map((n) => n.y)) + NODE_HEIGHT / 2 + BOUNDARY_PADDING;
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }, [visibleNodes]);
+
   // Canvas viewBox likewise fits the current view's own nodes (local, client
   // and cloud alike) instead of a single fixed size shared by all tabs.
   const viewBox = useMemo(() => {
@@ -251,6 +265,24 @@ function ArchitectureMap() {
             <text x={boundaryRect.x + 16} y={boundaryRect.y + 24} className="arch-boundary-label">
               Self-hosted / Local-first Perimeter
             </text>
+
+            {/* Inner zone: shared/external capability Personal can dock onto
+                (accelerators, LiNeP, the Core plugin) - not owned outright,
+                distinct from the plain self-hosted perimeter above. */}
+            {resourceZoneRect && (
+              <>
+                <rect
+                  x={resourceZoneRect.x}
+                  y={resourceZoneRect.y}
+                  width={resourceZoneRect.width}
+                  height={resourceZoneRect.height}
+                  className="arch-zone-rect"
+                />
+                <text x={resourceZoneRect.x + 16} y={resourceZoneRect.y + 24} className="arch-zone-label">
+                  Verfügbare / geteilte Ressourcen
+                </text>
+              </>
+            )}
 
             {/* Edges - forward flow uses a horizontal-tangent curve pulled
                 back to each node's border; feedback edges (a result/response
