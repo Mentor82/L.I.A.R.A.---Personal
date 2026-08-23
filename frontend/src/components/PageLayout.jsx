@@ -4,7 +4,7 @@ import { THEME_STORAGE_KEY, getStoredTheme, resolveEffectiveTheme, applyTheme } 
 import liaraLogo from '../assets/LIARA-LOGO.png';
 import './PageLayout.css';
 
-function PageLayout({ children, showGuestCTA = false }) {
+function PageLayout({ children, showGuestCTA = false, wide = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isLandingPage = location.pathname === '/';
@@ -76,7 +76,7 @@ function PageLayout({ children, showGuestCTA = false }) {
         </header>
       )}
 
-      <div className="layout-content">
+      <div className={`layout-content${wide ? ' layout-content-wide' : ''}`}>
         {/* Sidebar */}
         <aside className="layout-sidebar">
           <div className="sidebar-header">

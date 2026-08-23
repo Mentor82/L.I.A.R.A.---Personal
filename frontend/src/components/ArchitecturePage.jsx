@@ -4,7 +4,7 @@ import './FeaturesPage.css';
 
 function ArchitecturePage() {
   return (
-    <PageLayout>
+    <PageLayout wide>
       <div className="architecture-page-content">
         <section className="page-hero" style={{ paddingBottom: '1.5rem' }}>
           <h1 className="page-title">

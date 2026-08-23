@@ -104,6 +104,13 @@
   padding: 2rem;
 }
 
+/* Opt-in for pages whose main content wants more than the 1400px reading
+   width (e.g. the Architecture Map's canvas) - text-heavy pages (Features,
+   Technologie, legal pages) keep the narrower default on purpose. */
+.layout-content-wide {
+  max-width: 1800px;
+}
+
 /* Sidebar */
 .layout-sidebar {
   position: sticky;
