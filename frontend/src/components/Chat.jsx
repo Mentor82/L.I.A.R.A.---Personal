@@ -1237,6 +1237,9 @@ function Chat() {
             <div className="image-info">
               📸 {selectedImage?.name} ({(selectedImage?.size / 1024).toFixed(0)} KB)
             </div>
+            <div className="vision-model-hint">
+              ℹ️ Bildanalyse läuft immer über llava:7b bzw. Hailo-8L – die Modellauswahl oben gilt nur für Text-Chats.
+            </div>
           </div>
         )}
 
@@ -1339,7 +1342,7 @@ function Chat() {
                 onClick={handleImageAnalysis}
                 disabled={!message.trim()}
                 className="chat-submit vision-submit"
-                title="LLM Bildanalyse"
+                title="LLM-Bildanalyse (llava:7b, unabhängig vom oben gewählten Modell)"
               >
                 🖼️ LLM
               </button>
@@ -1348,7 +1351,7 @@ function Chat() {
                 onClick={handleHailoVision}
                 disabled={loading}
                 className="chat-submit vision-submit hailo-submit"
-                title="Hailo-8L Vision"
+                title="Hailo-8L Vision (dediziertes NPU-Backend, unabhängig vom oben gewählten Modell)"
               >
                 ⚡ Hailo
               </button>
