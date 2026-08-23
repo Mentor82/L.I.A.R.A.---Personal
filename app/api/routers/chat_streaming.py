@@ -804,6 +804,13 @@ async def stream_chat(
 
             threading.Thread(target=store_memory_async, daemon=True).start()
 
+    except HTTPException:
+        # The session-ownership check above deliberately raises 404 for a
+        # session the user doesn't own - without this, the bare except
+        # below swallowed it as a mere "storage failed" log line and chat
+        # continued anyway, so a request for someone else's session_id
+        # would silently degrade instead of actually failing.
+        raise
     except Exception as e:
         logger.error(f"Message storage failed: {e}")
         # Continue with chat even if message storage fails

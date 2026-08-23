@@ -31,7 +31,7 @@ export async function getChatSessions() {
 export async function createChatSession(title = 'Neue Konversation') {
   const token = localStorage.getItem('liara_token')
   
-  const response = await fetch(`${API_BASE}/chat/sessions/`, {
+  const response = await fetch(`${API_BASE}/chat/sessions`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -39,7 +39,7 @@ export async function createChatSession(title = 'Neue Konversation') {
     },
     body: JSON.stringify({ title })
   })
-  
+
   if (!response.ok) {
     throw new Error('Failed to create chat session')
   }
