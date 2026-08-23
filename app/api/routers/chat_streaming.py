@@ -431,8 +431,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             turn_content = ""
             turn_tool_calls = []
 
-            # Streaming Request zu Ollama via httpx (NO buffering)
-            async with httpx.AsyncClient(timeout=90.0) as client:
+            # Streaming Request zu Ollama via httpx (NO buffering).
+            # A flat 90s timeout here used to apply to EVERY read (the gap
+            # between successive streamed chunks), not just the initial
+            # connect - on CPU-only inference, a long/detailed answer can
+            # legitimately have a quiet stretch (large context processing,
+            # slow token generation under load) exceeding 90s well before
+            # nginx's own 300s proxy_read_timeout on /api/chat/stream would
+            # ever be the limiting factor, so long responses were cut off by
+            # our own client, not by anything downstream. Connect stays
+            # short (Ollama not even accepting a connection should fail
+            # fast); read is raised to just under nginx's ceiling.
+            ollama_timeout = httpx.Timeout(connect=10.0, read=280.0, write=10.0, pool=10.0)
+            async with httpx.AsyncClient(timeout=ollama_timeout) as client:
                 async with client.stream(
                     "POST",
                     "http://localhost:11434/api/chat",
@@ -688,7 +699,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
     except httpx.TimeoutException:
         error = ChatError(
             error_type="timeout",
-            message="Ollama antwortet nicht (Timeout nach 90s)",
+            message="Ollama antwortet nicht (Timeout nach 280s)",
             timestamp=datetime.now().isoformat(),
             recoverable=True,
             suggestion="Versuche es mit einem schnelleren Modell (z.B. llama3.2:1b)"
