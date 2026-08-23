@@ -19,6 +19,11 @@ pgvector==0.2.4
 python-jose[cryptography]==3.3.0
 httpx>=0.28.0
 
+# Concept extraction (POS-based noun/proper-noun extraction, replacing the
+# old length+stopword heuristic) - needs `python -m spacy download de_core_news_sm`
+# after installing, see deploy notes.
+spacy==3.7.5
+
 # Image Generation (Stable Diffusion via Replicate)
 # Optional: Nur wenn Bild-Generierung gewünscht
 # Keine zusätzlichen Pakete nötig (httpx schon vorhanden)

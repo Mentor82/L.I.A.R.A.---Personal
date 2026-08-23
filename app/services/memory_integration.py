@@ -27,18 +27,76 @@ logger = logging.getLogger(__name__)
 # CONCEPT EXTRACTION
 # ============================================================================
 
+# Lazy-loaded singleton: spaCy's German model takes a noticeable moment to
+# load (~1-2s), so it's loaded once per process, not per call. `parser`/`ner`
+# are disabled since concept extraction only needs POS tags + lemmas, not
+# dependency trees or named-entity spans - skipping them roughly halves
+# per-message processing time.
+_nlp_de = None
+_nlp_de_unavailable = False
+
+
+def _get_spacy_nlp():
+    global _nlp_de, _nlp_de_unavailable
+    if _nlp_de is not None or _nlp_de_unavailable:
+        return _nlp_de
+    try:
+        import spacy
+        _nlp_de = spacy.load("de_core_news_sm", disable=["parser", "ner"])
+        logger.info("Loaded spaCy de_core_news_sm for concept extraction")
+    except Exception as e:
+        # Missing model/package shouldn't break chat - degrade to the naive
+        # extractor below instead of raising on every single message.
+        logger.warning(f"spaCy German model unavailable, falling back to naive concept extraction: {e}")
+        _nlp_de_unavailable = True
+    return _nlp_de
+
+
 def extract_concepts(text: str, min_length: int = 4) -> List[str]:
     """
-    Extrahiert Konzepte aus Text (Substantive, wichtige Terme)
-    
+    Extrahiert Konzepte aus Text - echte Substantive/Eigennamen via
+    Wortart-Erkennung (spaCy), nicht nur "Wort ist lang genug und kein
+    Stoppwort". Die alte längen+Stoppwort-Heuristik hatte kein Konzept von
+    Grammatik: 2.-Person-Pronomen, Begrüßungen, Adverbien und konjugierte
+    Verbformen landeten genauso als "Concept" im Graph wie echte Substantive,
+    weil eine Stoppwortliste jede einzelne Flexionsform separat auflisten
+    müsste, um das zu verhindern.
+
     Args:
         text: Input-Text
-        min_length: Minimale Wortlänge
-        
+        min_length: Minimale Wortlänge (nach Lemmatisierung)
+
     Returns:
-        Liste von Konzepten
+        Liste von Konzepten (lemmatisiert, häufigste zuerst)
     """
-    # Stopwords (DE + EN)
+    nlp = _get_spacy_nlp()
+    if nlp is None:
+        return _extract_concepts_naive(text, min_length)
+
+    doc = nlp(text)
+    concepts = [
+        token.lemma_.lower() for token in doc
+        if token.pos_ in ("NOUN", "PROPN")
+        and token.is_alpha
+        and len(token.lemma_) >= min_length
+    ]
+
+    concept_freq = Counter(concepts)
+    unique_concepts = list(dict.fromkeys(
+        [word for word, _ in concept_freq.most_common()]
+    ))
+
+    logger.debug(f"Extracted {len(unique_concepts)} concepts from text (spaCy)")
+    return unique_concepts
+
+
+def _extract_concepts_naive(text: str, min_length: int = 4) -> List[str]:
+    """
+    Fallback used only when the spaCy German model isn't installed:
+    length + a small stopword list, no actual grammar awareness. Kept
+    around so a missing model degrades chat quality slightly instead of
+    breaking message storage outright.
+    """
     stopwords = {
         # Deutsch
         'aber', 'als', 'auch', 'bei', 'bin', 'bis', 'das', 'dass', 'dem', 'den',
@@ -56,26 +114,21 @@ def extract_concepts(text: str, min_length: int = 4) -> List[str]:
         'them', 'there', 'these', 'they', 'this', 'to', 'was', 'we', 'what', 'when',
         'where', 'which', 'who', 'will', 'with', 'you', 'your'
     }
-    
-    # Text normalisieren
+
     text_clean = re.sub(r'[^\w\s]', ' ', text.lower())
     words = text_clean.split()
-    
-    # Filtern: Länge + Stopwords
+
     concepts = [
-        word for word in words 
+        word for word in words
         if len(word) >= min_length and word not in stopwords
     ]
-    
-    # Deduplizieren aber Häufigkeit behalten (für Wichtigkeit)
+
     concept_freq = Counter(concepts)
-    
-    # Sortiere nach Häufigkeit, nehme unique
     unique_concepts = list(dict.fromkeys(
         [word for word, _ in concept_freq.most_common()]
     ))
-    
-    logger.debug(f"Extracted {len(unique_concepts)} concepts from text")
+
+    logger.debug(f"Extracted {len(unique_concepts)} concepts from text (naive fallback)")
     return unique_concepts
 
 
