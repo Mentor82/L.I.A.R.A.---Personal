@@ -155,11 +155,12 @@ def _preexec(language: str):
 
 
 def _build_command(language: str, workspace_dir: Path, script_path: Path) -> List[str]:
-    args = [RUNNER_SCRIPT, language, str(workspace_dir), str(script_path)]
-    if shutil.which("unshare"):
-        return ["sudo", "-n", "-u", RUNNER_USER, "--",
-                "unshare", "--net", "--map-root-user", "--", *args]
-    return ["sudo", "-n", "-u", RUNNER_USER, "--", *args]
+    # Network isolation (unshare --net) happens *inside* run_sandboxed.sh, not
+    # wrapped here - sudo's NOPASSWD rule whitelists that exact script as the
+    # command it execs, and wrapping `unshare` around the sudo call would make
+    # `unshare` the exec'd command instead, which never matches the rule.
+    return ["sudo", "-n", "-u", RUNNER_USER, "--",
+            RUNNER_SCRIPT, language, str(workspace_dir), str(script_path)]
 
 
 def run_code(language: str, code: str, session_dir: Path, timeout: int = TIMEOUT_SECONDS) -> SandboxResult:

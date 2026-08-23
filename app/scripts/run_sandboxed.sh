@@ -16,6 +16,17 @@ LANGUAGE="$1"
 WORKSPACE_DIR="$2"
 SCRIPT_PATH="$3"
 
+# Network isolation has to happen *inside* this script, not by wrapping the
+# sudo call in `unshare` from the Python caller: sudo's NOPASSWD rule
+# whitelists this exact script as the command it execs - if the caller instead
+# execs `unshare ... -- run_sandboxed.sh`, the command sudo checks against the
+# sudoers rule is `unshare`, which never matches, and sudo demands a password.
+# So: self-reexec once under a fresh net+user namespace, marked by an env var
+# to avoid unshare'ing recursively forever.
+if [ -z "${LIARA_SANDBOX_NETNS:-}" ] && command -v unshare >/dev/null 2>&1; then
+  exec env LIARA_SANDBOX_NETNS=1 unshare --net --map-root-user -- "$0" "$@"
+fi
+
 cd "$WORKSPACE_DIR"
 
 # Resource limits - last line of defense if the caller's preexec_fn rlimits
