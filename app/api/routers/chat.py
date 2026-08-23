@@ -136,27 +136,27 @@ def _detect_image_generation_request(message: str) -> bool:
     return any(keyword in message_lower for keyword in image_keywords)
 
 
-async def _execute_tool_call_if_needed(response_text: str, user_id: int) -> tuple[str, Optional[Dict]]:
+async def _execute_tool_call_if_needed(response_text: str, user_id: int, db: Optional[Session] = None) -> tuple[str, Optional[Dict]]:
     """
     Prüft ob Response einen Tool-Call enthält und führt ihn aus.
-    
+
     Returns:
         (updated_response, tool_result)
     """
     tool_parser = get_tool_parser()
-    
+
     # Prüfe auf Tool-Call
     if not tool_parser.contains_tool_call(response_text):
         return response_text, None
-    
+
     # Extrahiere Tool-Call
     tool_call = tool_parser.extract_tool_call(response_text)
     if not tool_call:
         return response_text, None
-    
+
     # Führe Tool aus
     tool_executor = get_tool_executor()
-    tool_result = await tool_executor.execute(tool_call, user_id)
+    tool_result = await tool_executor.execute(tool_call, user_id, db=db)
     
     # Entferne Tool-Call aus Response
     cleaned_response = tool_parser.remove_tool_calls(response_text)
@@ -590,7 +590,8 @@ class ChatResponse(BaseModel):
 @router.post("/message", response_model=ChatResponse)
 async def chat_with_liara(
     request: ChatRequest,
-    current_user: User = Depends(require_active_user)
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db)
 ):
     """
     Chat mit Liara über Ollama mit Intent Detection und Personalisierung
@@ -863,7 +864,7 @@ async def chat_with_liara(
         # === END BACKEND ROUTING ===
         
         # Prüfe auf Tool-Call und führe aus
-        response_text, tool_result = await _execute_tool_call_if_needed(response_text, current_user.id)
+        response_text, tool_result = await _execute_tool_call_if_needed(response_text, current_user.id, db=db)
         
         # Falls Tool verwendet: Zweite LLM-Anfrage mit Tool-Result
         if tool_result:

@@ -3,9 +3,10 @@
 Automatische Ausführung von Tool-Calls mit Privacy-Checks
 """
 import logging
-import requests
 from typing import Dict, Any, Optional
 from datetime import datetime
+
+from sqlalchemy.orm import Session
 
 from services.tool_registry import get_tool_registry, ToolDefinition
 from services.tool_parser import ToolCall
@@ -48,41 +49,45 @@ class ToolExecutor:
         self,
         tool_call: ToolCall,
         user_id: int,
-        check_consent: bool = True
+        check_consent: bool = True,
+        db: Optional[Session] = None
     ) -> Dict[str, Any]:
         """
         Führt Tool-Call aus
-        
+
         Args:
             tool_call: Der auszuführende Tool-Call
             user_id: User-ID für Privacy-Checks
             check_consent: Ob Consent geprüft werden soll
-            
+            db: DB-Session, nötig für Tools mit echter Consent-Prüfung
+                (aktuell nur detect_location) - optional, da die meisten
+                Aufrufer (z.B. Agent) sie nie brauchen.
+
         Returns:
             Tool-Execution Result
-            
+
         Raises:
             ToolExecutionError: Bei Ausführungsfehlern
         """
         # Tool aus Registry holen
         tool_def = self.registry.get_tool(tool_call.tool_name)
-        
+
         if not tool_def:
             return self._error_result(
                 tool_call.tool_name,
                 f"Unknown tool: {tool_call.tool_name}"
             )
-        
+
         # Privacy-Check
         if check_consent and tool_def.requires_consent:
-            has_consent = await self._check_user_consent(user_id, tool_def)
+            has_consent = await self._check_user_consent(user_id, tool_def, db)
             if not has_consent:
                 return self._error_result(
                     tool_call.tool_name,
                     "User consent required but not granted",
                     consent_required=True
                 )
-        
+
         # Parameter-Validierung
         validation_error = self._validate_parameters(tool_call, tool_def)
         if validation_error:
@@ -90,12 +95,12 @@ class ToolExecutor:
                 tool_call.tool_name,
                 validation_error
             )
-        
+
         # Tool ausführen
         try:
             logger.info(f"Executing tool: {tool_call.tool_name} for user {user_id}")
-            
-            result = await self._execute_tool(tool_def, tool_call.parameters, user_id)
+
+            result = await self._execute_tool(tool_def, tool_call.parameters, user_id, db)
             
             return {
                 "success": True,
@@ -116,7 +121,8 @@ class ToolExecutor:
         self,
         tool_def: ToolDefinition,
         parameters: Dict[str, Any],
-        user_id: int
+        user_id: int,
+        db: Optional[Session] = None
     ) -> Any:
         """
         Routing zu echten Tool-Implementierungen
@@ -124,14 +130,14 @@ class ToolExecutor:
         # Web Search
         if tool_def.name == "web_search":
             return await self._execute_web_search(parameters)
-        
+
         # Weather
         elif tool_def.name == "get_weather":
             return await self._execute_weather(parameters)
-        
+
         # Location Detection
         elif tool_def.name == "detect_location":
-            return await self._execute_location(user_id)
+            return await self._execute_location(user_id, db)
         
         # Wikipedia
         elif tool_def.name == "wikipedia_search":
@@ -166,64 +172,49 @@ class ToolExecutor:
     
     async def _execute_weather(self, params: Dict[str, Any]) -> Dict:
         """
-        Führt Wetter-Abfrage aus über Open-Meteo (kostenlos, kein API-Key nötig).
-        Zwei Calls: Geocoding (Stadtname -> Koordinaten), dann die Wettervorhersage.
+        Führt Wetter-Abfrage aus - reuses web_search_service.get_weather_info()
+        (the same Open-Meteo call chat_streaming.py's pre-LLM heuristic already
+        uses) instead of a second, independent Open-Meteo implementation.
         """
         city = params.get("city")
         country = params.get("country")
 
-        try:
-            geo_response = requests.get(
-                "https://geocoding-api.open-meteo.com/v1/search",
-                params={"name": city, "count": 1, "language": "de"},
-                timeout=5
-            )
-            geo_response.raise_for_status()
-            geo_results = geo_response.json().get("results")
+        result = self.web_search.get_weather_info(city)
 
-            if not geo_results:
-                return {
-                    "city": city,
-                    "country": country,
-                    "error": f"Ort '{city}' nicht gefunden"
-                }
-
-            location = geo_results[0]
-
-            weather_response = requests.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": location["latitude"],
-                    "longitude": location["longitude"],
-                    "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code",
-                    "timezone": "auto"
-                },
-                timeout=5
-            )
-            weather_response.raise_for_status()
-            current = weather_response.json().get("current", {})
-
-            return {
-                "city": location.get("name", city),
-                "country": location.get("country", country),
-                "temperature": current.get("temperature_2m"),
-                "condition": _WMO_WEATHER_CODES.get(current.get("weather_code"), "Unbekannt"),
-                "humidity": current.get("relative_humidity_2m"),
-                "wind_speed": current.get("wind_speed_10m")
-            }
-        except Exception as e:
-            logger.error(f"Weather lookup failed for '{city}': {e}")
+        if "error" in result:
             return {
                 "city": city,
                 "country": country,
-                "error": f"Wetterabfrage fehlgeschlagen: {e}"
+                "error": result["error"]
             }
+
+        return {
+            "city": result.get("location", city),
+            "country": result.get("country", country),
+            "temperature": result.get("temperature"),
+            "condition": _WMO_WEATHER_CODES.get(result.get("weather_code"), "Unbekannt"),
+            "humidity": result.get("humidity"),
+            "wind_speed": result.get("wind_speed")
+        }
     
-    async def _execute_location(self, user_id: int) -> Dict:
-        """Führt Standort-Erkennung aus"""
-        # TODO: Get user's IP from request context
-        location = await self.location_service.detect_location_from_ip(None)
-        
+    async def _execute_location(self, user_id: int, db: Optional[Session] = None) -> Dict:
+        """
+        Returns the user's already-consented stored location (see
+        PrivacySettings.jsx / location_router.py) - never a live IP lookup
+        here, since a backend tool call has no access to the original
+        end-user request's IP anyway (calling get_location_from_ip(None)
+        would just resolve this server's own IP, not the user's).
+        """
+        if db is None:
+            return {"error": "Standort nicht verfügbar (keine DB-Verbindung)"}
+
+        location = self.location_service.get_user_location(db, user_id)
+        if not location:
+            return {
+                "error": "Kein Standort hinterlegt",
+                "message": "Der Nutzer hat der Standort-Erkennung noch nicht zugestimmt (Einstellungen -> Datenschutz)."
+            }
+
         return {
             "city": location.get("city", "Unknown"),
             "region": location.get("region", "Unknown"),
@@ -342,18 +333,25 @@ class ToolExecutor:
         
         return None
     
-    async def _check_user_consent(self, user_id: int, tool_def: ToolDefinition) -> bool:
+    async def _check_user_consent(self, user_id: int, tool_def: ToolDefinition, db: Optional[Session] = None) -> bool:
         """
         Prüft ob User Consent für Tool gegeben hat
-        
-        TODO: Implement actual database check
         """
         # Für jetzt: Erlaube alle Tools mit niedrigem Privacy-Level
         if tool_def.privacy_level == "low":
             return True
-        
-        # Mittlere und hohe Privacy-Levels erfordern expliziten Consent
-        # TODO: Check database for user_tool_consents table
+
+        # detect_location has a real, already-shipped consent mechanism
+        # (user_location_preferences / PrivacySettings.jsx / location_router.py)
+        # - just check whether this user has actually granted it, instead of
+        # a blanket deny. No generic "user_tool_consents" table exists for
+        # any other tool, so everything else still falls through to the
+        # honest "not implemented" denial below.
+        if tool_def.name == "detect_location" and db is not None:
+            stored_location = self.location_service.get_user_location(db, user_id)
+            return stored_location is not None
+
+        # Mittlere und hohe Privacy-Levels ohne eigenen Consent-Mechanismus
         logger.warning(f"Consent check not fully implemented - denying {tool_def.name}")
         return False
     

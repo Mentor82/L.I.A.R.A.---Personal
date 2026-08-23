@@ -110,8 +110,13 @@ class ToolRegistry:
                 )
             ],
             function=self._weather_stub,
-            requires_consent=True,
-            privacy_level="medium"
+            # Only ever operates on a city name the model already pulled from
+            # the user's own message - never the user's real location/IP.
+            # Same public-lookup privacy profile as web_search/wikipedia_search
+            # (both "low", no consent gate) - "medium" was a miscategorization,
+            # not a deliberate protection (see live-tested "Fix tools" plan).
+            requires_consent=False,
+            privacy_level="low"
         ))
         
         # 📍 Location Detection Tool
