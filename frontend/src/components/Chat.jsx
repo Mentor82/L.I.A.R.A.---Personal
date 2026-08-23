@@ -1051,6 +1051,9 @@ function Chat() {
               💬 {messages.length}
             </span>
           )}
+          <button onClick={createNewChat} className="btn-new-chat" title="Neue Konversation">
+            ➕
+          </button>
           <button onClick={clearChat} className="btn-clear" title="Chat löschen">
             🗑️
           </button>
