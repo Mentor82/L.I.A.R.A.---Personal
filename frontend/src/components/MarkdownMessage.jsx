@@ -11,6 +11,28 @@ import './MarkdownMessage.css';
 // language aliases on the backend (app/services/code_sandbox.py).
 const RUNNABLE_LANGUAGES = new Set(['python', 'py', 'python3', 'julia', 'jl']);
 
+// Full-size overlay for images shown small inline (chat plots, generated
+// images) - click-to-enlarge without navigating away via window.open.
+const ImageLightbox = ({ src, alt, onClose }) => {
+  useEffect(() => {
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  return (
+    <div className="image-lightbox-backdrop" onClick={onClose}>
+      <button className="image-lightbox-close" onClick={onClose} title="Schließen">✕</button>
+      <img
+        src={src}
+        alt={alt || 'Bild'}
+        className="image-lightbox-img"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  );
+};
+
 // LLMs commonly write LaTeX using \( \)/\[ \] (common in OpenAI-style
 // training data) instead of the $ $/$$ $$ delimiters remark-math expects.
 // Without this, those blocks are not just left unstyled - markdown's own
@@ -185,6 +207,7 @@ MermaidDiagram.displayName = 'MermaidDiagram';
 // download-linked list for any other produced files.
 const CodeRunResult = ({ result, sessionId }) => {
   const [downloadError, setDownloadError] = useState(null);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
 
   if (result.error) {
     return (
@@ -232,7 +255,7 @@ const CodeRunResult = ({ result, sessionId }) => {
             src={f.inline_base64}
             alt={f.name}
             className="markdown-image"
-            onClick={() => window.open(f.inline_base64, '_blank')}
+            onClick={() => setLightboxSrc(f.inline_base64)}
             title="Klicken zum Vergrößern"
           />
           <p className="markdown-image-caption">
@@ -243,6 +266,9 @@ const CodeRunResult = ({ result, sessionId }) => {
           </p>
         </div>
       ))}
+      {lightboxSrc && (
+        <ImageLightbox src={lightboxSrc} alt="Ausführungsergebnis" onClose={() => setLightboxSrc(null)} />
+      )}
       {otherFiles.length > 0 && (
         <ul className="code-run-files">
           {otherFiles.map((f) => (
@@ -446,17 +472,21 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
         
         // Custom Image Renderer (für generierte Bilder)
         img({ src, alt }) {
+          const [lightboxOpen, setLightboxOpen] = useState(false);
           return (
             <div className="markdown-image-wrapper">
-              <img 
-                src={src} 
-                alt={alt || 'Generiertes Bild'} 
+              <img
+                src={src}
+                alt={alt || 'Generiertes Bild'}
                 className="markdown-image"
                 loading="lazy"
-                onClick={() => window.open(src, '_blank')}
+                onClick={() => setLightboxOpen(true)}
                 title="Klicken zum Vergrößern"
               />
               {alt && <p className="markdown-image-caption">{alt}</p>}
+              {lightboxOpen && (
+                <ImageLightbox src={src} alt={alt} onClose={() => setLightboxOpen(false)} />
+              )}
             </div>
           );
         },
