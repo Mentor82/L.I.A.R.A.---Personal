@@ -66,7 +66,7 @@ export const architectureNodes = [
     description: 'JWT-Login und die Consent-Prüfungen, die jedem sensiblen Tool-Aufruf vorgeschaltet sind (z.B. Websuche, Standort).',
     responsibilities: ['Login/Session verwalten', 'Privacy-Einstellungen speichern', 'Consent je Tool prüfen, bevor es aufgerufen wird'],
     paths: ['app/api/routers/privacy_router.py', 'app/services/tool_executor.py'],
-    views: ['chat', 'persistence'], x: 430, y: 100, },
+    views: ['chat', 'persistence'], x: 340, y: 100, },
   {
     id: 'admin-functions', title: 'Admin-Funktionen', subtitle: 'Nutzer · System · Logs · Terminal', layer: 'Governance',
     status: 'implemented', boundary: 'local',
@@ -113,7 +113,7 @@ export const architectureNodes = [
     description: 'Baut aus dem Gesprächsverlauf und extrahierten Konzepten (Nomen/Eigennamen) den Gedächtnis-Kontext für die nächste Antwort.',
     responsibilities: ['Konzepte extrahieren', 'Kontext aus Verlauf + Graph zusammenstellen'],
     paths: ['app/services/memory_service.py'],
-    views: ['system', 'chat', 'persistence'], x: 790, y: 480,
+    views: ['system', 'chat', 'persistence'], x: 610, y: 480,
   },
   {
     id: 'web-search', title: 'Web-Suche', subtitle: 'SearXNG · Freshness-Policy', layer: 'Reasoning',
@@ -161,7 +161,7 @@ export const architectureNodes = [
     description: 'Standard-Pfad für Inferenz - Modelle laufen vollständig auf eigener Hardware, nichts verlässt das System.',
     responsibilities: ['Lokale Modelle ausführen', 'Streaming-Tokens liefern'],
     paths: ['app/services/ollama_capabilities.py'],
-    views: ['system', 'chat'], x: 970, y: 100,
+    views: ['system', 'chat'], x: 520, y: 100,
   },
   {
     id: 'hailo-npu', title: 'Hailo-8L NPU', subtitle: 'RPi5 · Edge-Vision', layer: 'Edge',
@@ -169,7 +169,7 @@ export const architectureNodes = [
     description: 'Eigenständiges Edge-Gerät (Raspberry Pi 5 + Hailo-8L) für Objekterkennung/Pose/Gesichter - bleibt eine lokale Edge/NPU-Komponente, unabhängig davon, ob gerade ein Cloud-Modell für den Text-Chat gewählt ist.',
     responsibilities: ['Bilderkennung auf der NPU ausführen', 'Ergebnisse an das Backend zurückgeben'],
     paths: ['app/services/hailo_rpi5_client.py', 'app/api/routers/hailo_router.py'],
-    views: ['system'], x: 1150, y: 100,
+    views: ['system'], x: 700, y: 100,
   },
   {
     id: 'ollama-cloud', title: 'Ollama Cloud', subtitle: 'Nur bei :cloud-Modell', layer: 'Runtime',
