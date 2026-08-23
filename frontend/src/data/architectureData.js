@@ -108,7 +108,7 @@ export const architectureNodes = [
     description: 'Zentraler API-Server. Prüft Auth/Consent, lädt Kontext und übergibt an die Modell-Inferenz.',
     responsibilities: ['Request validieren', 'Auth/Consent durchsetzen', 'Kontext-Ladung anstoßen', 'An Modell-Inferenz übergeben'],
     paths: ['app/main.py', 'app/api/routers'],
-    views: ['system', 'chat', 'persistence'], x: 430, y: 290,
+    views: ['system', 'chat', 'persistence'], x: 430, y: 430,
   },
   {
     id: 'auth-privacy-consent', title: 'Auth, Privacy & Consent', subtitle: 'Login · Consent-Gates', layer: 'Governance',
@@ -124,7 +124,7 @@ export const architectureNodes = [
     description: 'Verwaltungsoberfläche für Admin-Nutzer: Benutzerverwaltung, Systemkonfiguration, Log-Einsicht, Service-Terminal, Update-Check.',
     responsibilities: ['Nutzer verwalten', 'Dienste neu starten/beobachten', 'Logs einsehen', 'Updates prüfen'],
     paths: ['app/api/routers/admin_router.py', 'frontend/src/components/AdminLayout.jsx'],
-    views: ['persistence'], x: 430, y: 480,
+    views: ['persistence'], x: 430, y: 580,
   },
   {
     id: 'context-memory', title: 'Context & Memory', subtitle: 'Konzept-Graph · Verlauf', layer: 'Knowledge',
