@@ -385,6 +385,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             chunk = json.loads(line)
                             
                             if "message" in chunk:
+                                # Ollama separates reasoning-model output into
+                                # its own `message.thinking` field natively
+                                # (confirmed live: deepseek-r1 chunks arrive
+                                # as {"content": "", "thinking": "..."} while
+                                # reasoning, then plain {"content": "..."}
+                                # once it's done - no <think> tags in content
+                                # at all here). thinking_splitter below is a
+                                # fallback for setups where a model inlines
+                                # the tags in content instead.
+                                native_thinking = chunk["message"].get("thinking", "")
+                                if native_thinking:
+                                    yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
+
                                 content = chunk["message"].get("content", "")
                                 if content:
                                     thinking_part, content_part = thinking_splitter.feed(content)
@@ -1122,6 +1135,10 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
                             yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
                         break
+
+                    native_thinking = chunk.get('thinking', '')
+                    if native_thinking:
+                        yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
 
                     content = chunk.get('response', '')
                     if content:
