@@ -40,7 +40,9 @@ ulimit -u 32
 case "$LANGUAGE" in
   python)
     ulimit -v 1048576   # 1 GiB
-    exec python3 "$SCRIPT_PATH"
+    # Dedicated venv (matplotlib etc.), not the bare system python3 or the
+    # LIARA backend's own venv - keeps sandboxed deps isolated from both.
+    exec /opt/liara/runner-venv/bin/python3 "$SCRIPT_PATH"
     ;;
   julia)
     ulimit -v 4194304   # 4 GiB - empirically tune during rollout

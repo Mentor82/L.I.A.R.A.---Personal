@@ -61,7 +61,9 @@ LANGUAGE_ALIASES = {
     "py": "python", "python": "python", "python3": "python",
     "jl": "julia", "julia": "julia",
 }
-INTERPRETER_BINARY = {"python": "python3", "julia": "julia"}
+# Must match the actual interpreter invocations in run_sandboxed.sh -
+# python uses a dedicated venv (matplotlib etc.), not bare "python3".
+INTERPRETER_BINARY = {"python": "/opt/liara/runner-venv/bin/python3", "julia": "julia"}
 SCRIPT_FILENAME = {"python": "script.py", "julia": "script.jl"}
 
 
