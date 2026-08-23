@@ -30,6 +30,7 @@ from core.dependencies import require_active_user
 from core.database import get_db
 from api.models.base_models import User
 from services.memory_integration import store_in_4d_memory, store_message_with_concepts, get_relevant_context
+from services.neo4j_service import get_neo4j_service
 from services.embedding_service import get_embedding_service
 from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
@@ -218,7 +219,10 @@ async def stream_ollama_response(
     user_id: int = None,
     username: Optional[str] = None,
     personality: Optional[str] = None,
-    custom_instructions: Optional[str] = None
+    custom_instructions: Optional[str] = None,
+    user_message_id: Optional[int] = None,
+    memory_enabled: bool = True,
+    used_tools: bool = False
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -343,6 +347,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             if web_search_data:
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type, 'risk_score': web_search_risk_score or 0})}\n\n"
         
+        # Accumulate the full reply so it can be persisted once streaming
+        # finishes - individual SSE chunks are never stored anywhere.
+        full_response_text = ""
+
         # Streaming Request zu Ollama via httpx (NO buffering)
         async with httpx.AsyncClient(timeout=90.0) as client:
             async with client.stream(
@@ -361,6 +369,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             if "message" in chunk:
                                 content = chunk["message"].get("content", "")
                                 if content:
+                                    full_response_text += content
                                     # Mirko Debug Logging
                                     try:
                                         if username and should_log_for_user(username):
@@ -383,7 +392,76 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                 # Update Mood nach Antwort
                                 if user_id is not None:
                                     mood_system.update_mood(interaction_type, intensity=0.5)
-                                
+
+                                # Persist Liara's reply - this used to only
+                                # happen client-side (POST /chat/messages/),
+                                # which never set user_id and meant this
+                                # server-side session_id/message_id (used
+                                # for concept extraction and the RESULTED_IN
+                                # link below) never matched what the user
+                                # actually saw.
+                                if user_id is not None and session_id is not None and full_response_text:
+                                    def persist_assistant_turn():
+                                        from core.database import SessionLocal
+                                        db_final = SessionLocal()
+                                        try:
+                                            insert_result = db_final.execute(text("""
+                                                INSERT INTO chat_messages
+                                                    (user_id, session_id, role, content, model, mood, timestamp)
+                                                VALUES
+                                                    (:user_id, :session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+                                                RETURNING id
+                                            """), {
+                                                'user_id': user_id,
+                                                'session_id': session_id,
+                                                'content': full_response_text,
+                                                'model': model,
+                                                'mood': mood_snapshot["mood"]
+                                            })
+                                            db_final.commit()
+                                            assistant_message_id = insert_result.scalar()
+
+                                            db_final.execute(text("""
+                                                UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
+                                            """), {'session_id': session_id})
+                                            db_final.commit()
+
+                                            if memory_enabled and assistant_message_id:
+                                                try:
+                                                    store_message_with_concepts(
+                                                        user_id=user_id,
+                                                        message_id=assistant_message_id,
+                                                        content=full_response_text,
+                                                        role='assistant',
+                                                        timestamp=datetime.utcnow(),
+                                                        session_id=session_id
+                                                    )
+                                                except Exception as e:
+                                                    logger.error(f"Assistant concept storage failed: {e}")
+
+                                                if user_message_id:
+                                                    try:
+                                                        get_neo4j_service().create_relationship(
+                                                            source_type='Message', source_id=user_message_id,
+                                                            target_type='Message', target_id=assistant_message_id,
+                                                            relation_type='RESULTED_IN', user_id=user_id,
+                                                            properties={
+                                                                'personality': personality,
+                                                                'mood': mood_snapshot["mood"],
+                                                                'model': model,
+                                                                'used_tools': used_tools
+                                                            }
+                                                        )
+                                                    except Exception as e:
+                                                        logger.error(f"RESULTED_IN relationship failed: {e}")
+                                        except Exception as e:
+                                            logger.error(f"Assistant message persistence failed: {e}")
+                                        finally:
+                                            db_final.close()
+
+                                    import threading
+                                    threading.Thread(target=persist_assistant_turn, daemon=True).start()
+
                                 yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
                                 break
                         
@@ -461,6 +539,24 @@ async def stream_chat(
     
     # Per-User Preferences: Personality, Individuelle Anweisungen, Memory-Opt-in
     user_prefs = get_user_preferences(db, current_user.id)
+
+    # Tag the previous turn's outcome (capture-only, no automatic behavior
+    # change yet) using this new message's sentiment as a rough "how did
+    # that response land" proxy - only meaningful when continuing an
+    # existing conversation, and only when memory is enabled.
+    if request.session_id and user_prefs['memory_enabled']:
+        try:
+            from liara_engine.nlp.sentiment_analyzer import get_sentiment_analyzer
+            neo4j_outcome = get_neo4j_service()
+            last_assistant_id = neo4j_outcome.get_last_assistant_message_id(current_user.id, request.session_id)
+            if last_assistant_id:
+                sentiment = get_sentiment_analyzer().analyze_sentiment(request.message)
+                neo4j_outcome.tag_message_outcome(
+                    current_user.id, last_assistant_id,
+                    sentiment.get('category', 'neutral'), sentiment.get('score', 0.0)
+                )
+        except Exception as e:
+            logger.warning(f"Outcome tagging failed: {e}")
 
     # Store user message in 4D Memory BEFORE streaming response
     session_id = f"chat_{current_user.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -596,6 +692,11 @@ async def stream_chat(
                 logger.error(f"Failed to store search history: {e}")
                 # Continue even if storage fails
     
+    # Safe defaults in case the storage block below fails before setting
+    # these - stream_ollama_response() must never NameError on them.
+    message_id = None
+    used_tools = False
+
     try:
         # Get or create session_id
         if not request.session_id:
@@ -664,7 +765,8 @@ async def stream_chat(
                     message_id=message_id,
                     content=request.message,
                     role='user',
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.utcnow(),
+                    session_id=session_id
                 )
                 logger.info(f"Stored concepts for message {message_id}")
             except Exception as e:
@@ -722,7 +824,10 @@ async def stream_chat(
             user_id=current_user.id,
             username=current_user.username,
             personality=user_prefs['personality'],
-            custom_instructions=user_prefs['custom_instructions']
+            custom_instructions=user_prefs['custom_instructions'],
+            user_message_id=message_id,
+            memory_enabled=user_prefs['memory_enabled'],
+            used_tools=used_tools
         ),
         media_type="text/event-stream",
         headers={

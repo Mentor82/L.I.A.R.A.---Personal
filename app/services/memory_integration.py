@@ -448,27 +448,31 @@ def store_message_with_concepts(
     message_id: int,
     content: str,
     role: str,
-    timestamp: Optional[datetime] = None
+    timestamp: Optional[datetime] = None,
+    session_id: Optional[int] = None
 ) -> Dict:
     """
     Speichert Message in Neo4j mit auto-extrahierten Concepts
-    
+
     Args:
         user_id: User ID
         message_id: Message ID (from PostgreSQL)
         content: Message-Content
         role: 'user' | 'assistant'
         timestamp: Message Timestamp
-        
+        session_id: PostgreSQL chat_sessions.id - lets later queries (e.g.
+            "find the last assistant reply in this conversation") scope by
+            the actual conversation instead of across the whole user
+
     Returns:
         Dict mit Statistiken
     """
     if timestamp is None:
         timestamp = datetime.utcnow()
-    
+
     neo4j = get_neo4j_service()
     embedding_service = get_embedding_service()
-    
+
     # 1. Message Node erstellen
     with neo4j.driver.session() as session:
         # User sicherstellen
@@ -477,7 +481,7 @@ def store_message_with_concepts(
             ON CREATE SET u.created_at = datetime()
             SET u.last_active = datetime()
         """, user_id=user_id)
-        
+
         # Message Node
         session.run("""
             MATCH (u:User {user_id: $user_id})
@@ -486,15 +490,17 @@ def store_message_with_concepts(
                 message_id: $message_id,
                 content: $content,
                 role: $role,
+                session_id: $session_id,
                 timestamp: datetime($timestamp),
                 created_at: datetime()
             })
             MERGE (u)-[:SENT]->(m)
-        """, 
+        """,
             user_id=user_id,
             message_id=message_id,
             content=content[:500],
             role=role,
+            session_id=session_id,
             timestamp=timestamp.isoformat()
         )
     

@@ -339,15 +339,12 @@ function Chat() {
       timestamp: new Date().toISOString()
     };
     
-    setChatSessions(prev => prev.map(session => 
-      session.id === activeSessionId 
+    setChatSessions(prev => prev.map(session =>
+      session.id === activeSessionId
         ? { ...session, messages: [...session.messages, userMessage], timestamp: new Date().toISOString() }
         : session
     ));
-    
-    // Save user message to DB
-    saveMessageToDB(activeSessionId, userMessage);
-    
+
     setLoading(true);
     setSearching(false);
     setSearchIntent(null);
@@ -371,7 +368,11 @@ function Chat() {
         // ====== SYNC MODE: High system load, use traditional request/response ======
         console.log('[Chat] SYNC MODE: Using /api/chat/message');
         console.log(`[FRONTEND_LOG] ${timestamp} - HTTP_START - Sending POST to /api/chat/message`);
-        
+
+        // /chat/message (chat.py) doesn't persist messages server-side like
+        // /chat/stream now does, so this path still needs to save it itself.
+        saveMessageToDB(activeSessionId, userMessage);
+
         const response = await fetch('/api/chat/message', {
           method: 'POST',
           headers: {
@@ -431,7 +432,11 @@ function Chat() {
         },
         body: JSON.stringify({
           message: trimmedMessage,
-          model: modelToUse
+          model: modelToUse,
+          // Without this, the backend could never tell which session a
+          // message belonged to and created a brand-new orphaned session
+          // for every single message instead of continuing this one.
+          session_id: activeSessionId
         }),
         signal: requestAbortController.signal
       });
@@ -524,9 +529,9 @@ function Chat() {
               } else if (parsed.type === 'done') {
                 setLoading(false);
                 setSearching(false);
-                
-                // Save assistant message to DB
-                saveMessageToDB(activeSessionId, liaraMessage);
+                // /chat/stream now persists both sides of the exchange
+                // itself (see chat_streaming.py) - saving it again here
+                // duplicated the message with a NULL user_id.
               } else if (parsed.type === 'error') {
                 throw new Error(parsed.error);
               }

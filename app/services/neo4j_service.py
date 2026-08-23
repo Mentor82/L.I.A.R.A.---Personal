@@ -145,6 +145,37 @@ class Neo4jGraphService:
             logger.info(f"Deleted {deleted} Neo4j nodes for user {user_id}")
             return deleted
 
+    def get_last_assistant_message_id(self, user_id: int, session_id: int) -> Optional[int]:
+        """
+        Find the most recent assistant Message node in a specific
+        conversation - used to retroactively tag it with an outcome
+        signal once the user's next message arrives.
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (m:Message {user_id: $user_id, session_id: $session_id, role: 'assistant'})
+                RETURN m.message_id as message_id
+                ORDER BY m.timestamp DESC
+                LIMIT 1
+            """, user_id=user_id, session_id=session_id).single()
+            return result["message_id"] if result else None
+
+    def tag_message_outcome(self, user_id: int, message_id: int, outcome_sentiment: str, outcome_score: float):
+        """
+        Tag an assistant Message node with a lightweight outcome signal -
+        the sentiment of the user's next message, used as a proxy for
+        "how did this response land". Capture-only: nothing currently
+        reads this back to change behavior.
+        """
+        with self.driver.session() as session:
+            session.run("""
+                MATCH (m:Message {user_id: $user_id, message_id: $message_id})
+                SET m.outcome_sentiment = $outcome_sentiment,
+                    m.outcome_score = $outcome_score,
+                    m.outcome_tagged_at = datetime()
+            """, user_id=user_id, message_id=message_id,
+                outcome_sentiment=outcome_sentiment, outcome_score=outcome_score)
+
     def create_mood_node(self, user_id: int, timestamp: str, mood: str, energy_level: int,
                         properties: Optional[Dict] = None):
         """Create mood node and link to user"""
