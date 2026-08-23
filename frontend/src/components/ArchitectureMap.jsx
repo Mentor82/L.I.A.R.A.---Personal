@@ -227,6 +227,17 @@ function ArchitectureMap() {
                   <path d="M0,0 L10,5 L0,10 z" fill={style.color} />
                 </marker>
               ))}
+              <marker
+                id="arch-arrow-planned"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M0,0 L10,5 L0,10 z" fill={statusColors.planned} />
+              </marker>
             </defs>
 
             {/* Trust boundary: everything inside is Liara's self-hosted perimeter */}
@@ -254,6 +265,9 @@ function ArchitectureMap() {
 
               const flowRole = kindFlow[edge.kind] || 'main';
               const style = flowStyles[flowRole];
+              // A connection into/out of a not-yet-built ("planned") node
+              // shouldn't read as a solid, already-working main-flow line.
+              const isPlannedEdge = from.status === 'planned' || to.status === 'planned';
 
               const dx = to.x - from.x;
               const dy = to.y - from.y;
@@ -291,11 +305,11 @@ function ArchitectureMap() {
                   <path
                     d={d}
                     fill="none"
-                    stroke={style.color}
+                    stroke={isPlannedEdge ? statusColors.planned : style.color}
                     strokeWidth={2}
-                    strokeDasharray={style.dash || undefined}
-                    opacity={0.85}
-                    markerEnd={`url(#arch-arrow-${flowRole})`}
+                    strokeDasharray={isPlannedEdge ? '3 5' : (style.dash || undefined)}
+                    opacity={isPlannedEdge ? 0.6 : 0.85}
+                    markerEnd={`url(#arch-arrow-${isPlannedEdge ? 'planned' : flowRole})`}
                   />
                   <text
                     x={labelX}

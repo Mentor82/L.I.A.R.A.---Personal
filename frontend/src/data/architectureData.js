@@ -88,6 +88,13 @@ export const architectureNodes = [
     paths: [], views: ['system', 'chat'], x: 20, y: 290,
   },
   {
+    id: 'native-apps', title: 'Native Apps', subtitle: 'iOS · Android · Windows', layer: 'Interface',
+    status: 'planned', boundary: 'client',
+    description: 'Geplante native Clients für iOS, Android und Windows - würden dieselben Backend-Contracts wie das Web-Frontend nutzen, aber ohne über die React-SPA zu laufen.',
+    responsibilities: ['Gleiche API/Auth-Contracts wie das Web-Frontend nutzen', 'Push-Benachrichtigungen (geplant)'],
+    paths: [], views: ['system', 'chat'], x: 20, y: 420,
+  },
+  {
     id: 'frontend', title: 'Frontend', subtitle: 'React SPA', layer: 'Interface',
     status: 'implemented', boundary: 'local',
     description: 'Single-Page-App, ausgeliefert vom selbstgehosteten Server. Reicht die Anfrage weiter und rendert die zurückgestreamte Antwort.',
@@ -237,6 +244,7 @@ export const architectureNodes = [
 export const architectureEdges = [
   { from: 'user-browser', to: 'frontend', label: 'Anfrage', kind: 'request', views: ['system', 'chat'] },
   { from: 'frontend', to: 'user-browser', label: 'Antwort', kind: 'stream', views: ['system', 'chat'] },
+  { from: 'native-apps', to: 'backend', label: 'geplant: REST', kind: 'request', views: ['system', 'chat'] },
 
   { from: 'frontend', to: 'backend', label: 'REST + SSE', kind: 'request', views: ['system', 'chat'] },
   { from: 'backend', to: 'auth-privacy-consent', label: 'Consent-Gate', kind: 'auth-consent', views: ['chat'] },
