@@ -6,20 +6,21 @@ function ArchitecturePage() {
   return (
     <PageLayout>
       <div className="architecture-page-content">
-        <section className="page-hero">
+        <section className="page-hero" style={{ paddingBottom: '1.5rem' }}>
           <h1 className="page-title">
             <span className="gradient-text">Architektur</span>-Übersicht
           </h1>
-          <p className="page-subtitle">
-            Eine interaktive Karte der LIARA-Personal-Komponenten: was zusammenhängt,
-            was lokal bleibt, was implementiert ist - und wo die Grenze zu Ollama Cloud
-            liegt. Komponente anklicken für Details.
-          </p>
         </section>
 
         <section className="feature-section">
           <ArchitectureMap />
         </section>
+
+        <p className="page-subtitle" style={{ maxWidth: 'none', marginTop: '1.5rem' }}>
+          Eine interaktive Karte der LIARA-Personal-Komponenten: was zusammenhängt,
+          was lokal bleibt, was implementiert ist - und wo die Grenze zu Ollama Cloud
+          liegt. Komponente anklicken für Details.
+        </p>
 
         <div className="privacy-note" style={{ marginTop: '1rem' }}>
           <p>
