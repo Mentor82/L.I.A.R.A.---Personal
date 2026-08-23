@@ -1117,9 +1117,16 @@ function Chat() {
                 />
               )}
               
-              <div className="bubble-text">
-                <MarkdownMessage content={msg.content} />
-              </div>
+              {/* When an action succeeded, its confirmation text is already
+                  shown above via the styled action-result badge - the
+                  backend puts the identical message in msg.content too
+                  (chat.py: response=action_result['message']), so showing
+                  both duplicated the same line twice in the same bubble. */}
+              {!msg.actionResult?.success && (
+                <div className="bubble-text">
+                  <MarkdownMessage content={msg.content} />
+                </div>
+              )}
               {msg.model && (
                 <div className="bubble-footer">
                   <span className="bubble-model">🤖 {msg.model}</span>
