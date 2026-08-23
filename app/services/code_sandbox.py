@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from services.session_workspace import SESSION_FILES_DIR
+
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 20
@@ -152,13 +154,12 @@ def _preexec(language: str):
     return _apply
 
 
-def _build_command(language: str, session_dir: Path) -> List[str]:
-    base = ["sudo", "-n", "-u", RUNNER_USER, "--", RUNNER_SCRIPT, language, str(session_dir)]
+def _build_command(language: str, workspace_dir: Path, script_path: Path) -> List[str]:
+    args = [RUNNER_SCRIPT, language, str(workspace_dir), str(script_path)]
     if shutil.which("unshare"):
         return ["sudo", "-n", "-u", RUNNER_USER, "--",
-                "unshare", "--net", "--map-root-user", "--",
-                RUNNER_SCRIPT, language, str(session_dir)]
-    return base
+                "unshare", "--net", "--map-root-user", "--", *args]
+    return ["sudo", "-n", "-u", RUNNER_USER, "--", *args]
 
 
 def run_code(language: str, code: str, session_dir: Path, timeout: int = TIMEOUT_SECONDS) -> SandboxResult:
@@ -189,17 +190,30 @@ def run_code(language: str, code: str, session_dir: Path, timeout: int = TIMEOUT
     workspace_dir.mkdir(parents=True, exist_ok=True)
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # liara-runner (a different OS user) needs execute/traverse permission on
+    # every ancestor directory to reach run_dir/workspace_dir at all - relying
+    # on the backend process's umask to happen to leave these traversable
+    # would be fragile, so set it explicitly on the whole chain up to
+    # SESSION_FILES_DIR.
+    for ancestor in (SESSION_FILES_DIR, session_dir.parent, session_dir):
+        try:
+            os.chmod(ancestor, 0o755)
+        except OSError:
+            pass
+
     script_path = run_dir / SCRIPT_FILENAME[normalized]
     script_path.write_text(code, encoding="utf-8")
-    # liara-runner needs to read this script and write into workspace_dir -
-    # world-readable/writable is acceptable here since both dirs only ever
-    # contain this session's own generated content, never secrets.
-    os.chmod(run_dir, 0o777)
+    # liara-runner needs to read this script - world-readable/traversable,
+    # but not writable, since nothing writes back into run_dir.
+    os.chmod(run_dir, 0o755)
     os.chmod(script_path, 0o644)
+    # workspace_dir is where the script's own output lands, so liara-runner
+    # needs write access here too. World-writable is acceptable since this
+    # directory only ever contains this session's own generated content.
     os.chmod(workspace_dir, 0o777)
 
     before = _snapshot(workspace_dir)
-    command = _build_command(normalized, session_dir)
+    command = _build_command(normalized, workspace_dir, script_path)
 
     result = SandboxResult(run_id=run_id)
     with tempfile.TemporaryFile() as stdout_f, tempfile.TemporaryFile() as stderr_f:
