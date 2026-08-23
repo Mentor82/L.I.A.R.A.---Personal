@@ -35,6 +35,7 @@
     "katex": "^0.18.4",
     "lexical": "^0.38.2",
     "lucide-react": "^0.555.0",
+    "mermaid": "^11.17.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-i18next": "^16.3.5",

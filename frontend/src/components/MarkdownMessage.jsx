@@ -113,6 +113,53 @@ const useLazySyntax = () => {
   return { syntaxHighlighter, syntaxStyle, ensureLanguage };
 };
 
+let mermaidIdCounter = 0;
+
+// Renders a fenced ```mermaid block as an actual diagram (flowchart, sequence,
+// etc.). Mermaid is loaded on demand so chats without diagrams pay nothing.
+const MermaidDiagram = memo(({ code }) => {
+  const [svg, setSvg] = useState(null);
+  const [error, setError] = useState(null);
+  const idRef = useRef(`mermaid-${++mermaidIdCounter}`);
+
+  useEffect(() => {
+    let active = true;
+    setSvg(null);
+    setError(null);
+
+    import('mermaid').then(({ default: mermaid }) => {
+      if (!active) return;
+      const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+      mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default', securityLevel: 'strict' });
+      return mermaid.render(idRef.current, code);
+    }).then((result) => {
+      if (!active || !result) return;
+      setSvg(result.svg);
+    }).catch((err) => {
+      if (!active) return;
+      setError(err?.message || 'Diagramm konnte nicht gerendert werden.');
+    });
+
+    return () => { active = false; };
+  }, [code]);
+
+  if (error) {
+    return (
+      <pre className="code-fallback">
+        <code>{code}</code>
+      </pre>
+    );
+  }
+
+  if (!svg) {
+    return <div className="mermaid-loading">Diagramm wird gerendert…</div>;
+  }
+
+  // eslint-disable-next-line react/no-danger -- mermaid.render output, securityLevel 'strict' sanitizes it
+  return <div className="mermaid-diagram" dangerouslySetInnerHTML={{ __html: svg }} />;
+});
+MermaidDiagram.displayName = 'MermaidDiagram';
+
 const MarkdownMessage = memo(({ content }) => {
   const { syntaxHighlighter: SyntaxHighlighter, syntaxStyle, ensureLanguage } = useLazySyntax();
   const normalizedContent = useMemo(() => normalizeMathDelimiters(content), [content]);
@@ -122,6 +169,14 @@ const MarkdownMessage = memo(({ content }) => {
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={{
+        // The `code` renderer below always supplies its own wrapper (a
+        // <pre class="code-fallback">, a .code-block-wrapper div, or a
+        // mermaid <div>) - without this override, react-markdown's default
+        // `pre` wraps that in a second <pre>, nesting <pre><pre>...</pre></pre>.
+        pre({ children }) {
+          return <>{children}</>;
+        },
+
         // Custom Code Block Renderer
         code({ node, inline, className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || '');
@@ -130,7 +185,12 @@ const MarkdownMessage = memo(({ content }) => {
           const normalizedLanguage = language.toLowerCase();
           
           const codeText = String(children).replace(/\n$/, '');
+          const isMermaid = normalizedLanguage === 'mermaid';
 
+          // Hooks below must run unconditionally on every render of this
+          // component instance (Rules of Hooks) - the mermaid branch is
+          // handled further down, after all hooks have been called, not
+          // via an early return here.
           useEffect(() => {
             let active = true;
             if (!normalizedLanguage) {
@@ -158,6 +218,10 @@ const MarkdownMessage = memo(({ content }) => {
                 {children}
               </code>
             );
+          }
+
+          if (isMermaid) {
+            return <MermaidDiagram code={codeText} />;
           }
 
           // If the highlighter isn't loaded yet, render a simple pre block.

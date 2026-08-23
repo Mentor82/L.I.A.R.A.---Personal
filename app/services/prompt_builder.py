@@ -46,3 +46,32 @@ def build_personality_and_instructions_block(
     if custom_instructions:
         block += f"\n\nIndividuelle Anweisungen von {username}:\n{custom_instructions}"
     return block
+
+
+def build_diagram_instructions() -> str:
+    """
+    Tells the model it can render mermaid diagrams and, specifically, that
+    mermaid has a real chart type (xychart-beta) for numeric data. Without
+    this the model has no way to know the frontend renders ```mermaid```
+    blocks as actual SVG diagrams, and improvises things like ASCII-art
+    bars inside flowchart node labels when asked for a bar chart.
+    """
+    return """WICHTIG - Diagramme und Visualisierungen:
+Für Flussdiagramme oder Abläufe nutze einen ```mermaid```-Codeblock, z.B.:
+```mermaid
+flowchart TD
+    A[Start] --> B{Entscheidung}
+    B -->|Ja| C[Ergebnis 1]
+    B -->|Nein| D[Ergebnis 2]
+```
+
+Für Balken-/Liniendiagramme mit echten Zahlen nutze mermaid's xychart-beta statt ASCII-Balken in Knotennamen:
+```mermaid
+xychart-beta
+    title "Beispiel"
+    x-axis [Montag, Dienstag, Mittwoch]
+    y-axis "Wert" 0 --> 10
+    bar [5, 8, 3]
+```
+
+Diese Diagramme werden im Chat als echte Grafik gerendert - nutze sie, wenn eine visuelle Darstellung sinnvoller ist als Text."""
