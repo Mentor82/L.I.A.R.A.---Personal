@@ -22,11 +22,14 @@
     "Android >= 8"
   ],
   "dependencies": {
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/legacy-modes": "^6.5.3",
     "@lexical/html": "^0.38.2",
     "@lexical/list": "^0.38.2",
     "@lexical/react": "^0.38.2",
     "@lexical/rich-text": "^0.38.2",
     "@lexical/selection": "^0.38.2",
+    "@uiw/react-codemirror": "^4.25.11",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",

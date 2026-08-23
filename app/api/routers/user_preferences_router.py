@@ -36,6 +36,7 @@ class PreferencesResponse(BaseModel):
     personality: str
     memory_enabled: bool
     tool_memory_enabled: bool
+    workspace_enabled: bool
 
 
 class PreferencesUpdateRequest(BaseModel):
@@ -48,6 +49,7 @@ class PreferencesUpdateRequest(BaseModel):
     personality: Optional[str] = None
     memory_enabled: Optional[bool] = None
     tool_memory_enabled: Optional[bool] = None
+    workspace_enabled: Optional[bool] = None
 
 
 @router.get("/preferences", response_model=PreferencesResponse)
@@ -142,10 +144,12 @@ def update_preferences(
         db.execute(text("""
             INSERT INTO user_preferences
                 (user_id, ai_model, language, theme, notifications, sound_effects,
-                 custom_instructions, personality, memory_enabled, tool_memory_enabled)
+                 custom_instructions, personality, memory_enabled, tool_memory_enabled,
+                 workspace_enabled)
             VALUES
                 (:user_id, :ai_model, :language, :theme, :notifications, :sound_effects,
-                 :custom_instructions, :personality, :memory_enabled, :tool_memory_enabled)
+                 :custom_instructions, :personality, :memory_enabled, :tool_memory_enabled,
+                 :workspace_enabled)
         """), {"user_id": current_user.id, **merged})
         db.commit()
 

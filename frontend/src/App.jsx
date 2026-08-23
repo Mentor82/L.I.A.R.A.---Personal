@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
+import { preferencesAPI } from './services/api'
 import liaraLogo from './assets/LIARA-LOGO.png'
 
 // Eager loaded components (needed immediately)
@@ -19,6 +20,7 @@ const IdentityPage = lazy(() => import('./components/IdentityPage'))
 const PrivacyPage = lazy(() => import('./components/PrivacyPage'))
 const TechnologyPage = lazy(() => import('./components/TechnologyPage'))
 const ArchitecturePage = lazy(() => import('./components/ArchitecturePage'))
+const WorkspacePage = lazy(() => import('./components/WorkspacePage'))
 const MoodDashboard = lazy(() => import('./components/MoodDashboard'))
 const Config = lazy(() => import('./components/Config'))
 const Tasks = lazy(() => import('./components/Tasks'))
@@ -144,10 +146,21 @@ function App() {
   // localStorage reads), so there's nothing to actually "load".
   const [user, setUser] = useState(restoreUserFromStorage)
   const [showLocationConsent, setShowLocationConsent] = useState(false)
+  // Workspace v1 is gated by a per-user preference (toggle lives in
+  // UserPreferences.jsx) - defaults to true so the nav item doesn't flicker
+  // away for a split second on every load while the real value is fetched.
+  const [workspaceEnabled, setWorkspaceEnabled] = useState(true)
   // Captured once, before any redirect can change it, so a reload of a
   // protected route can be restored after login instead of silently
   // falling back to /chat (see the !user branch and handleLogin below).
   const [originalPath] = useState(() => window.location.pathname + window.location.search)
+
+  useEffect(() => {
+    if (!user || user.is_guest) return
+    preferencesAPI.get()
+      .then((prefs) => setWorkspaceEnabled(prefs?.workspace_enabled !== false))
+      .catch(() => {}) // keep the default (true) if this fails - non-critical
+  }, [user])
 
   const handleLogin = (userData) => {
     setUser(userData)
@@ -293,6 +306,11 @@ function App() {
               <NavLink to="/notes" className="nav-link">
                 <span>📝</span> <span>Notizen</span>
               </NavLink>
+              {workspaceEnabled && (
+                <NavLink to="/workspace" className="nav-link">
+                  <span>🗂️</span> <span>Workspace</span>
+                </NavLink>
+              )}
               <NavLink to="/mood" className="nav-link">
                 <span>😊</span> <span>Stimmung</span>
               </NavLink>
@@ -325,6 +343,7 @@ function App() {
                   <Route path="/tasks" element={<Tasks />} />
                   <Route path="/calendar" element={<CalendarView />} />
                   <Route path="/notes" element={<NotesFileManager />} />
+                  {workspaceEnabled && <Route path="/workspace" element={<WorkspacePage />} />}
                   <Route path="/profile" element={<ProfileEdit />} />
                   <Route path="/vision" element={<VisionDetect />} />
                   

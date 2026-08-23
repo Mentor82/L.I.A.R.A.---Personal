@@ -31,15 +31,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from services.session_workspace import SESSION_FILES_DIR
+from services.session_workspace import SESSION_FILES_DIR, MANIFEST_FILENAME, record_file_event
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 20
 OUTPUT_CAP = 20000  # bytes kept per stdout/stderr (tail)
 MAX_INLINE_IMAGE = 5 * 1024 * 1024  # 5 MiB
-MAX_SESSION_FILE = 100 * 1024 * 1024  # 100 MiB
-MAX_SESSION_TOTAL = 500 * 1024 * 1024  # 500 MiB per session workspace
 
 RUNNER_USER = "liara-runner"
 RUNNER_SCRIPT = str(Path(__file__).resolve().parent.parent / "scripts" / "run_sandboxed.sh")
@@ -104,7 +102,7 @@ def _snapshot(workspace_dir: Path) -> Dict[str, Tuple[int, float]]:
     if not workspace_dir.exists():
         return snapshot
     for entry in workspace_dir.iterdir():
-        if entry.is_file() and not entry.is_symlink():
+        if entry.is_file() and not entry.is_symlink() and entry.name != MANIFEST_FILENAME:
             stat = entry.stat()
             snapshot[entry.name] = (stat.st_size, stat.st_mtime)
     return snapshot
@@ -120,7 +118,7 @@ def _diff_snapshot(
         # Symlinks are rejected outright, both for downloads and here - a
         # script could otherwise os.symlink() a sensitive path into its
         # workspace and have it show up as a normal "generated file".
-        if entry.is_symlink() or not entry.is_file():
+        if entry.is_symlink() or not entry.is_file() or entry.name == MANIFEST_FILENAME:
             continue
         stat = entry.stat()
         current = (stat.st_size, stat.st_mtime)
@@ -165,11 +163,19 @@ def _build_command(language: str, workspace_dir: Path, script_path: Path) -> Lis
             RUNNER_SCRIPT, language, str(workspace_dir), str(script_path)]
 
 
-def run_code(language: str, code: str, session_dir: Path, timeout: int = TIMEOUT_SECONDS) -> SandboxResult:
+def run_code(
+    language: str, code: str, session_dir: Path, timeout: int = TIMEOUT_SECONDS,
+    user_id: Optional[int] = None, session_id: Optional[int] = None,
+) -> SandboxResult:
     """
     session_dir: the per-session root (SESSION_FILES_DIR/{user_id}/{session_id}/).
     Writes the script under session_dir/.runs/{run_id}/, executes with
     session_dir/workspace/ as cwd, and diffs that workspace before/after.
+
+    user_id/session_id are optional only for backwards compatibility with any
+    other caller - when given (the code-exec router always passes them), every
+    created/modified file is recorded in the workspace manifest as
+    source="code_runner" so the Workspace UI can show it was Run-generated.
     """
     run_id = str(uuid.uuid4())
     normalized = normalize_language(language)
@@ -250,6 +256,9 @@ def run_code(language: str, code: str, session_dir: Path, timeout: int = TIMEOUT
             result.error = f"Sandbox-Fehler: {e}"
 
     changed_files = _diff_snapshot(before, workspace_dir)
+    if user_id is not None and session_id is not None:
+        for f in changed_files:
+            record_file_event(user_id, session_id, f.name, source="code_runner", execution_id=run_id)
     inline_count = 0
     for f in changed_files:
         if f.mime_type.startswith("image/") and f.size <= MAX_INLINE_IMAGE and inline_count < 4:

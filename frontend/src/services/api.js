@@ -149,6 +149,15 @@ export const chatAPI = {
   async getStatus() {
     return apiFetch('/chat/status');
   },
+
+  /**
+   * Hole alle Chat-Sessions des Nutzers (echte DB-Zeilen, nicht der
+   * localStorage-Cache in Chat.jsx) - genutzt für die Session-Auswahl im
+   * Workspace-Tab, wo ein echter session_id gebraucht wird.
+   */
+  async getSessions() {
+    return apiFetch('/chat/sessions');
+  },
 };
 
 /**
@@ -501,6 +510,17 @@ export const personaAPI = {
 };
 
 /**
+ * User Preferences API - thin wrapper matching this file's convention;
+ * UserPreferences.jsx itself still uses raw fetch() calls (pre-existing,
+ * unrelated to this addition), this is just for App.jsx's nav-gating check.
+ */
+export const preferencesAPI = {
+  async get() {
+    return apiFetch('/user/preferences');
+  },
+};
+
+/**
  * Code Execution API (chat "Run" button for Python/Julia code blocks)
  */
 export const codeExecAPI = {
@@ -539,6 +559,69 @@ export const codeExecAPI = {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  },
+};
+
+/**
+ * Workspace API (Workspace v1 - file create/save/rename/delete + chat-
+ * context selection). Reuses codeExecAPI.run/downloadFile for execution
+ * and downloads - this only covers the file-CRUD endpoints codeExecAPI
+ * doesn't have.
+ */
+export const workspaceAPI = {
+  async listFiles(sessionId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/files`);
+  },
+
+  /**
+   * Lädt den Textinhalt einer Workspace-Datei für den Editor - reuses the
+   * existing code-exec download endpoint as plain text (fetch() ignores
+   * Content-Disposition, so the same "attachment" endpoint works fine here
+   * without needing a second backend route).
+   */
+  async getFileContent(sessionId, filename) {
+    const token = localStorage.getItem('liara_token');
+    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      throw new Error(`Datei konnte nicht geladen werden: ${response.status}`);
+    }
+    return response.text();
+  },
+
+  async createFile(sessionId, filename, content = '') {
+    return apiFetch(`/workspace/sessions/${sessionId}/files`, {
+      method: 'POST',
+      body: JSON.stringify({ filename, content }),
+    });
+  },
+
+  async saveFile(sessionId, filename, content) {
+    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  async renameFile(sessionId, filename, newName) {
+    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeURIComponent(filename)}/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName }),
+    });
+  },
+
+  async deleteFile(sessionId, filename) {
+    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async setContextSelection(sessionId, filenames) {
+    return apiFetch(`/workspace/sessions/${sessionId}/context`, {
+      method: 'PUT',
+      body: JSON.stringify({ filenames }),
+    });
   },
 };
 

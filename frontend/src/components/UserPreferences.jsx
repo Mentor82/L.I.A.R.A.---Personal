@@ -12,7 +12,8 @@ function UserPreferences() {
     custom_instructions: '',
     personality: 'warmherzig',
     memory_enabled: true,
-    tool_memory_enabled: true
+    tool_memory_enabled: true,
+    workspace_enabled: true
   })
   const [models, setModels] = useState([])
   const [personalityOptions, setPersonalityOptions] = useState([])
@@ -334,6 +335,26 @@ function UserPreferences() {
         >
           {deletingMemories ? 'Lösche...' : '🗑️ Erinnerungen löschen'}
         </button>
+      </div>
+
+      {/* Workspace */}
+      <div className="settings-card">
+        <h3 className="settings-card-title">🗂️ Workspace</h3>
+
+        <div className="switch-group">
+          <div className="switch-label">
+            <span className="switch-title">Workspace-Tab aktivieren</span>
+            <span className="switch-desc">
+              Gemeinsamer Datei-/Code-Bereich mit Editor, Ausführung und Artefakten - erscheint als eigener Hauptreiter
+            </span>
+          </div>
+          <div
+            className={`switch ${preferences.workspace_enabled ? 'active' : ''}`}
+            onClick={() => togglePreference('workspace_enabled')}
+          >
+            <div className="switch-toggle"></div>
+          </div>
+        </div>
       </div>
 
       {/* Language & Theme */}

@@ -1,0 +1,341 @@
+import { useEffect, useMemo, useState } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { python } from '@codemirror/lang-python';
+import { StreamLanguage } from '@codemirror/language';
+import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
+import { chatAPI, workspaceAPI, codeExecAPI } from '../services/api';
+import CodeRunResult from './CodeRunResult';
+import './WorkspacePage.css';
+
+const juliaLanguage = StreamLanguage.define(juliaLegacyMode);
+
+// Maps a file extension to a CodeMirror language extension and the sandbox's
+// language identifier (app/services/code_sandbox.py's LANGUAGE_ALIASES) -
+// files with no known extension are still fully editable, just without
+// syntax highlighting and without a Run button.
+const LANGUAGE_BY_EXTENSION = {
+  py: { cm: python(), runLanguage: 'python' },
+  jl: { cm: juliaLanguage, runLanguage: 'julia' },
+};
+
+function extensionOf(filename) {
+  const dot = filename.lastIndexOf('.');
+  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : '';
+}
+
+function formatBytes(size) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const SOURCE_LABELS = {
+  user: 'Selbst erstellt',
+  code_runner: 'Von Code-Ausführung erzeugt',
+  liara: 'Von LIARA erstellt',
+  agent: 'Vom Agent erstellt',
+  web_research: 'Aus Web-Recherche',
+  generated: 'Automatisch erzeugt',
+  unknown: 'Unbekannte Herkunft',
+};
+
+function WorkspacePage() {
+  const [sessions, setSessions] = useState([]);
+  const [sessionId, setSessionId] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [error, setError] = useState(null);
+
+  const [tabs, setTabs] = useState([]); // [{name, content, dirty}]
+  const [activeTab, setActiveTab] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState(null);
+
+  const [newFileOpen, setNewFileOpen] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [modalError, setModalError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await chatAPI.getSessions();
+        setSessions(list);
+        const savedId = parseInt(localStorage.getItem('liara_active_session'), 10);
+        const initial = list.find((s) => s.id === savedId) || list[0];
+        if (initial) setSessionId(initial.id);
+      } catch (err) {
+        setError(err.message || 'Sessions konnten nicht geladen werden.');
+      }
+    })();
+  }, []);
+
+  const loadFiles = async (id) => {
+    setLoadingFiles(true);
+    setError(null);
+    try {
+      const { files: list } = await workspaceAPI.listFiles(id);
+      setFiles(list);
+    } catch (err) {
+      setError(err.message || 'Dateien konnten nicht geladen werden.');
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  useEffect(() => {
+    if (sessionId) loadFiles(sessionId);
+  }, [sessionId]);
+
+  const activeTabData = useMemo(() => tabs.find((t) => t.name === activeTab), [tabs, activeTab]);
+  const activeExt = activeTab ? extensionOf(activeTab) : '';
+  const activeLang = LANGUAGE_BY_EXTENSION[activeExt];
+
+  const openFile = async (filename) => {
+    const existing = tabs.find((t) => t.name === filename);
+    if (existing) {
+      setActiveTab(filename);
+      return;
+    }
+    try {
+      const content = await workspaceAPI.getFileContent(sessionId, filename);
+      setTabs((prev) => [...prev, { name: filename, content, dirty: false }]);
+      setActiveTab(filename);
+    } catch (err) {
+      setError(err.message || 'Datei konnte nicht geöffnet werden.');
+    }
+  };
+
+  const closeTab = (filename) => {
+    setTabs((prev) => prev.filter((t) => t.name !== filename));
+    if (activeTab === filename) {
+      const remaining = tabs.filter((t) => t.name !== filename);
+      setActiveTab(remaining.length ? remaining[remaining.length - 1].name : null);
+    }
+  };
+
+  const updateActiveContent = (value) => {
+    setTabs((prev) => prev.map((t) => (t.name === activeTab ? { ...t, content: value, dirty: true } : t)));
+  };
+
+  const saveActiveTab = async () => {
+    if (!activeTabData) return;
+    try {
+      await workspaceAPI.saveFile(sessionId, activeTabData.name, activeTabData.content);
+      setTabs((prev) => prev.map((t) => (t.name === activeTab ? { ...t, dirty: false } : t)));
+      loadFiles(sessionId);
+    } catch (err) {
+      setError(err.message || 'Speichern fehlgeschlagen.');
+    }
+  };
+
+  const runActiveTab = async () => {
+    if (!activeTabData || !activeLang) return;
+    setRunning(true);
+    setRunResult(null);
+    try {
+      const result = await codeExecAPI.run(sessionId, activeLang.runLanguage, activeTabData.content);
+      setRunResult(result);
+      loadFiles(sessionId);
+    } catch (err) {
+      setRunResult({ error: err.message || 'Ausführung fehlgeschlagen.' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const toggleContextSelection = async (filename) => {
+    const selectedNow = files.filter((f) => f.selected_for_context).map((f) => f.name);
+    const next = selectedNow.includes(filename)
+      ? selectedNow.filter((n) => n !== filename)
+      : [...selectedNow, filename];
+    try {
+      await workspaceAPI.setContextSelection(sessionId, next);
+      loadFiles(sessionId);
+    } catch (err) {
+      setError(err.message || 'Kontext-Auswahl konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleCreateFile = async () => {
+    setModalError(null);
+    if (!newFileName.trim()) return;
+    try {
+      await workspaceAPI.createFile(sessionId, newFileName.trim(), '');
+      setNewFileOpen(false);
+      setNewFileName('');
+      await loadFiles(sessionId);
+      openFile(newFileName.trim());
+    } catch (err) {
+      setModalError(err.message || 'Datei konnte nicht erstellt werden.');
+    }
+  };
+
+  const handleRename = async () => {
+    setModalError(null);
+    if (!renameValue.trim() || !renameTarget) return;
+    try {
+      await workspaceAPI.renameFile(sessionId, renameTarget, renameValue.trim());
+      if (activeTab === renameTarget) setActiveTab(renameValue.trim());
+      setTabs((prev) => prev.map((t) => (t.name === renameTarget ? { ...t, name: renameValue.trim() } : t)));
+      setRenameTarget(null);
+      setRenameValue('');
+      loadFiles(sessionId);
+    } catch (err) {
+      setModalError(err.message || 'Umbenennen fehlgeschlagen.');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await workspaceAPI.deleteFile(sessionId, deleteTarget);
+      closeTab(deleteTarget);
+      setDeleteTarget(null);
+      loadFiles(sessionId);
+    } catch (err) {
+      setError(err.message || 'Löschen fehlgeschlagen.');
+    }
+  };
+
+  return (
+    <div className="workspace-page">
+      <div className="workspace-header">
+        <h1>Workspace</h1>
+        <select
+          className="workspace-session-select"
+          value={sessionId || ''}
+          onChange={(e) => setSessionId(parseInt(e.target.value, 10))}
+        >
+          {sessions.map((s) => (
+            <option key={s.id} value={s.id}>{s.title}</option>
+          ))}
+        </select>
+      </div>
+
+      {error && <div className="workspace-error">{error} <button onClick={() => setError(null)}>✕</button></div>}
+
+      <div className="workspace-body">
+        <aside className="workspace-sidebar">
+          <div className="workspace-sidebar-header">
+            <span>Dateien</span>
+            <button className="workspace-icon-btn" onClick={() => setNewFileOpen(true)} title="Neue Datei">➕</button>
+          </div>
+          {loadingFiles && <p className="workspace-hint">Lade…</p>}
+          {!loadingFiles && files.length === 0 && <p className="workspace-hint">Noch keine Dateien in diesem Workspace.</p>}
+          <ul className="workspace-file-list">
+            {files.map((f) => (
+              <li key={f.name} className={activeTab === f.name ? 'active' : ''}>
+                <button className="workspace-file-open" onClick={() => openFile(f.name)}>
+                  <span className="workspace-file-name">{f.name}</span>
+                  <span className="workspace-file-meta">{formatBytes(f.size)} · {SOURCE_LABELS[f.source] || f.source}</span>
+                </button>
+                <div className="workspace-file-actions">
+                  <button
+                    className={`workspace-icon-btn ${f.selected_for_context ? 'active' : ''}`}
+                    title="Zu Chat-Kontext hinzufügen"
+                    onClick={() => toggleContextSelection(f.name)}
+                  >💬</button>
+                  <button className="workspace-icon-btn" title="Umbenennen" onClick={() => { setRenameTarget(f.name); setRenameValue(f.name); }}>✏️</button>
+                  <button className="workspace-icon-btn" title="Herunterladen" onClick={() => codeExecAPI.downloadFile(sessionId, f.name)}>⬇️</button>
+                  <button className="workspace-icon-btn danger" title="Löschen" onClick={() => setDeleteTarget(f.name)}>🗑️</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </aside>
+
+        <section className="workspace-main">
+          <div className="workspace-tabs">
+            {tabs.map((t) => (
+              <button
+                key={t.name}
+                className={`workspace-tab ${activeTab === t.name ? 'active' : ''}`}
+                onClick={() => setActiveTab(t.name)}
+              >
+                {t.name}{t.dirty ? ' •' : ''}
+                <span className="workspace-tab-close" onClick={(e) => { e.stopPropagation(); closeTab(t.name); }}>✕</span>
+              </button>
+            ))}
+          </div>
+
+          {activeTabData ? (
+            <>
+              <div className="workspace-toolbar">
+                <button onClick={saveActiveTab} disabled={!activeTabData.dirty}>💾 Speichern</button>
+                <button onClick={runActiveTab} disabled={!activeLang || running}>
+                  {running ? 'Läuft…' : '▶ Ausführen'}
+                </button>
+              </div>
+              <CodeMirror
+                value={activeTabData.content}
+                height="420px"
+                theme="dark"
+                extensions={activeLang ? [activeLang.cm] : []}
+                onChange={updateActiveContent}
+              />
+              {runResult && (
+                <div className="workspace-output">
+                  <CodeRunResult result={runResult} sessionId={sessionId} />
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="workspace-hint">Datei aus der Liste öffnen oder eine neue anlegen.</p>
+          )}
+        </section>
+      </div>
+
+      {newFileOpen && (
+        <div className="workspace-modal-overlay" onClick={() => setNewFileOpen(false)}>
+          <div className="workspace-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Neue Datei</h3>
+            <input
+              type="text"
+              value={newFileName}
+              onChange={(e) => setNewFileName(e.target.value)}
+              placeholder="z. B. analyse.py"
+              autoFocus
+            />
+            {modalError && <p className="workspace-modal-error">{modalError}</p>}
+            <div className="workspace-modal-actions">
+              <button onClick={() => { setNewFileOpen(false); setModalError(null); }}>Abbrechen</button>
+              <button className="primary" onClick={handleCreateFile}>Anlegen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameTarget && (
+        <div className="workspace-modal-overlay" onClick={() => setRenameTarget(null)}>
+          <div className="workspace-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Datei umbenennen</h3>
+            <input type="text" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus />
+            {modalError && <p className="workspace-modal-error">{modalError}</p>}
+            <div className="workspace-modal-actions">
+              <button onClick={() => { setRenameTarget(null); setModalError(null); }}>Abbrechen</button>
+              <button className="primary" onClick={handleRename}>Umbenennen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="workspace-modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="workspace-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Datei löschen?</h3>
+            <p>„{deleteTarget}" wird unwiderruflich gelöscht.</p>
+            <div className="workspace-modal-actions">
+              <button onClick={() => setDeleteTarget(null)}>Abbrechen</button>
+              <button className="danger" onClick={handleDelete}>Löschen</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default WorkspacePage;

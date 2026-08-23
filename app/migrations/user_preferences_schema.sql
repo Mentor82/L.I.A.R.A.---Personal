@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     tool_memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
 
+    -- Workspace v1 feature toggle (shared file/code editing + execution tab)
+    workspace_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

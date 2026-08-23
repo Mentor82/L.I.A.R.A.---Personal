@@ -73,7 +73,10 @@ async def run_code(
     _verify_session_ownership(db, req.session_id, current_user.id)
 
     session_dir = SESSION_FILES_DIR / str(current_user.id) / str(req.session_id)
-    result = code_sandbox.run_code(req.language, req.code, session_dir)
+    result = code_sandbox.run_code(
+        req.language, req.code, session_dir,
+        user_id=current_user.id, session_id=req.session_id,
+    )
 
     return RunResponse(
         run_id=result.run_id,

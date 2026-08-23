@@ -37,7 +37,7 @@ from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
 from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_task_list_instructions
-from services.session_workspace import build_workspace_manifest
+from services.session_workspace import build_workspace_manifest, get_context_selected_files, read_session_file
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
 from services.ollama_capabilities import model_supports_tools
@@ -857,6 +857,22 @@ async def stream_chat(
                 enhanced_context += f"\n\n{workspace_manifest}"
         except Exception as e:
             logger.warning(f"Workspace manifest lookup failed: {e}")
+
+        # 1c. Files the user explicitly marked "add to chat context" in the
+        # Workspace tab - inlines actual content (not just name/size like the
+        # manifest above), same size/text-type cap read_session_file already
+        # enforces. Opt-in per file, never the whole workspace automatically.
+        try:
+            selected_files = get_context_selected_files(current_user.id, request.session_id)
+            for filename in selected_files:
+                file_data = read_session_file(current_user.id, request.session_id, filename)
+                if file_data.get("found") and file_data.get("content"):
+                    enhanced_context += (
+                        f"\n\n--- Workspace-Datei (vom Nutzer als Kontext markiert): {filename} ---\n"
+                        f"{file_data['content']}"
+                    )
+        except Exception as e:
+            logger.warning(f"Workspace context-selection lookup failed: {e}")
 
     # ✨ 2. NEU: Add Semantic Context from Neo4j (Top-5 similar concepts)
     # Gated by memory_enabled too, not just memory *creation* below - if a
