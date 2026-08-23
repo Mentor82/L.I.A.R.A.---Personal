@@ -252,6 +252,7 @@ async def stream_ollama_response(
     memory_enabled: bool = True,
     used_tools: bool = False,
     conversation_history: Optional[List[Dict]] = None,
+    db: Optional[Session] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -544,7 +545,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                     tool_call = ToolCall(tool_name=tool_name, parameters=arguments, raw_text="", confidence=1.0)
                     try:
-                        tool_result = await tool_executor.execute(tool_call, user_id or 0)
+                        tool_result = await tool_executor.execute(tool_call, user_id or 0, db=db)
                     except Exception as e:
                         logger.error(f"Agent tool execution failed: {tool_name}: {e}")
                         tool_result = {"success": False, "error": str(e)}
@@ -1076,7 +1077,8 @@ async def stream_chat(
             custom_instructions=user_prefs['custom_instructions'],
             user_message_id=message_id,
             memory_enabled=user_prefs['memory_enabled'],
-            used_tools=used_tools
+            used_tools=used_tools,
+            db=db
         ),
         media_type="text/event-stream",
         headers={

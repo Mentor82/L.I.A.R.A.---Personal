@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from services.tool_registry import get_tool_registry, ToolDefinition
@@ -337,9 +338,13 @@ class ToolExecutor:
         """
         Prüft ob User Consent für Tool gegeben hat
         """
-        # Für jetzt: Erlaube alle Tools mit niedrigem Privacy-Level
-        if tool_def.privacy_level == "low":
-            return True
+        # web_search/wikipedia_search have a real, already-shipped consent
+        # flag (user_privacy_settings.allow_web_search / PrivacySettings.jsx's
+        # "Web-Suche erlauben" toggle) - checked before the blanket
+        # privacy_level shortcut below since both tools are "low" but should
+        # still respect an explicit opt-out.
+        if tool_def.name in ("web_search", "wikipedia_search"):
+            return self._check_web_search_consent(user_id, db)
 
         # detect_location has a real, already-shipped consent mechanism
         # (user_location_preferences / PrivacySettings.jsx / location_router.py)
@@ -351,9 +356,30 @@ class ToolExecutor:
             stored_location = self.location_service.get_user_location(db, user_id)
             return stored_location is not None
 
+        # Für jetzt: Erlaube alle übrigen Tools mit niedrigem Privacy-Level
+        if tool_def.privacy_level == "low":
+            return True
+
         # Mittlere und hohe Privacy-Levels ohne eigenen Consent-Mechanismus
         logger.warning(f"Consent check not fully implemented - denying {tool_def.name}")
         return False
+
+    def _check_web_search_consent(self, user_id: int, db: Optional[Session]) -> bool:
+        """
+        Checks user_privacy_settings.allow_web_search. Defaults to allowed
+        (matches the column's own DEFAULT TRUE) when there's no db session
+        or no settings row yet, so a user who's never opened Privacy
+        Settings isn't silently blocked - only an explicit opt-out denies.
+        """
+        if db is None:
+            return True
+        row = db.execute(
+            text("SELECT allow_web_search FROM user_privacy_settings WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).first()
+        if row is None:
+            return True
+        return bool(row[0])
     
     def _error_result(
         self,

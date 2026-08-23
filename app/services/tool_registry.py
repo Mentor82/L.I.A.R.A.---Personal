@@ -78,7 +78,11 @@ class ToolRegistry:
                 )
             ],
             function=self._web_search_stub,
-            requires_consent=False,
+            # requires_consent=True routes through ToolExecutor's real
+            # user_privacy_settings.allow_web_search check - privacy_level
+            # stays "low" (that field only gates the Agent's native tool-set
+            # filter, unrelated to this).
+            requires_consent=True,
             privacy_level="low"
         ))
         
@@ -152,7 +156,8 @@ class ToolRegistry:
                 )
             ],
             function=self._wikipedia_stub,
-            requires_consent=False,
+            # Same allow_web_search gate as web_search - see that tool's comment.
+            requires_consent=True,
             privacy_level="low"
         ))
         

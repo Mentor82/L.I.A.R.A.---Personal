@@ -160,10 +160,11 @@ async def get_privacy_settings(
 ):
     """
     Privacy-Einstellungen des Users abrufen
-    
+
     Returns:
         - location_tracking: bool
         - web_search_history: bool
+        - allow_web_search: bool
         - auto_delete_days: int (0 = disabled)
         - data_export_available: bool
     """
@@ -172,19 +173,20 @@ async def get_privacy_settings(
         text("SELECT consent_given FROM user_location_preferences WHERE user_id = :user_id ORDER BY detected_at DESC LIMIT 1"),
         {"user_id": current_user.id}
     ).fetchone()
-    
+
     location_tracking = location_result[0] if location_result else False
-    
+
     # Get privacy settings from database
     privacy_settings = db.execute(
-        text("SELECT store_search_history, auto_delete_searches_after_days FROM user_privacy_settings WHERE user_id = :user_id"),
+        text("SELECT allow_web_search, store_search_history, auto_delete_searches_after_days FROM user_privacy_settings WHERE user_id = :user_id"),
         {"user_id": current_user.id}
     ).fetchone()
-    
+
     if privacy_settings:
-        web_search_history = privacy_settings[0]
+        allow_web_search = privacy_settings[0]
+        web_search_history = privacy_settings[1]
         # Use the actual DB value, don't override with default
-        auto_delete_days = privacy_settings[1] if privacy_settings[1] is not None else 30
+        auto_delete_days = privacy_settings[2] if privacy_settings[2] is not None else 30
     else:
         # Create default settings if not exists
         db.execute(
@@ -195,12 +197,14 @@ async def get_privacy_settings(
             {"user_id": current_user.id}
         )
         db.commit()
+        allow_web_search = True
         web_search_history = True
         auto_delete_days = 30
-    
+
     return {
         "location_tracking": location_tracking,
         "web_search_history": web_search_history,
+        "allow_web_search": allow_web_search,
         "auto_delete_days": auto_delete_days,
         "data_export_available": True
     }
@@ -209,15 +213,17 @@ async def get_privacy_settings(
 @router.post("/settings")
 async def update_privacy_settings(
     web_search_history: Optional[bool] = None,
+    allow_web_search: Optional[bool] = None,
     auto_delete_days: Optional[int] = None,
     current_user: UserResponse = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Privacy-Einstellungen aktualisieren
-    
+
     Args:
         web_search_history: Web-Search-History aktivieren/deaktivieren
+        allow_web_search: Liara erlauben, das Web zu durchsuchen (DuckDuckGo/Wikipedia)
         auto_delete_days: Auto-Delete nach X Tagen (0 = disabled)
     """
     try:
@@ -226,20 +232,24 @@ async def update_privacy_settings(
             text("SELECT id FROM user_privacy_settings WHERE user_id = :user_id"),
             {"user_id": current_user.id}
         ).fetchone()
-        
+
         if existing:
             # Update existing settings
             update_parts = []
             params = {"user_id": current_user.id}
-            
+
             if web_search_history is not None:
                 update_parts.append("store_search_history = :web_search_history")
                 params["web_search_history"] = web_search_history
-            
+
+            if allow_web_search is not None:
+                update_parts.append("allow_web_search = :allow_web_search")
+                params["allow_web_search"] = allow_web_search
+
             if auto_delete_days is not None:
                 update_parts.append("auto_delete_searches_after_days = :auto_delete_days")
                 params["auto_delete_days"] = auto_delete_days
-            
+
             if update_parts:
                 update_parts.append("updated_at = CURRENT_TIMESTAMP")
                 sql = f"UPDATE user_privacy_settings SET {', '.join(update_parts)} WHERE user_id = :user_id"
@@ -249,23 +259,25 @@ async def update_privacy_settings(
             # Create new settings
             db.execute(
                 text("""
-                INSERT INTO user_privacy_settings 
+                INSERT INTO user_privacy_settings
                 (user_id, allow_web_search, store_search_history, auto_delete_searches_after_days)
-                VALUES (:user_id, true, :web_search_history, :auto_delete_days)
+                VALUES (:user_id, :allow_web_search, :web_search_history, :auto_delete_days)
                 """),
                 {
                     "user_id": current_user.id,
+                    "allow_web_search": allow_web_search if allow_web_search is not None else True,
                     "web_search_history": web_search_history if web_search_history is not None else True,
                     "auto_delete_days": auto_delete_days if auto_delete_days is not None else 30
                 }
             )
             db.commit()
-        
+
         return {
             "success": True,
             "message": "Privacy settings updated successfully",
             "settings": {
                 "web_search_history": web_search_history,
+                "allow_web_search": allow_web_search,
                 "auto_delete_days": auto_delete_days
             }
         }

@@ -97,6 +97,9 @@ export async function updatePrivacySettings(settings) {
   if (settings.web_search_history !== undefined) {
     params.append('web_search_history', settings.web_search_history)
   }
+  if (settings.allow_web_search !== undefined) {
+    params.append('allow_web_search', settings.allow_web_search)
+  }
   if (settings.auto_delete_days !== undefined) {
     params.append('auto_delete_days', settings.auto_delete_days)
   }

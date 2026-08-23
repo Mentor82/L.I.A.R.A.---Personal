@@ -103,6 +103,19 @@ function PrivacySettings() {
     }
   }
 
+  const handleWebSearchToggle = async () => {
+    try {
+      setSaving(true)
+      const newValue = !settings.allow_web_search
+      await updatePrivacySettings({ allow_web_search: newValue })
+      setSettings({ ...settings, allow_web_search: newValue })
+    } catch (error) {
+      setErrorMessage('Fehler beim Speichern: ' + error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleAutoDeleteChange = async (days) => {
     try {
       setSaving(true)
@@ -220,7 +233,21 @@ function PrivacySettings() {
         <div className="privacy-section-header">
           <h2>🔍 Web-Suchen</h2>
         </div>
-        
+
+        <div className="privacy-setting">
+          <div className="setting-info">
+            <h3>Web-Suche erlauben</h3>
+            <p>Erlaubt Liara, das Internet nach aktuellen Informationen zu durchsuchen (DuckDuckGo, Wikipedia)</p>
+          </div>
+          <button
+            className={`toggle-btn ${settings?.allow_web_search ? 'active' : ''}`}
+            onClick={handleWebSearchToggle}
+            disabled={saving}
+          >
+            {settings?.allow_web_search ? '✅ Aktiviert' : '❌ Deaktiviert'}
+          </button>
+        </div>
+
         <div className="privacy-setting">
           <div className="setting-info">
             <h3>Suchverlauf speichern</h3>
