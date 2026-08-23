@@ -21,7 +21,12 @@ i18n
   .init({
     resources,
     fallbackLng: 'de', // Default language
-    lng: 'de', // Force German as initial language
+    // No `lng` here deliberately - setting it forces that language on every
+    // init and skips LanguageDetector entirely (per i18next's own docs),
+    // which is why a persisted liara_language selection never survived a
+    // reload. Detector below (order: localStorage -> navigator) now
+    // actually gets to run; fallbackLng above still covers "detected
+    // nothing"/unsupported-language cases.
     debug: false,
     
     interpolation: {
