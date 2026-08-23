@@ -15,6 +15,7 @@ function UserPreferences() {
   })
   const [models, setModels] = useState([])
   const [personalityOptions, setPersonalityOptions] = useState([])
+  const [personalityInsights, setPersonalityInsights] = useState(null)
   const [message, setMessage] = useState(null)
   const [memoriesToDelete, setMemoriesToDelete] = useState(false)
   const [deletingMemories, setDeletingMemories] = useState(false)
@@ -23,6 +24,7 @@ function UserPreferences() {
     loadPreferences()
     loadModels()
     loadPersonalityOptions()
+    loadPersonalityInsights()
   }, [])
 
   const loadPreferences = async () => {
@@ -68,6 +70,25 @@ function UserPreferences() {
     } catch (error) {
       console.error('Failed to load personality options:', error)
     }
+  }
+
+  const loadPersonalityInsights = async () => {
+    try {
+      const token = localStorage.getItem('liara_token')
+      const response = await fetch('/api/user/preferences/personality-insights', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (response.ok) {
+        setPersonalityInsights(await response.json())
+      }
+    } catch (error) {
+      console.error('Failed to load personality insights:', error)
+    }
+  }
+
+  const insightFor = (personalityValue) => {
+    if (!personalityInsights) return null
+    return personalityInsights.personalities.find(p => p.personality === personalityValue) || null
   }
 
   const savePreferences = async () => {
@@ -198,25 +219,38 @@ function UserPreferences() {
       <div className="settings-card">
         <h3 className="settings-card-title">🎭 Persönlichkeit</h3>
         <div className="personality-options">
-          {personalityOptions.map(option => (
-            <label
-              key={option.value}
-              className={`personality-option ${preferences.personality === option.value ? 'active' : ''}`}
-            >
-              <input
-                type="radio"
-                name="personality"
-                value={option.value}
-                checked={preferences.personality === option.value}
-                onChange={() => setPreferences(prev => ({ ...prev, personality: option.value }))}
-              />
-              <span className="personality-option-label">{option.label}</span>
-              <span className="personality-option-desc">{option.description}</span>
-            </label>
-          ))}
+          {personalityOptions.map(option => {
+            const insight = insightFor(option.value)
+            const isBest = personalityInsights?.best_personality === option.value
+            return (
+              <label
+                key={option.value}
+                className={`personality-option ${preferences.personality === option.value ? 'active' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="personality"
+                  value={option.value}
+                  checked={preferences.personality === option.value}
+                  onChange={() => setPreferences(prev => ({ ...prev, personality: option.value }))}
+                />
+                <span className="personality-option-label">
+                  {option.label}
+                  {isBest && <span title="Kommt bei dir bisher am besten an"> ⭐</span>}
+                </span>
+                <span className="personality-option-desc">{option.description}</span>
+                {insight && (
+                  <span className="personality-option-insight">
+                    Ø-Stimmung danach: {insight.avg_score > 0 ? '+' : ''}{insight.avg_score} ({insight.sample_count} Antworten)
+                  </span>
+                )}
+              </label>
+            )
+          })}
         </div>
         <span className="form-hint">
           Legt Liaras grundlegenden Kommunikationsstil fest, unabhängig von der automatischen Stimmung.
+          {personalityInsights?.best_personality && ' ⭐ zeigt, welche Personality bisher am positivsten bei dir ankam.'}
         </span>
       </div>
 

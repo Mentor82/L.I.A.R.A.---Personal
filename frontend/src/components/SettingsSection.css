@@ -297,6 +297,12 @@ textarea.input {
   color: var(--color-text-muted);
 }
 
+.personality-option-insight {
+  font-size: var(--text-xs);
+  color: var(--color-primary);
+  margin-top: 2px;
+}
+
 /* Delete Memories Confirmation Modal */
 .prefs-modal-overlay {
   position: fixed;

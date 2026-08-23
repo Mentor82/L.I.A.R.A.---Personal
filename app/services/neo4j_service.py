@@ -145,6 +145,38 @@ class Neo4jGraphService:
             logger.info(f"Deleted {deleted} Neo4j nodes for user {user_id}")
             return deleted
 
+    def get_personality_effectiveness(self, user_id: int) -> List[Dict]:
+        """
+        Aggregate outcome_score by personality preset, from the
+        RESULTED_IN edges and outcome-tagged replies captured per turn.
+
+        Insight-only: this is surfaced to the user to look at, nothing
+        reads it back to change Liara's behavior automatically.
+
+        Returns one entry per personality actually used, each with the
+        average outcome score and how many outcome-tagged replies that
+        average is based on (so the caller can decide what counts as
+        enough samples to mean anything).
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (:Message)-[r:RESULTED_IN]->(a:Message {user_id: $user_id})
+                WHERE a.outcome_score IS NOT NULL AND r.personality IS NOT NULL
+                RETURN r.personality as personality,
+                       avg(a.outcome_score) as avg_score,
+                       count(*) as sample_count
+                ORDER BY avg_score DESC
+            """, user_id=user_id)
+
+            return [
+                {
+                    'personality': record['personality'],
+                    'avg_score': round(record['avg_score'], 3),
+                    'sample_count': record['sample_count']
+                }
+                for record in result
+            ]
+
     def get_last_assistant_message_id(self, user_id: int, session_id: int) -> Optional[int]:
         """
         Find the most recent assistant Message node in a specific

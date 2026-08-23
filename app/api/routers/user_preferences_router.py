@@ -64,6 +64,37 @@ def get_preferences_personality_options():
     return {"options": get_personality_choices()}
 
 
+# Below this many outcome-tagged replies, an average is too noisy to
+# call "the personality that works best for you" - just show the raw
+# number instead of highlighting it.
+MIN_OUTCOME_SAMPLES = 5
+
+
+@router.get("/preferences/personality-insights")
+def get_preferences_personality_insights(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Insight-only: how each personality preset has landed for this user so
+    far, based on the sentiment of the message that followed each reply
+    (see chat_streaming.py's outcome-tagging). Nothing reads this back to
+    change Liara's behavior - it's purely for the user to look at.
+    """
+    try:
+        effectiveness = get_neo4j_service().get_personality_effectiveness(current_user.id)
+    except Exception:
+        effectiveness = []
+
+    qualified = [e for e in effectiveness if e['sample_count'] >= MIN_OUTCOME_SAMPLES]
+    best_personality = qualified[0]['personality'] if len(qualified) >= 2 else None
+
+    return {
+        "personalities": effectiveness,
+        "min_samples_required": MIN_OUTCOME_SAMPLES,
+        "best_personality": best_personality
+    }
+
+
 @router.put("/preferences", response_model=PreferencesResponse)
 def update_preferences(
     request: PreferencesUpdateRequest,
