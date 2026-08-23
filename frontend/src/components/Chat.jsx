@@ -495,11 +495,15 @@ function Chat() {
                 // Append content chunk
                 liaraMessage.content += parsed.text;
                 
-                // Beim ersten Content: Message hinzufügen
+                // Beim ersten Content: Message hinzufügen und Loading-Indikator
+                // ausblenden - sonst läuft die "denkt nach..."-Bubble parallel
+                // zur bereits sichtbaren, live wachsenden Antwort weiter, bis
+                // der komplette Stream fertig ist.
                 if (!messageAdded) {
                   messageAdded = true;
-                  setChatSessions(prev => prev.map(session => 
-                    session.id === activeSessionId 
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
                       ? { ...session, messages: [...session.messages, liaraMessage] }
                       : session
                   ));

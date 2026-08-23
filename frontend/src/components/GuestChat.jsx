@@ -126,7 +126,9 @@ function GuestChat() {
     try {
       // Create abort controller
       abortControllerRef.current = new AbortController();
-      
+
+      let firstContentReceived = false;
+
       await guestAPI.streamMessage(
         userMessage,
         // onChunk
@@ -136,12 +138,19 @@ function GuestChat() {
             setSearchIntent(data.intent);
           } else if (data.type === 'web_results') {
             setSearching(false);
-            setMessages(prev => prev.map(msg => 
-              msg.id === assistantMsgId 
+            setMessages(prev => prev.map(msg =>
+              msg.id === assistantMsgId
                 ? { ...msg, webSearchResults: data.results, searchType: data.search_type }
                 : msg
             ));
           } else if (data.type === 'content') {
+            // Erster Chunk: Loading-Indikator ausblenden, sonst läuft die
+            // "denkt nach..."-Bubble parallel zur bereits sichtbaren,
+            // live wachsenden Antwort weiter bis der Stream fertig ist.
+            if (!firstContentReceived) {
+              firstContentReceived = true;
+              setLoading(false);
+            }
             setMessages(prev => prev.map(msg =>
               msg.id === assistantMsgId
                 ? { ...msg, content: msg.content + data.text }
