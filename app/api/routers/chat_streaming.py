@@ -574,25 +574,32 @@ async def stream_chat(
     
     # Fast keyword-based pre-check for actions
     action_keywords = ['erstell', 'create', 'neue task', 'neue notiz', 'neuer termin']
-    needs_action_check = any(kw in message_lower for kw in action_keywords)
-    
+    # "Zeig mir meine Aufgaben" etc. never triggered execute_list_* here at
+    # all - only chat.py's non-streaming fallback wired these up, so the
+    # default (streaming) path always fell through to the LLM, which could
+    # only mention items it happened to have in semantic memory context
+    # rather than reliably listing everything.
+    list_keywords = ['zeig mir meine', 'zeig meine', 'liste meine', 'welche aufgaben', 'welche termine',
+                      'welche notizen', 'meine aufgaben', 'meine tasks', 'meine termine', 'meine notizen']
+    needs_action_check = any(kw in message_lower for kw in action_keywords) or any(kw in message_lower for kw in list_keywords)
+
     # Only run expensive intent detection if keywords match
     search_intent = None
     action_intent = None
     action_result = None
-    
+
     if needs_web_search:
         embedding_service = get_embedding_service()
         search_intent = embedding_service.detect_intent(request.message)
-    
+
     if needs_action_check:
         intent_detector = get_intent_detector()
         action_intent = intent_detector.detect(request.message)
-    
+
     # Execute action if detected
     if action_intent and action_intent.startswith('create_'):
         executor = ActionExecutor(db)
-        
+
         if action_intent == 'create_event':
             details = intent_detector.extract_event_details(request.message)
             details['user_id'] = current_user.id
@@ -605,6 +612,15 @@ async def stream_chat(
             details = intent_detector.extract_note_details(request.message)
             details['user_id'] = current_user.id
             action_result = await executor.execute_create_note(details)
+    elif action_intent and action_intent.startswith('list_'):
+        executor = ActionExecutor(db)
+
+        if action_intent == 'list_tasks':
+            action_result = await executor.execute_list_tasks(current_user.id)
+        elif action_intent == 'list_events':
+            action_result = await executor.execute_list_events(current_user.id)
+        elif action_intent == 'list_notes':
+            action_result = await executor.execute_list_notes(current_user.id)
     
     # Build enhanced context
     enhanced_context = request.context or ""
