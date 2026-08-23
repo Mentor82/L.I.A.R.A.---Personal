@@ -35,7 +35,7 @@ from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
-from liara_engine.personality import get_personality_prompt
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -241,9 +241,11 @@ Deine Art zu kommunizieren:
 - Leicht verspielt
 - Ruhig und stabilisierend
 
+Aktuelle Zeit: {build_temporal_context()}
+
 Aktueller Mood-Modifier: {mood_modifier}
 
-Persönlichkeit: {get_personality_prompt(personality)}
+{build_personality_and_instructions_block(username, personality, custom_instructions)}
 
 WICHTIG - Formatierung deiner Antworten (Markdown):
 Formatiere deine Antworten automatisch je nach Inhalt:
@@ -291,8 +293,6 @@ WICHTIG - Bei fehlenden Standort-Daten:
 Wenn ein User nach Wetter fragt aber KEIN Standort verfügbar ist (weder in der Frage noch gespeichert),
 frage freundlich nach: "Für welchen Ort möchtest du die Wettervorhersage wissen?" 
 Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (mit Consent).
-
-{f"Individuelle Anweisungen von {username}:" + chr(10) + custom_instructions if custom_instructions else ''}
 
 {context or ''}
 """

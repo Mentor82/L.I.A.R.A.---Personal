@@ -26,7 +26,7 @@ from services.tool_parser import get_tool_parser
 from services.tool_executor import get_tool_executor
 from services.image_generation import get_image_generation_service
 from services.user_preferences_service import get_user_preferences
-from liara_engine.personality import get_personality_prompt
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block
 
 # === Hailo-8L Backend Router Integration ===
 from services.backend_router import get_backend_router, BackendRouter, BackendType
@@ -765,18 +765,10 @@ async def chat_with_liara(
         
         # 5. Personalisiertes System Prompt basierend auf User
         personalized_context = _get_personalized_context(current_user)
-        
+
         # 6. Aktuelle Zeit/Datum für Kontext
-        from datetime import datetime
-        now = datetime.now()
-        current_datetime = now.strftime("%A, %d. %B %Y, %H:%M Uhr")
-        weekday_de = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][now.weekday()]
-        months_de = ["", "Januar", "Februar", "März", "April", "Mai", "Juni", 
-                     "Juli", "August", "September", "Oktober", "November", "Dezember"]
-        current_datetime_de = f"{weekday_de}, {now.day}. {months_de[now.month]} {now.year}, {now.hour:02d}:{now.minute:02d} Uhr"
-        
-        temporal_context = f"\n\nAktuelle Zeit: {current_datetime_de}"
-        
+        temporal_context = f"\n\nAktuelle Zeit: {build_temporal_context()}"
+
         # 7. Lade globalen System Prompt aus Config (falls vorhanden)
         with get_db_context() as db:
             config_service = get_config_service(db)
@@ -785,10 +777,8 @@ async def chat_with_liara(
             # 7b. Per-User Preferences: Personality-Preset + Individuelle Anweisungen
             user_prefs = get_user_preferences(db, current_user.id)
 
-        personality_prompt = get_personality_prompt(user_prefs["personality"])
-        custom_instructions_block = (
-            f"\n\nIndividuelle Anweisungen von {current_user.username}:\n{user_prefs['custom_instructions']}"
-            if user_prefs.get("custom_instructions") else ""
+        personality_instructions_block = build_personality_and_instructions_block(
+            current_user.username, user_prefs["personality"], user_prefs["custom_instructions"]
         )
 
         # 8. Normaler Chat wenn keine Aktion oder Aktion fehlgeschlagen
@@ -800,10 +790,10 @@ async def chat_with_liara(
         # Kombiniere: Global Prompt (falls vorhanden) + User Context + Time + Mood + Tools
         if global_system_prompt:
             # Global Prompt überschreibt Default, aber User-Context wird angehängt
-            combined_prompt = f"{global_system_prompt}\n\n{personalized_context}{temporal_context}\n\n{personality_prompt}{custom_instructions_block}\n\n{tool_system_prompt}"
+            combined_prompt = f"{global_system_prompt}\n\n{personalized_context}{temporal_context}\n\n{personality_instructions_block}\n\n{tool_system_prompt}"
         else:
             # Fallback auf Default Prompt
-            combined_prompt = f"{LIARA_SYSTEM_PROMPT}{temporal_context}\n\n{personality_prompt}{custom_instructions_block}\n\n{tool_system_prompt}"
+            combined_prompt = f"{LIARA_SYSTEM_PROMPT}{temporal_context}\n\n{personality_instructions_block}\n\n{tool_system_prompt}"
         
         mood_modifier = mood_system.get_system_prompt_modifier()
         context_with_mood = f"Mood: {mood_modifier}"
