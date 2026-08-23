@@ -36,9 +36,10 @@ from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
-from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_task_list_instructions
 from services.session_workspace import build_workspace_manifest
 from services.thinking_splitter import ThinkingSplitter
+from services.task_splitter import TaskBlockExtractor, parse_task_items
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -293,6 +294,8 @@ Formatiere deine Antworten automatisch je nach Inhalt:
 
 {build_safety_dimensioning_instructions()}
 
+{build_task_list_instructions()}
+
 Wähle die Formatierung automatisch basierend auf dem Inhalt:
 - Code → Code-Block mit korrekter Sprache
 - Vergleiche → Tabelle
@@ -368,6 +371,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # future context or concept extraction.
         full_response_text = ""
         thinking_splitter = ThinkingSplitter()
+        task_extractor = TaskBlockExtractor()
 
         # Streaming Request zu Ollama via httpx (NO buffering)
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -406,6 +410,16 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                         yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
 
                                     if content_part:
+                                        # <tasks> blocks (see build_task_list_instructions) are
+                                        # stripped out of content_part here and re-emitted as
+                                        # their own 'tasks' event instead - a model-authored plan
+                                        # display, not a verified execution record (see
+                                        # task_splitter.py's module docstring).
+                                        content_part, completed_task_blocks = task_extractor.feed(content_part)
+                                        for raw_block in completed_task_blocks:
+                                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+
+                                    if content_part:
                                         full_response_text += content_part
                                         # Mirko Debug Logging
                                         try:
@@ -425,8 +439,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                 if leftover_thinking:
                                     yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
                                 if leftover_content:
-                                    full_response_text += leftover_content
-                                    yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
+                                    leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
+                                    for raw_block in leftover_task_blocks:
+                                        yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                                    if leftover_content:
+                                        full_response_text += leftover_content
+                                        yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
+                                # Anything the extractor itself still had buffered (plain
+                                # trailing content, or an incomplete <tasks> block - the
+                                # latter discarded per task_extractor.flush()'s own contract).
+                                final_task_content = task_extractor.flush()
+                                if final_task_content:
+                                    full_response_text += final_task_content
+                                    yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
                                 # Mirko Debug Logging
                                 try:
                                     if username and should_log_for_user(username):

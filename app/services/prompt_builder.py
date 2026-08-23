@@ -103,3 +103,40 @@ Dosierungen o.ä.) und biete keine konkrete Zahl als "Schnell-Antwort" an, nur u
 Eine unvollständige Auslegungsfrage bleibt eine Rückfrage, auch wenn der User mehrfach nachhakt - liefere
 in diesem Fall lieber allgemeine Prinzipien/Normklassen ohne konkrete Zahlenempfehlung, statt eine
 Dimensionierung zu erfinden, die im Ernstfall falsch und gefährlich sein könnte."""
+
+
+def build_task_list_instructions() -> str:
+    """
+    Tells the model it may open a multi-step answer with a <tasks>
+    checklist block, and may re-emit an updated version of it later in the
+    same response to check items off as it addresses them.
+
+    Scope note: this only ever produces a MODEL-AUTHORED plan display, not
+    a verified execution record - "done" here means only "the model says
+    it covered this," nothing more. chat_streaming.py calls the model
+    exactly once per message; there is no multi-step tool-execution loop
+    behind it (yet) that could confirm a step actually happened. See the
+    "Aufgaben" plan for the fuller reasoning and what changes once a real
+    Agent loop exists (done would then be system-confirmed, not
+    model-claimed, using this same {id, label, done} shape).
+
+    Wired into stream_ollama_response (the authenticated path) only, not
+    stream_guest_response - keeping this off the public guest path was a
+    deliberate scope decision, not an oversight.
+    """
+    return """WICHTIG - Aufgaben-Checkliste bei mehrschrittigen Anfragen:
+Wenn eine Anfrage aus mehreren klar abgrenzbaren Schritten besteht (z.B. eine Anleitung mit mehreren
+Etappen, eine Frage mit mehreren Teilaufgaben), kannst du deine Antwort mit einem <tasks>-Block
+einleiten, der die Schritte als Checkliste auflistet:
+<tasks>
+- [ ] Erster Schritt
+- [ ] Zweiter Schritt
+- [ ] Dritter Schritt
+</tasks>
+
+Du darfst später in derselben Antwort einen aktualisierten <tasks>-Block erneut ausgeben, um bereits
+behandelte Schritte mit [x] abzuhaken - gib dabei immer die VOLLSTÄNDIGE, aktuelle Liste aus, keine
+Teil-Updates. Nutze das sparsam (höchstens ein paar Mal pro Antwort, nicht nach jedem Absatz) und nur
+bei wirklich mehrschrittigen Anfragen - für kurze oder einfache Antworten ist kein <tasks>-Block nötig.
+Der Block erscheint als eigene Checkliste im Chat, nicht im normalen Antworttext - schreibe die
+eigentliche Antwort trotzdem vollständig und normal weiter."""

@@ -38,6 +38,37 @@ function ThinkingBlock({ thinking, isAnswering }) {
   );
 }
 
+// Collapsible checklist from the model's <tasks> block(s) - see
+// task_splitter.py. This is a MODEL-AUTHORED plan display, not a verified
+// execution record: a checked item only means the model claims to have
+// covered that step in its own text, not that anything actually ran. Stays
+// expanded by default and doesn't auto-collapse like ThinkingBlock does -
+// watching it update as the model re-emits a fresher state is the point.
+function TaskListBlock({ tasks }) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (!tasks || tasks.length === 0) return null;
+
+  return (
+    <div className="task-list-block">
+      <button type="button" className="task-list-toggle" onClick={() => setExpanded((e) => !e)}>
+        <span>📋 Aufgaben</span>
+        <span className="task-list-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && (
+        <ul className="task-list-content">
+          {tasks.map((item) => (
+            <li key={item.id} className={`task-list-item ${item.done ? 'done' : ''}`}>
+              <input type="checkbox" checked={item.done} disabled readOnly />
+              <span>{item.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Chat() {
   const [message, setMessage] = useState('');
   const [chatSessions, setChatSessions] = useState(() => {
@@ -542,6 +573,28 @@ function Chat() {
                 // from liaraMessage.content so it renders as its own
                 // collapsible block instead of leaking into the answer text.
                 liaraMessage.thinking = (liaraMessage.thinking || '') + parsed.text;
+
+                if (!messageAdded) {
+                  messageAdded = true;
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages, liaraMessage] }
+                      : session
+                  ));
+                } else {
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                      : session
+                  ));
+                }
+              } else if (parsed.type === 'tasks') {
+                // Model-authored plan checklist (see task_splitter.py) - each
+                // event carries the FULL current state, so it replaces
+                // liaraMessage.tasks wholesale rather than accumulating like
+                // 'thinking' does.
+                liaraMessage.tasks = parsed.items;
 
                 if (!messageAdded) {
                   messageAdded = true;
@@ -1224,6 +1277,9 @@ function Chat() {
                   both duplicated the same line twice in the same bubble. */}
               {msg.role === 'assistant' && (
                 <ThinkingBlock thinking={msg.thinking} isAnswering={!!msg.content} />
+              )}
+              {msg.role === 'assistant' && (
+                <TaskListBlock tasks={msg.tasks} />
               )}
               {!msg.actionResult?.success && (
                 <div className="bubble-text">
