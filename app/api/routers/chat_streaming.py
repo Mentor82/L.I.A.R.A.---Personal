@@ -400,6 +400,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         for iteration in range(MAX_AGENT_ITERATIONS + 1):
             iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
 
+            if iteration_tools is None and ollama_tools:
+                # Forced final turn after using up the tool budget. Without
+                # an explicit nudge, a reasoning model can just keep
+                # reasoning about which tool it wishes it could call next
+                # and never emit real content before hitting num_predict -
+                # observed live with gpt-oss:120b-cloud. Telling it plainly
+                # that no more tools are available reliably gets a real
+                # answer instead of a silent, content-less turn.
+                messages.append({
+                    "role": "user",
+                    "content": "Es sind keine weiteren Tool-Aufrufe mehr möglich. Bitte beantworte die ursprüngliche Frage jetzt direkt mit den bisher erhaltenen Informationen."
+                })
+
             payload = {
                 "model": model,
                 "messages": messages,
