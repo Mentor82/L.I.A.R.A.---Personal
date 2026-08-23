@@ -56,7 +56,9 @@ class ToolRegistry:
                 "für schnelle Fakten/Definitionen via DuckDuckGo. search_type='web' für "
                 "Recherche-Fragen zu aktuellen Ereignissen oder Themen, die mehrere echte Quellen "
                 "brauchen - durchsucht das offene Web (SearXNG) und liefert tatsächlich abgerufene "
-                "Quellentexte mit URL/Titel statt nur einem kurzen Snippet."
+                "Quellentexte mit URL/Titel statt nur einem kurzen Snippet. Bei search_type='web' "
+                "steuert policy='fresh' die Sortierung nach Aktualität (neueste Quellen zuerst, "
+                "Quellen ohne Datum werden markiert) - Standard ist policy='general' (Relevanz)."
             ),
             category=ToolCategory.INFORMATION,
             parameters=[
@@ -81,6 +83,14 @@ class ToolRegistry:
                     required=False,
                     default="de",
                     enum=["de", "en"]
+                ),
+                ToolParameter(
+                    name="policy",
+                    type="string",
+                    description="Nur für search_type='web': 'general' (Relevanz, Standard) oder 'fresh' (neueste Quellen zuerst)",
+                    required=False,
+                    default="general",
+                    enum=["general", "fresh"]
                 )
             ],
             function=self._web_search_stub,

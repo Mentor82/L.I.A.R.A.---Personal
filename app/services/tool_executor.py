@@ -4,7 +4,7 @@ Automatische Ausführung von Tool-Calls mit Privacy-Checks
 """
 import asyncio
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from sqlalchemy import text
@@ -170,7 +170,8 @@ class ToolExecutor:
         language = params.get("language", "de")
 
         if search_type == "web":
-            return await self._execute_web_search_general(query, language)
+            policy = params.get("policy", "general")
+            return await self._execute_web_search_general(query, language, policy)
 
         if search_type == "wikipedia":
             result = self.web_search.search_wikipedia(query, language)
@@ -185,7 +186,7 @@ class ToolExecutor:
             "raw": result
         }
 
-    async def _execute_web_search_general(self, query: str, language: str) -> Dict:
+    async def _execute_web_search_general(self, query: str, language: str, policy: str = "general") -> Dict:
         """
         General/research-style web search (issue #4 phase 1) - SearXNG via
         SearchBroker for discovery, then real fetch-and-extract enrichment
@@ -195,8 +196,18 @@ class ToolExecutor:
         not an exception) if SearXNG is unreachable - the caller/model
         should be able to say "couldn't find anything" rather than the
         whole tool call failing.
+
+        policy="fresh" (issue #4 phase 2) re-sorts by publish date instead
+        of SearXNG's relevance order - dated results first, most recent
+        first, undated ones pushed to the end rather than dropped (a
+        result having no known date doesn't mean it's wrong, just that
+        recency can't be claimed for it).
         """
         broker_results = await self.search_broker.search(query, language=language)
+
+        if policy == "fresh":
+            broker_results = self._sort_by_freshness(broker_results)
+
         to_enrich = broker_results[:WEB_SEARCH_ENRICH_TOP_N]
 
         # fetch_safe() is a synchronous, blocking call (real HTTP request,
@@ -226,21 +237,52 @@ class ToolExecutor:
                 "title": title,
                 "domain": item.get("domain", ""),
                 "published_at": item.get("published_at"),
+                "dated": bool(item.get("published_at")),
                 "retrieved_at": datetime.utcnow().isoformat(),
                 "source_type": "search_result",
                 "text": text,
                 "search_rank": item.get("rank")
             })
 
+        summary = (
+            f"{len(sources)} Quelle(n) gefunden für '{query}'." if sources
+            else f"Keine Ergebnisse für '{query}' gefunden (Suche nicht verfügbar oder keine Treffer)."
+        )
+        undated_count = sum(1 for s in sources if not s["dated"])
+        if policy == "fresh" and undated_count:
+            summary += (
+                f" Hinweis: {undated_count} von {len(sources)} Quelle(n) haben kein bekanntes "
+                "Veröffentlichungsdatum - nicht als Beleg für aktuelle Ereignisse werten."
+            )
+
         return {
             "query": query,
             "type": "web",
             "sources": sources,
-            "summary": (
-                f"{len(sources)} Quelle(n) gefunden für '{query}'." if sources
-                else f"Keine Ergebnisse für '{query}' gefunden (Suche nicht verfügbar oder keine Treffer)."
-            )
+            "summary": summary
         }
+
+    def _sort_by_freshness(self, results: List[Dict]) -> List[Dict]:
+        """
+        Dated entries first (most recent first), undated entries after in
+        their original relative order - never drops undated results, just
+        deprioritizes them, since "no known date" isn't the same as "not
+        relevant".
+        """
+        def parse_date(item):
+            raw = item.get("published_at")
+            if not raw:
+                return None
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                return None
+
+        dated = [(parse_date(item), item) for item in results]
+        with_date = [d for d in dated if d[0] is not None]
+        without_date = [d[1] for d in dated if d[0] is None]
+        with_date.sort(key=lambda d: d[0], reverse=True)
+        return [d[1] for d in with_date] + without_date
     
     async def _execute_weather(self, params: Dict[str, Any]) -> Dict:
         """

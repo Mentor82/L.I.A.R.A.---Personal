@@ -553,6 +553,27 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     agent_steps[-1]["status"] = "done" if tool_result.get("success") else "error"
                     yield f"data: {json.dumps({'type': 'agent_steps', 'items': agent_steps})}\n\n"
 
+                    # Structured source-card UI (issue #4 phase 2) - the
+                    # model already cites sources in its own prose, but this
+                    # gives a reliable, structured display independent of
+                    # how well it happens to cite in any given answer.
+                    # Replaces wholesale on a later web_search("web") call
+                    # in the same response, same contract as agent_steps.
+                    inner_result = tool_result.get("result") or {}
+                    if tool_result.get("success") and inner_result.get("type") == "web":
+                        web_source_items = [
+                            {
+                                "id": f"source-{i}",
+                                "title": s.get("title", ""),
+                                "url": s.get("url", ""),
+                                "domain": s.get("domain", ""),
+                                "published_at": s.get("published_at"),
+                                "dated": s.get("dated", False)
+                            }
+                            for i, s in enumerate(inner_result.get("sources", []))
+                        ]
+                        yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
+
                     tool_message = {"role": "tool", "content": json.dumps(tool_result)}
                     if tc.get("id"):
                         tool_message["tool_call_id"] = tc["id"]

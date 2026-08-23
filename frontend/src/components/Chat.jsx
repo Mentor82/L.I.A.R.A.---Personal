@@ -123,6 +123,53 @@ function AgentStepsBlock({ steps }) {
   );
 }
 
+function formatSourceDate(published_at) {
+  if (!published_at) return null;
+  try {
+    return new Date(published_at).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return null;
+  }
+}
+
+// Structured source-card display for web_search(search_type="web") results
+// (issue #4 phase 2) - deliberately shown alongside, not instead of, the
+// model's own cited text: a reliable, structured view that doesn't depend
+// on how well the model happens to cite sources in any given answer.
+function WebSourcesBlock({ sources }) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (!sources || sources.length === 0) return null;
+
+  return (
+    <div className="web-sources-block">
+      <button type="button" className="web-sources-toggle" onClick={() => setExpanded((e) => !e)}>
+        <span>📚 Quellen ({sources.length})</span>
+        <span className="web-sources-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && (
+        <ul className="web-sources-content">
+          {sources.map((source) => (
+            <li key={source.id} className="web-sources-item">
+              <a href={source.url} target="_blank" rel="noopener noreferrer" className="web-sources-title">
+                {source.title || source.url}
+              </a>
+              <div className="web-sources-meta">
+                <span className="web-sources-domain">{source.domain}</span>
+                {source.dated ? (
+                  <span className="web-sources-date">{formatSourceDate(source.published_at)}</span>
+                ) : (
+                  <span className="web-sources-date web-sources-undated">kein Datum</span>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Chat() {
   const [message, setMessage] = useState('');
   const [chatSessions, setChatSessions] = useState(() => {
@@ -671,6 +718,29 @@ function Chat() {
                 // separate event/field from 'tasks'. Full current state each
                 // time, same replace-wholesale contract as 'tasks'.
                 liaraMessage.agentSteps = parsed.items;
+
+                if (!messageAdded) {
+                  messageAdded = true;
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages, liaraMessage] }
+                      : session
+                  ));
+                } else {
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                      : session
+                  ));
+                }
+              } else if (parsed.type === 'web_sources') {
+                // Structured source cards from web_search(search_type="web")
+                // (see chat_streaming.py's agent loop) - shown alongside the
+                // model's own cited text, not instead of it. Full current
+                // state each time, same replace-wholesale contract as
+                // 'agent_steps'/'tasks'.
+                liaraMessage.webSources = parsed.items;
 
                 if (!messageAdded) {
                   messageAdded = true;
@@ -1356,6 +1426,9 @@ function Chat() {
               )}
               {msg.role === 'assistant' && (
                 <AgentStepsBlock steps={msg.agentSteps} />
+              )}
+              {msg.role === 'assistant' && (
+                <WebSourcesBlock sources={msg.webSources} />
               )}
               {msg.role === 'assistant' && (
                 <TaskListBlock tasks={msg.tasks} />

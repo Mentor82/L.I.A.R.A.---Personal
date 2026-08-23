@@ -632,6 +632,74 @@
   flex-shrink: 0;
 }
 
+/* Web Sources Block (structured source cards, see chat_streaming.py's agent loop) */
+.web-sources-block {
+  margin: 0.5rem 0;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.web-sources-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-purple-subtle);
+  border: none;
+  color: var(--color-text-muted);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.web-sources-toggle:hover {
+  color: var(--color-purple);
+}
+
+.web-sources-caret {
+  font-style: normal;
+}
+
+.web-sources-content {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid rgba(139, 92, 246, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.web-sources-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.web-sources-title {
+  font-size: 0.85rem;
+  color: var(--color-purple);
+  text-decoration: none;
+}
+
+.web-sources-title:hover {
+  text-decoration: underline;
+}
+
+.web-sources-meta {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.web-sources-undated {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 /* Action Result Badge */
 .action-result {
   display: flex;
