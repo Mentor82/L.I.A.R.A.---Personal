@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { THEME_STORAGE_KEY, getStoredTheme, applyTheme } from '../utils/theme';
 import './ThemeToggle.css';
 
 /**
@@ -6,44 +7,31 @@ import './ThemeToggle.css';
  * Supports: Dark, Light, System (auto)
  */
 function ThemeToggle() {
-  const [theme, setTheme] = useState('system');
+  const [theme, setTheme] = useState(getStoredTheme);
 
-  // Initialize theme from localStorage or system preference
+  // Live-update when the OS-level color scheme changes while "System" is
+  // selected - the theme itself is already applied (by index.html's
+  // blocking script on load, or by cycleTheme on click), so this effect
+  // only needs to react to matchMedia, not re-apply on every theme change.
   useEffect(() => {
-    const savedTheme = localStorage.getItem('liara_theme') || 'system';
-    setTheme(savedTheme);
-    applyTheme(savedTheme);
-
-    // Listen for system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
       if (theme === 'system') {
         applyTheme('system');
       }
     };
-    
+
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [theme]);
-
-  const applyTheme = (selectedTheme) => {
-    let effectiveTheme = selectedTheme;
-    
-    if (selectedTheme === 'system') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      effectiveTheme = prefersDark ? 'dark' : 'light';
-    }
-    
-    document.documentElement.setAttribute('data-theme', effectiveTheme);
-  };
 
   const cycleTheme = () => {
     const themes = ['dark', 'light', 'system'];
     const currentIndex = themes.indexOf(theme);
     const nextTheme = themes[(currentIndex + 1) % themes.length];
-    
+
     setTheme(nextTheme);
-    localStorage.setItem('liara_theme', nextTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
     applyTheme(nextTheme);
   };
 

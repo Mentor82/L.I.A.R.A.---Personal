@@ -12,6 +12,30 @@
     
     <meta name="description" content="Liara - Deine persönliche Digitalbegleiterin" />
     <title>Liara - Digitalbegleiterin</title>
+
+    <!--
+      Applies the stored theme before first paint, eliminating the
+      flash-of-wrong-theme (e.g. a stored "light" preference briefly
+      rendering dark, since theme.css's bare :root is the dark palette).
+      Plain JS, duplicated from utils/theme.js's resolveEffectiveTheme()
+      deliberately - this must run before any module/bundle exists yet.
+      Keep the storage key in sync with THEME_STORAGE_KEY in
+      frontend/src/utils/theme.js if it's ever renamed.
+    -->
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem('liara_theme') || 'system';
+          var effective = pref === 'system'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : pref;
+          document.documentElement.setAttribute('data-theme', effective);
+        } catch (e) {
+          // localStorage unavailable (private mode, etc.) - fall through
+          // to theme.css's default (dark) rather than block rendering.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

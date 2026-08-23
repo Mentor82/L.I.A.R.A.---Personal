@@ -53,6 +53,43 @@ import './styles/components/chat.css'
 import './styles/components/sidebar.css'
 import './App.css'
 
+// Synchronous session restore from localStorage - pure reads, no network
+// call, so this can run directly as a useState initializer instead of a
+// post-mount effect (see App()).
+function restoreUserFromStorage() {
+  const isGuestMode = localStorage.getItem('liara_guest_mode') === 'true'
+  if (isGuestMode) {
+    return {
+      username: 'guest',
+      full_name: 'Gast',
+      role: 'guest',
+      is_guest: true
+    }
+  }
+
+  const token = localStorage.getItem('liara_token')
+  const userData = localStorage.getItem('liara_user')
+  if (token && userData) {
+    try {
+      return JSON.parse(userData)
+    } catch (error) {
+      console.error('Failed to parse user data:', error)
+      localStorage.removeItem('liara_token')
+      localStorage.removeItem('liara_user')
+    }
+  }
+
+  return null
+}
+
+// Every path the unauthenticated tree actually serves - anything else is
+// treated as an attempted protected route, so it can be restored after
+// login instead of silently discarded (see the !user branch in App()).
+const PUBLIC_PATHS = new Set([
+  '/', '/features', '/identity', '/privacy', '/technology', '/login',
+  '/impressum', '/datenschutz', '/agb', '/cookies'
+])
+
 // Loading fallback component
 const PageLoader = () => (
   <div className="page-loader">
@@ -98,35 +135,18 @@ function PersistentTerminal() {
 
 function App() {
   const { t } = useTranslation()
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+  // Restored synchronously during the initial render (not in a useEffect,
+  // which used to leave a render where auth state was still "unknown" -
+  // harmless for a healthy session since setUser/setLoading batched
+  // together, but a real gap for a corrupted/partial localStorage state,
+  // see restoreUserFromStorage below). No async check involved (pure
+  // localStorage reads), so there's nothing to actually "load".
+  const [user, setUser] = useState(restoreUserFromStorage)
   const [showLocationConsent, setShowLocationConsent] = useState(false)
-
-  // Check for existing token on mount
-  useEffect(() => {
-    const isGuestMode = localStorage.getItem('liara_guest_mode') === 'true'
-    const token = localStorage.getItem('liara_token')
-    const userData = localStorage.getItem('liara_user')
-    
-    if (isGuestMode) {
-      setUser({
-        username: 'guest',
-        full_name: 'Gast',
-        role: 'guest',
-        is_guest: true
-      })
-    } else if (token && userData) {
-      try {
-        setUser(JSON.parse(userData))
-      } catch (error) {
-        console.error('Failed to parse user data:', error)
-        localStorage.removeItem('liara_token')
-        localStorage.removeItem('liara_user')
-      }
-    }
-    
-    setLoading(false)
-  }, [])
+  // Captured once, before any redirect can change it, so a reload of a
+  // protected route can be restored after login instead of silently
+  // falling back to /chat (see the !user branch and handleLogin below).
+  const [originalPath] = useState(() => window.location.pathname + window.location.search)
 
   const handleLogin = (userData) => {
     setUser(userData)
@@ -134,6 +154,14 @@ function App() {
     if (!userData.is_guest) {
       setShowLocationConsent(true)
     }
+    // Restore the route the user actually asked for (see the !user
+    // branch's redirect to /login?redirect=...) - window.history, not
+    // useNavigate(), since this fires before the authenticated <Router>
+    // (a fresh BrowserRouter instance) has mounted; it reads the address
+    // bar fresh on the very next render, after this synchronously corrects it.
+    const redirectTo = new URLSearchParams(window.location.search).get('redirect')
+    const target = redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//') ? redirectTo : '/chat'
+    window.history.replaceState(null, '', target)
   }
 
   const handleLocationConsentComplete = (accepted) => {
@@ -160,18 +188,18 @@ function App() {
     setUser(null)
   }
 
-  // Show loading state
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <p className="loading-text">Initialisiere Liara...</p>
-      </div>
-    )
-  }
-
   // Show login if not authenticated
   if (!user) {
+    // A path that isn't one of the pages this tree actually serves means
+    // the user (or a corrupted/partial session) landed here trying to
+    // reach a protected route - send them through /login with it attached
+    // instead of the old blind "*" -> "/" (which erased it) so handleLogin
+    // can restore it after a successful sign-in.
+    const requestedPath = originalPath.split('?')[0]
+    const catchAllTarget = PUBLIC_PATHS.has(requestedPath)
+      ? '/'
+      : `/login?redirect=${encodeURIComponent(originalPath)}`
+
     return (
       <Router>
         <Suspense fallback={<PageLoader />}>
@@ -186,7 +214,7 @@ function App() {
             <Route path="/datenschutz" element={<Datenschutz />} />
             <Route path="/agb" element={<AGB />} />
             <Route path="/cookies" element={<Cookies />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to={catchAllTarget} replace />} />
           </Routes>
         </Suspense>
       </Router>

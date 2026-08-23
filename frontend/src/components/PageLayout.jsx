@@ -1,5 +1,6 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { THEME_STORAGE_KEY, getStoredTheme, resolveEffectiveTheme, applyTheme } from '../utils/theme';
 import liaraLogo from '../assets/LIARA-LOGO.png';
 import './PageLayout.css';
 
@@ -7,22 +8,26 @@ function PageLayout({ children, showGuestCTA = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isLandingPage = location.pathname === '/';
-  
-  // Theme State
-  const [theme, setTheme] = useState(() => {
-    const savedTheme = localStorage.getItem('liara-theme');
-    if (savedTheme) return savedTheme;
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-      return 'light';
-    }
-    return 'dark';
-  });
+
+  // Theme State - shares the same liara_theme key/resolution as the
+  // authenticated app (ThemeToggle.jsx) instead of its own separate
+  // "liara-theme" key, which never synced with it before. This component's
+  // toggle is dark/light-only (no "system" option in its UI), so a stored
+  // "system" preference is resolved to its effective value up front.
+  const [theme, setTheme] = useState(() => resolveEffectiveTheme(getStoredTheme()));
+
+  // index.html's blocking script already applies the theme before first
+  // paint site-wide, but apply again here too in case this component ever
+  // mounts standalone - cheap, and keeps this page's own state/DOM in sync.
+  useEffect(() => {
+    applyTheme(theme);
+  }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    localStorage.setItem('liara-theme', newTheme);
+    applyTheme(newTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, newTheme);
   };
 
   return (

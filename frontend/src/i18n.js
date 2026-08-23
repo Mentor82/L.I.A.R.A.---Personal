@@ -35,4 +35,14 @@ i18n
     }
   });
 
+// Keep <html lang> in sync with the active UI language - previously never
+// set at all (index.html's lang="en" was static regardless of the
+// selected locale). Covers both the initial load and every later switch
+// via LanguageSwitcher.jsx (which already calls i18n.changeLanguage(),
+// firing this same event) with no changes needed there.
+document.documentElement.lang = i18n.language;
+i18n.on('languageChanged', (lng) => {
+  document.documentElement.lang = lng;
+});
+
 export default i18n;

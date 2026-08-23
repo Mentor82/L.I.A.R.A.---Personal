@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { THEME_STORAGE_KEY, applyTheme } from '../utils/theme'
 import './SettingsSection.css'
 
 function UserPreferences() {
@@ -108,10 +109,12 @@ function UserPreferences() {
       if (response.ok) {
         setMessage({ type: 'success', text: 'Präferenzen gespeichert!' })
         
-        // Update theme if changed
+        // Update theme if changed - applyTheme() correctly resolves
+        // "system" instead of writing it literally as data-theme (which
+        // has no matching CSS selector and silently fell back to dark).
         if (preferences.theme) {
-          localStorage.setItem('liara_theme', preferences.theme)
-          document.documentElement.setAttribute('data-theme', preferences.theme)
+          localStorage.setItem(THEME_STORAGE_KEY, preferences.theme)
+          applyTheme(preferences.theme)
         }
       } else {
         setMessage({ type: 'error', text: 'Fehler beim Speichern' })
