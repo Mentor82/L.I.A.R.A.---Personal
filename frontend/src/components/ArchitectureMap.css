@@ -119,10 +119,7 @@
 }
 
 .arch-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 1rem;
-  align-items: start;
+  position: relative;
 }
 
 .arch-diagram {
@@ -206,11 +203,62 @@
 }
 
 .arch-detail-panel {
-  background: rgba(8, 12, 24, 0.55);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 340px;
+  max-width: calc(100% - 2rem);
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
+  background: rgba(8, 12, 24, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 14px;
   padding: 1.1rem;
-  min-height: 200px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 3;
+}
+
+.arch-detail-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-secondary, #b6bfd1);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 0.85rem;
+}
+
+.arch-detail-close:hover {
+  border-color: rgba(255, 122, 156, 0.6);
+  color: #ff7a9c;
+}
+
+.arch-detail-reopen {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  background: rgba(8, 12, 24, 0.85);
+  color: #67e8f9;
+  cursor: pointer;
+  font-size: 0.85rem;
+  backdrop-filter: blur(6px);
+}
+
+.arch-detail-header {
+  padding-right: 1.6rem;
 }
 
 .arch-detail-header h3 {
@@ -317,12 +365,6 @@
   color: var(--text-secondary, #8b93a7);
 }
 
-@media (max-width: 900px) {
-  .arch-workspace {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 768px) {
   .arch-diagram {
     display: none;
@@ -332,6 +374,21 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
+  }
+
+  /* No canvas to float over on mobile - the panel becomes a normal block
+     stacked after the node list instead of an absolutely-positioned overlay. */
+  .arch-detail-panel {
+    position: static;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    margin-top: 0.75rem;
+  }
+
+  .arch-detail-reopen {
+    position: static;
+    margin-top: 0.75rem;
   }
 
   .arch-mobile-list button {

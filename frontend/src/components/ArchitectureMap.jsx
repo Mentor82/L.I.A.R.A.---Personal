@@ -33,6 +33,7 @@ function ArchitectureMap() {
   const [view, setView] = useState('system');
   const [selectedId, setSelectedId] = useState('backend');
   const [query, setQuery] = useState('');
+  const [detailOpen, setDetailOpen] = useState(true);
 
   const nodesById = useMemo(
     () => Object.fromEntries(architectureNodes.map((node) => [node.id, node])),
@@ -79,6 +80,7 @@ function ArchitectureMap() {
 
   const chooseNode = (id) => {
     setSelectedId(id);
+    setDetailOpen(true);
     const node = nodesById[id];
     if (node && !node.views.includes(view)) {
       setView(node.views[0]);
@@ -236,9 +238,17 @@ function ArchitectureMap() {
           ))}
         </div>
 
-        {/* Detail panel */}
-        <aside className="arch-detail-panel" aria-live="polite">
-          {selected ? (
+        {/* Detail panel - floats over the diagram so the canvas keeps full width */}
+        {detailOpen && selected && (
+          <aside className="arch-detail-panel" aria-live="polite">
+            <button
+              type="button"
+              className="arch-detail-close"
+              onClick={() => setDetailOpen(false)}
+              aria-label="Detailansicht schließen"
+            >
+              ✕
+            </button>
             <>
               <div className="arch-detail-header">
                 <h3>{selected.title}</h3>
@@ -290,10 +300,18 @@ function ArchitectureMap() {
                 </>
               )}
             </>
-          ) : (
-            <p>Komponente auswählen, um Details zu sehen.</p>
-          )}
-        </aside>
+          </aside>
+        )}
+
+        {!detailOpen && selected && (
+          <button
+            type="button"
+            className="arch-detail-reopen"
+            onClick={() => setDetailOpen(true)}
+          >
+            ℹ️ {selected.title}
+          </button>
+        )}
       </div>
     </div>
   );

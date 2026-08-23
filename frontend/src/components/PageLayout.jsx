@@ -181,7 +181,7 @@ function PageLayout({ children, showGuestCTA = false }) {
         </div>
 
         <div className="footer-bottom">
-          <p>&copy; 2024 Liara AI Assistant. Alle Rechte vorbehalten.</p>
+          <p>&copy; 2026 LIARA Personal. Alle Rechte vorbehalten.</p>
         </div>
       </footer>
     </div>
