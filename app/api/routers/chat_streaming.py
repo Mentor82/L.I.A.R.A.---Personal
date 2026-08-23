@@ -446,7 +446,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                 # link below) never matched what the user
                                 # actually saw.
                                 if user_id is not None and session_id is not None and full_response_text:
-                                    def persist_assistant_turn():
+                                    def persist_assistant_turn() -> bool:
                                         from core.database import SessionLocal
                                         db_final = SessionLocal()
                                         try:
@@ -499,15 +499,31 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                                         )
                                                     except Exception as e:
                                                         logger.error(f"RESULTED_IN relationship failed: {e}")
+                                            return True
                                         except Exception as e:
                                             logger.error(f"Assistant message persistence failed: {e}")
+                                            return False
                                         finally:
                                             db_final.close()
 
-                                    import threading
-                                    threading.Thread(target=persist_assistant_turn, daemon=True).start()
+                                    # 'done' fires immediately, same as before - the UI shouldn't
+                                    # wait on persistence to know the reply finished streaming.
+                                    yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
 
-                                yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+                                    # asyncio.to_thread (not a bare threading.Thread) so this stays
+                                    # awaitable: a reload/navigation right after 'done' could race
+                                    # ahead of the DB commit if persistence were truly fire-and-forget
+                                    # (observed live: a tester reloaded ~immediately after streaming
+                                    # looked finished and briefly worried the reply hadn't saved).
+                                    # 'persisted' gives a caller that cares a real signal to wait for.
+                                    persisted_ok = False
+                                    try:
+                                        persisted_ok = await asyncio.to_thread(persist_assistant_turn)
+                                    except Exception as e:
+                                        logger.error(f"Assistant message persistence task failed: {e}")
+                                    yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
+                                else:
+                                    yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
                                 break
                         
                         except json.JSONDecodeError:

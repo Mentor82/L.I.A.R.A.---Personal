@@ -594,6 +594,18 @@ function Chat() {
                 // /chat/stream now persists both sides of the exchange
                 // itself (see chat_streaming.py) - saving it again here
                 // duplicated the message with a NULL user_id.
+              } else if (parsed.type === 'persisted') {
+                // Fires once the DB write actually commits, separately from
+                // (and slightly after) 'done' - 'done' only means Ollama
+                // finished generating, not that the reply is safely saved
+                // yet. Tracked on the message for now (e.g. future "still
+                // saving" UI); not surfaced visually yet.
+                liaraMessage.persisted = parsed.success;
+                setChatSessions(prev => prev.map(session =>
+                  session.id === activeSessionId
+                    ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                    : session
+                ));
               } else if (parsed.type === 'error') {
                 throw new Error(parsed.error);
               }
