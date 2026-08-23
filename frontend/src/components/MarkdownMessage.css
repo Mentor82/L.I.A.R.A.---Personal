@@ -387,7 +387,11 @@
 
 .image-lightbox-img {
   max-width: 90vw;
-  max-height: 90vh;
+  /* Leaves a clear margin above the image (mostly backdrop, not image
+     content) so the close button never sits directly on top of a
+     light-colored image like a white-background plot, where a translucent
+     light button would be almost invisible. */
+  max-height: 78vh;
   border-radius: 8px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
   cursor: default;
@@ -397,8 +401,10 @@
   position: fixed;
   top: 20px;
   right: 24px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  /* Solid dark background (not translucent white) so it stays visible
+     regardless of what's behind it - backdrop or a light image. */
+  background: rgba(20, 20, 20, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.4);
   color: #fff;
   font-size: 18px;
   width: 40px;
