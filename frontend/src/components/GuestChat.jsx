@@ -14,6 +14,7 @@ function GuestChat() {
   const [welcomeData, setWelcomeData] = useState(null);
   const [messageCount, setMessageCount] = useState(0);
   const [guestModeDisabled, setGuestModeDisabled] = useState(false);
+  const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const messagesEndRef = useRef(null);
   const abortControllerRef = useRef(null);
 
@@ -202,6 +203,16 @@ function GuestChat() {
     }
   };
 
+  const handleCopyMessage = async (content, index) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageIndex(index);
+      setTimeout(() => setCopiedMessageIndex(prev => (prev === index ? null : prev)), 1500);
+    } catch (error) {
+      console.error('Failed to copy message:', error);
+    }
+  };
+
   return (
     <div className="chat-container">
       <div className="chat-header">
@@ -232,11 +243,21 @@ function GuestChat() {
                 <span className="bubble-sender">
                   {msg.role === 'user' ? 'Du' : msg.role === 'assistant' ? 'Liara' : 'System'}
                 </span>
-                <span className="bubble-time">
-                  {new Date(msg.timestamp).toLocaleTimeString('de-DE', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
+                <span className="bubble-header-right">
+                  <span className="bubble-time">
+                    {new Date(msg.timestamp).toLocaleTimeString('de-DE', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    className="bubble-copy-btn"
+                    onClick={() => handleCopyMessage(msg.content, idx)}
+                    title="Nachricht kopieren"
+                  >
+                    {copiedMessageIndex === idx ? '✅' : '📋'}
+                  </button>
                 </span>
               </div>
               <div className="bubble-text">

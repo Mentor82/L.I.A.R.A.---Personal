@@ -29,6 +29,7 @@ function Chat() {
   const [isSending, setIsSending] = useState(false); // Mehrfachklick-Schutz
   const [errorMessage, setErrorMessage] = useState('');
   const [chatToDelete, setChatToDelete] = useState(null);
+  const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
   const [searching, setSearching] = useState(false);
   const [searchIntent, setSearchIntent] = useState(null);
   const [models, setModels] = useState([]);
@@ -655,6 +656,17 @@ function Chat() {
     }
   };
 
+  const handleCopyMessage = async (content, index) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageIndex(index);
+      setTimeout(() => setCopiedMessageIndex(prev => (prev === index ? null : prev)), 1500);
+    } catch (error) {
+      console.error('Failed to copy message:', error);
+      setErrorMessage('Kopieren fehlgeschlagen');
+    }
+  };
+
   const createNewChat = async () => {
     const title = `Chat ${chatSessions.length + 1}`;
     
@@ -1058,14 +1070,24 @@ function Chat() {
                 <span className="bubble-sender">
                   {msg.role === 'user' ? 'Du' : msg.role === 'assistant' ? 'Liara' : 'System'}
                 </span>
-                <span className="bubble-time">
-                  {new Date(msg.timestamp).toLocaleTimeString('de-DE', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })}
+                <span className="bubble-header-right">
+                  <span className="bubble-time">
+                    {new Date(msg.timestamp).toLocaleTimeString('de-DE', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    className="bubble-copy-btn"
+                    onClick={() => handleCopyMessage(msg.content, index)}
+                    title="Nachricht kopieren"
+                  >
+                    {copiedMessageIndex === index ? '✅' : '📋'}
+                  </button>
                 </span>
               </div>
-              
+
               {/* Action Result Badge */}
               {msg.actionResult && (
                 <div className={`action-result ${msg.actionResult.success ? 'success' : 'error'}`}>

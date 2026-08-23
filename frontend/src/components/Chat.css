@@ -449,6 +449,28 @@
   opacity: 0.6;
 }
 
+.bubble-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bubble-copy-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  opacity: 0.5;
+  padding: 0;
+  line-height: 1;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.bubble-copy-btn:hover {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
 .bubble-text {
   line-height: 1.6;
 }
