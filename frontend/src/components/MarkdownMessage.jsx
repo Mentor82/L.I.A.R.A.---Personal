@@ -42,6 +42,7 @@ const prismLanguageImports = {
   ruby: () => import('react-syntax-highlighter/dist/esm/languages/prism/ruby'),
   kotlin: () => import('react-syntax-highlighter/dist/esm/languages/prism/kotlin'),
   swift: () => import('react-syntax-highlighter/dist/esm/languages/prism/swift'),
+  julia: () => import('react-syntax-highlighter/dist/esm/languages/prism/julia'),
   sql: () => import('react-syntax-highlighter/dist/esm/languages/prism/sql'),
   yaml: () => import('react-syntax-highlighter/dist/esm/languages/prism/yaml'),
   yml: () => import('react-syntax-highlighter/dist/esm/languages/prism/yaml'),
