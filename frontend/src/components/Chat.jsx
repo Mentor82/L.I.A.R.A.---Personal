@@ -91,6 +91,38 @@ function TaskListBlock({ tasks }) {
   );
 }
 
+const AGENT_STEP_ICON = { running: '⏳', done: '✅', error: '❌' };
+
+// Real tool-execution progress, backend-authored (see chat_streaming.py's
+// agent loop / _build_agent_step_label) - deliberately a separate component
+// and SSE event from TaskListBlock/'tasks': a status here reflects an
+// actual ToolExecutor result, never something the model merely claimed.
+// See task_splitter.py's docstring for why that distinction is kept strict.
+function AgentStepsBlock({ steps }) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (!steps || steps.length === 0) return null;
+
+  return (
+    <div className="agent-steps-block">
+      <button type="button" className="agent-steps-toggle" onClick={() => setExpanded((e) => !e)}>
+        <span>⚙️ Agent</span>
+        <span className="agent-steps-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && (
+        <ul className="agent-steps-content">
+          {steps.map((step) => (
+            <li key={step.id} className={`agent-steps-item ${step.status}`}>
+              <span className="agent-steps-icon">{AGENT_STEP_ICON[step.status] || '•'}</span>
+              <span>{step.label}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Chat() {
   const [message, setMessage] = useState('');
   const [chatSessions, setChatSessions] = useState(() => {
@@ -617,6 +649,28 @@ function Chat() {
                 // liaraMessage.tasks wholesale rather than accumulating like
                 // 'thinking' does.
                 liaraMessage.tasks = parsed.items;
+
+                if (!messageAdded) {
+                  messageAdded = true;
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages, liaraMessage] }
+                      : session
+                  ));
+                } else {
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                      : session
+                  ));
+                }
+              } else if (parsed.type === 'agent_steps') {
+                // Real tool-execution progress (see chat_streaming.py's agent
+                // loop) - backend-confirmed, not model-claimed, so this is a
+                // separate event/field from 'tasks'. Full current state each
+                // time, same replace-wholesale contract as 'tasks'.
+                liaraMessage.agentSteps = parsed.items;
 
                 if (!messageAdded) {
                   messageAdded = true;
@@ -1299,6 +1353,9 @@ function Chat() {
                   both duplicated the same line twice in the same bubble. */}
               {msg.role === 'assistant' && (
                 <ThinkingBlock thinking={msg.thinking} isAnswering={!!msg.content} />
+              )}
+              {msg.role === 'assistant' && (
+                <AgentStepsBlock steps={msg.agentSteps} />
               )}
               {msg.role === 'assistant' && (
                 <TaskListBlock tasks={msg.tasks} />

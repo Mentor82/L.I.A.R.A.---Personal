@@ -218,6 +218,47 @@ class ToolRegistry:
         
         return "\n".join(lines)
     
+    def get_tools_for_ollama(self) -> List[Dict]:
+        """
+        Serializes tools into Ollama's native function-calling format
+        (`{"type": "function", "function": {...}}`, JSON-Schema parameters) -
+        for the real tool_calls loop in chat_streaming.py, as opposed to
+        get_tool_descriptions_for_llm()'s prompt text that teaches chat.py's
+        model a <tool_call> tag to emit and tool_parser.py to regex out.
+
+        Restricted to privacy_level == "low": get_weather/detect_location
+        require consent, and ToolExecutor._check_user_consent is currently a
+        stub that unconditionally denies anything above "low" - exposing
+        them as callable tools here would just mean the model "calls" them
+        and always gets a consent-denied error back. Filtering by the same
+        field ToolExecutor itself checks means this list widens on its own,
+        with no change needed here, once real per-user consent exists.
+        """
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            p.name: {
+                                "type": p.type,
+                                "description": p.description,
+                                **({"enum": p.enum} if p.enum else {}),
+                                **({"default": p.default} if p.default is not None else {})
+                            }
+                            for p in tool.parameters
+                        },
+                        "required": [p.name for p in tool.parameters if p.required]
+                    }
+                }
+            }
+            for tool in self._tools.values()
+            if tool.privacy_level == "low"
+        ]
+
     def get_tool_schema(self, name: str) -> Optional[Dict]:
         """Hole Tool-Schema als JSON (für API-Docs)"""
         tool = self.get_tool(name)

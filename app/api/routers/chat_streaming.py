@@ -40,6 +40,10 @@ from services.prompt_builder import build_temporal_context, build_personality_an
 from services.session_workspace import build_workspace_manifest
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
+from services.ollama_capabilities import model_supports_tools
+from services.tool_registry import get_tool_registry
+from services.tool_executor import get_tool_executor
+from services.tool_parser import ToolCall
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -193,6 +197,22 @@ def perform_web_search(query: str, intent: str, user_id: Optional[int] = None, d
         return None, None, None, None
 
 
+def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
+    """
+    Human-readable label for an agent_steps SSE item - always built here,
+    server-side, from the tool name/arguments actually invoked. Never from
+    model text: that's the whole point of this being a separate event from
+    the model-authored 'tasks' block (see task_splitter.py's docstring).
+    """
+    if tool_name == "web_search":
+        return f'Websuche: "{arguments.get("query", "")}"'
+    if tool_name == "wikipedia_search":
+        return f'Wikipedia: "{arguments.get("query", "")}"'
+    if tool_name == "get_current_time":
+        return "Aktuelle Zeit abrufen"
+    return tool_name
+
+
 class StreamChatRequest(BaseModel):
     """Request für Streaming Chat."""
     message: str
@@ -316,20 +336,22 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 {context or ''}
 """
     
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            *(conversation_history or []),
-            {"role": "user", "content": message}
-        ],
-        "stream": True,
-        "options": {
-            "temperature": temperature,
-            "num_predict": 2000
-        }
-    }
-    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *(conversation_history or []),
+        {"role": "user", "content": message}
+    ]
+
+    # Native Ollama tool-calling (see the "Agent" plan) - only attached when
+    # the selected model actually supports it (confirmed live: passing
+    # `tools` to a model that doesn't is a hard HTTP 400, not a graceful
+    # ignore) and only the tools ToolExecutor's consent stub doesn't
+    # unconditionally deny (get_tools_for_ollama filters to privacy_level
+    # == "low").
+    ollama_tools = None
+    if await model_supports_tools(model):
+        ollama_tools = get_tool_registry().get_tools_for_ollama()
+
     try:
         # Sende Metadata Event with session_id
         metadata = {
@@ -363,197 +385,271 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             if web_search_data:
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type, 'risk_score': web_search_risk_score or 0})}\n\n"
         
-        # Accumulate the full reply so it can be persisted once streaming
-        # finishes - individual SSE chunks are never stored anywhere. Only
-        # the actual answer is accumulated here, not a <think> block (see
-        # thinking_splitter) - conversation history re-injects this text on
-        # later turns, and old reasoning traces have no business polluting
-        # future context or concept extraction.
+        # Agent tool-calling loop: bounded re-invocation of Ollama so the
+        # model can call a real tool and see its actual result, instead of
+        # only ever getting one shot per user message. Each iteration is one
+        # full Ollama call; the last iteration always omits `tools`, forcing
+        # a model that still wants another tool call to instead answer with
+        # whatever tool results it already has - this is what guarantees the
+        # loop always ends in a real answer rather than cutting off mid-plan.
+        MAX_AGENT_ITERATIONS = 3
+        agent_tool_used = False
+        agent_steps: List[Dict] = []
         full_response_text = ""
-        thinking_splitter = ThinkingSplitter()
-        task_extractor = TaskBlockExtractor()
 
-        # Streaming Request zu Ollama via httpx (NO buffering)
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            async with client.stream(
-                "POST",
-                "http://localhost:11434/api/chat",
-                json=payload
-            ) as response:
-                response.raise_for_status()
-                
-                # Stream Response Chunks - line by line
-                async for line in response.aiter_lines():
-                    if line:
-                        try:
-                            chunk = json.loads(line)
-                            
-                            if "message" in chunk:
-                                # Ollama separates reasoning-model output into
-                                # its own `message.thinking` field natively
-                                # (confirmed live: deepseek-r1 chunks arrive
-                                # as {"content": "", "thinking": "..."} while
-                                # reasoning, then plain {"content": "..."}
-                                # once it's done - no <think> tags in content
-                                # at all here). thinking_splitter below is a
-                                # fallback for setups where a model inlines
-                                # the tags in content instead.
-                                native_thinking = chunk["message"].get("thinking", "")
-                                if native_thinking:
-                                    yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
+        for iteration in range(MAX_AGENT_ITERATIONS + 1):
+            iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
 
-                                content = chunk["message"].get("content", "")
-                                if content:
-                                    thinking_part, content_part = thinking_splitter.feed(content)
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": 2000
+                }
+            }
+            if iteration_tools:
+                payload["tools"] = iteration_tools
 
-                                    if thinking_part:
-                                        yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
+            thinking_splitter = ThinkingSplitter()
+            task_extractor = TaskBlockExtractor()
+            turn_content = ""
+            turn_tool_calls = []
 
-                                    if content_part:
-                                        # <tasks> blocks (see build_task_list_instructions) are
-                                        # stripped out of content_part here and re-emitted as
-                                        # their own 'tasks' event instead - a model-authored plan
-                                        # display, not a verified execution record (see
-                                        # task_splitter.py's module docstring).
-                                        content_part, completed_task_blocks = task_extractor.feed(content_part)
-                                        for raw_block in completed_task_blocks:
-                                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+            # Streaming Request zu Ollama via httpx (NO buffering)
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                async with client.stream(
+                    "POST",
+                    "http://localhost:11434/api/chat",
+                    json=payload
+                ) as response:
+                    response.raise_for_status()
 
-                                    if content_part:
-                                        full_response_text += content_part
-                                        # Mirko Debug Logging
-                                        try:
-                                            if username and should_log_for_user(username):
-                                                mlogger.log_sse_chunk("content", content=content_part)
-                                        except:
-                                            pass  # Logging-Fehler ignorieren
+                    # Stream Response Chunks - line by line
+                    async for line in response.aiter_lines():
+                        if line:
+                            try:
+                                chunk = json.loads(line)
 
-                                        # SSE Format: data: {json}\n\n
-                                        yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
+                                if "message" in chunk:
+                                    # Native tool_calls can arrive on a chunk
+                                    # with done:false (confirmed live) -
+                                    # accumulate across the whole turn, act
+                                    # once done:true arrives below.
+                                    if chunk["message"].get("tool_calls"):
+                                        turn_tool_calls.extend(chunk["message"]["tool_calls"])
 
-                            # Check if done
-                            if chunk.get("done", False):
-                                # Flush anything the splitter is still holding
-                                # (e.g. a <think> block that never closed).
-                                leftover_thinking, leftover_content = thinking_splitter.flush()
-                                if leftover_thinking:
-                                    yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
-                                if leftover_content:
-                                    leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
-                                    for raw_block in leftover_task_blocks:
-                                        yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                                    # Ollama separates reasoning-model output into
+                                    # its own `message.thinking` field natively
+                                    # (confirmed live: deepseek-r1 chunks arrive
+                                    # as {"content": "", "thinking": "..."} while
+                                    # reasoning, then plain {"content": "..."}
+                                    # once it's done - no <think> tags in content
+                                    # at all here). thinking_splitter below is a
+                                    # fallback for setups where a model inlines
+                                    # the tags in content instead.
+                                    native_thinking = chunk["message"].get("thinking", "")
+                                    if native_thinking:
+                                        yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
+
+                                    content = chunk["message"].get("content", "")
+                                    if content:
+                                        thinking_part, content_part = thinking_splitter.feed(content)
+
+                                        if thinking_part:
+                                            yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
+
+                                        if content_part:
+                                            # <tasks> blocks (see build_task_list_instructions) are
+                                            # stripped out of content_part here and re-emitted as
+                                            # their own 'tasks' event instead - a model-authored plan
+                                            # display, not a verified execution record (see
+                                            # task_splitter.py's module docstring).
+                                            content_part, completed_task_blocks = task_extractor.feed(content_part)
+                                            for raw_block in completed_task_blocks:
+                                                yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+
+                                        if content_part:
+                                            turn_content += content_part
+                                            # Mirko Debug Logging
+                                            try:
+                                                if username and should_log_for_user(username):
+                                                    mlogger.log_sse_chunk("content", content=content_part)
+                                            except:
+                                                pass  # Logging-Fehler ignorieren
+
+                                            # SSE Format: data: {json}\n\n
+                                            yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
+
+                                # Check if done
+                                if chunk.get("done", False):
+                                    # Flush anything the splitter is still holding
+                                    # (e.g. a <think> block that never closed).
+                                    leftover_thinking, leftover_content = thinking_splitter.flush()
+                                    if leftover_thinking:
+                                        yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
                                     if leftover_content:
-                                        full_response_text += leftover_content
-                                        yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
-                                # Anything the extractor itself still had buffered (plain
-                                # trailing content, or an incomplete <tasks> block - the
-                                # latter discarded per task_extractor.flush()'s own contract).
-                                final_task_content = task_extractor.flush()
-                                if final_task_content:
-                                    full_response_text += final_task_content
-                                    yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
-                                # Mirko Debug Logging
-                                try:
-                                    if username and should_log_for_user(username):
-                                        mlogger.log_sse_chunk("done", metadata={"mood_updated": True})
-                                except:
-                                    pass  # Logging-Fehler ignorieren
-                                
-                                # Update Mood nach Antwort
-                                if user_id is not None:
-                                    mood_system.update_mood(interaction_type, intensity=0.5)
+                                        leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
+                                        for raw_block in leftover_task_blocks:
+                                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                                        if leftover_content:
+                                            turn_content += leftover_content
+                                            yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
+                                    # Anything the extractor itself still had buffered (plain
+                                    # trailing content, or an incomplete <tasks> block - the
+                                    # latter discarded per task_extractor.flush()'s own contract).
+                                    final_task_content = task_extractor.flush()
+                                    if final_task_content:
+                                        turn_content += final_task_content
+                                        yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
+                                    break
 
-                                # Persist Liara's reply - this used to only
-                                # happen client-side (POST /chat/messages/),
-                                # which never set user_id and meant this
-                                # server-side session_id/message_id (used
-                                # for concept extraction and the RESULTED_IN
-                                # link below) never matched what the user
-                                # actually saw.
-                                if user_id is not None and session_id is not None and full_response_text:
-                                    def persist_assistant_turn() -> bool:
-                                        from core.database import SessionLocal
-                                        db_final = SessionLocal()
-                                        try:
-                                            insert_result = db_final.execute(text("""
-                                                INSERT INTO chat_messages
-                                                    (user_id, session_id, role, content, model, mood, timestamp)
-                                                VALUES
-                                                    (:user_id, :session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
-                                                RETURNING id
-                                            """), {
-                                                'user_id': user_id,
-                                                'session_id': session_id,
-                                                'content': full_response_text,
-                                                'model': model,
-                                                'mood': mood_snapshot["mood"]
-                                            })
-                                            db_final.commit()
-                                            assistant_message_id = insert_result.scalar()
+                            except json.JSONDecodeError:
+                                continue
 
-                                            db_final.execute(text("""
-                                                UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
-                                            """), {'session_id': session_id})
-                                            db_final.commit()
+            if turn_tool_calls and iteration < MAX_AGENT_ITERATIONS:
+                agent_tool_used = True
+                messages.append({
+                    "role": "assistant",
+                    "content": turn_content,
+                    "tool_calls": turn_tool_calls
+                })
 
-                                            if memory_enabled and assistant_message_id:
-                                                try:
-                                                    store_message_with_concepts(
-                                                        user_id=user_id,
-                                                        message_id=assistant_message_id,
-                                                        content=full_response_text,
-                                                        role='assistant',
-                                                        timestamp=datetime.utcnow(),
-                                                        session_id=session_id
-                                                    )
-                                                except Exception as e:
-                                                    logger.error(f"Assistant concept storage failed: {e}")
+                tool_executor = get_tool_executor()
+                for tc in turn_tool_calls:
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
+                    arguments = fn.get("arguments") or {}
 
-                                                if user_message_id:
-                                                    try:
-                                                        get_neo4j_service().create_relationship(
-                                                            source_type='Message', source_id=user_message_id,
-                                                            target_type='Message', target_id=assistant_message_id,
-                                                            relation_type='RESULTED_IN', user_id=user_id,
-                                                            properties={
-                                                                'personality': personality,
-                                                                'mood': mood_snapshot["mood"],
-                                                                'model': model,
-                                                                'used_tools': used_tools
-                                                            }
-                                                        )
-                                                    except Exception as e:
-                                                        logger.error(f"RESULTED_IN relationship failed: {e}")
-                                            return True
-                                        except Exception as e:
-                                            logger.error(f"Assistant message persistence failed: {e}")
-                                            return False
-                                        finally:
-                                            db_final.close()
+                    agent_steps.append({
+                        "id": f"step-{len(agent_steps)}",
+                        "label": _build_agent_step_label(tool_name, arguments),
+                        "status": "running"
+                    })
+                    yield f"data: {json.dumps({'type': 'agent_steps', 'items': agent_steps})}\n\n"
 
-                                    # 'done' fires immediately, same as before - the UI shouldn't
-                                    # wait on persistence to know the reply finished streaming.
-                                    yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+                    tool_call = ToolCall(tool_name=tool_name, parameters=arguments, raw_text="", confidence=1.0)
+                    try:
+                        tool_result = await tool_executor.execute(tool_call, user_id or 0)
+                    except Exception as e:
+                        logger.error(f"Agent tool execution failed: {tool_name}: {e}")
+                        tool_result = {"success": False, "error": str(e)}
 
-                                    # asyncio.to_thread (not a bare threading.Thread) so this stays
-                                    # awaitable: a reload/navigation right after 'done' could race
-                                    # ahead of the DB commit if persistence were truly fire-and-forget
-                                    # (observed live: a tester reloaded ~immediately after streaming
-                                    # looked finished and briefly worried the reply hadn't saved).
-                                    # 'persisted' gives a caller that cares a real signal to wait for.
-                                    persisted_ok = False
-                                    try:
-                                        persisted_ok = await asyncio.to_thread(persist_assistant_turn)
-                                    except Exception as e:
-                                        logger.error(f"Assistant message persistence task failed: {e}")
-                                    yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
-                                else:
-                                    yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
-                                break
-                        
-                        except json.JSONDecodeError:
-                            continue
-        
+                    agent_steps[-1]["status"] = "done" if tool_result.get("success") else "error"
+                    yield f"data: {json.dumps({'type': 'agent_steps', 'items': agent_steps})}\n\n"
+
+                    tool_message = {"role": "tool", "content": json.dumps(tool_result)}
+                    if tc.get("id"):
+                        tool_message["tool_call_id"] = tc["id"]
+                    messages.append(tool_message)
+
+                continue
+
+            full_response_text = turn_content
+            break
+
+        # Mirko Debug Logging
+        try:
+            if username and should_log_for_user(username):
+                mlogger.log_sse_chunk("done", metadata={"mood_updated": True})
+        except:
+            pass  # Logging-Fehler ignorieren
+
+        # Update Mood nach Antwort
+        if user_id is not None:
+            mood_system.update_mood(interaction_type, intensity=0.5)
+
+        # Persist Liara's reply - this used to only
+        # happen client-side (POST /chat/messages/),
+        # which never set user_id and meant this
+        # server-side session_id/message_id (used
+        # for concept extraction and the RESULTED_IN
+        # link below) never matched what the user
+        # actually saw.
+        if user_id is not None and session_id is not None and full_response_text:
+            def persist_assistant_turn() -> bool:
+                from core.database import SessionLocal
+                db_final = SessionLocal()
+                try:
+                    insert_result = db_final.execute(text("""
+                        INSERT INTO chat_messages
+                            (user_id, session_id, role, content, model, mood, timestamp)
+                        VALUES
+                            (:user_id, :session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+                        RETURNING id
+                    """), {
+                        'user_id': user_id,
+                        'session_id': session_id,
+                        'content': full_response_text,
+                        'model': model,
+                        'mood': mood_snapshot["mood"]
+                    })
+                    db_final.commit()
+                    assistant_message_id = insert_result.scalar()
+
+                    db_final.execute(text("""
+                        UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
+                    """), {'session_id': session_id})
+                    db_final.commit()
+
+                    if memory_enabled and assistant_message_id:
+                        try:
+                            store_message_with_concepts(
+                                user_id=user_id,
+                                message_id=assistant_message_id,
+                                content=full_response_text,
+                                role='assistant',
+                                timestamp=datetime.utcnow(),
+                                session_id=session_id
+                            )
+                        except Exception as e:
+                            logger.error(f"Assistant concept storage failed: {e}")
+
+                        if user_message_id:
+                            try:
+                                get_neo4j_service().create_relationship(
+                                    source_type='Message', source_id=user_message_id,
+                                    target_type='Message', target_id=assistant_message_id,
+                                    relation_type='RESULTED_IN', user_id=user_id,
+                                    properties={
+                                        'personality': personality,
+                                        'mood': mood_snapshot["mood"],
+                                        'model': model,
+                                        # Agent's own tool_calls loop can use tools even when the
+                                        # pre-LLM heuristics (used_tools, computed by the caller
+                                        # before this generator even runs) found none.
+                                        'used_tools': used_tools or agent_tool_used
+                                    }
+                                )
+                            except Exception as e:
+                                logger.error(f"RESULTED_IN relationship failed: {e}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Assistant message persistence failed: {e}")
+                    return False
+                finally:
+                    db_final.close()
+
+            # 'done' fires immediately, same as before - the UI shouldn't
+            # wait on persistence to know the reply finished streaming.
+            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+
+            # asyncio.to_thread (not a bare threading.Thread) so this stays
+            # awaitable: a reload/navigation right after 'done' could race
+            # ahead of the DB commit if persistence were truly fire-and-forget
+            # (observed live: a tester reloaded ~immediately after streaming
+            # looked finished and briefly worried the reply hadn't saved).
+            # 'persisted' gives a caller that cares a real signal to wait for.
+            persisted_ok = False
+            try:
+                persisted_ok = await asyncio.to_thread(persist_assistant_turn)
+            except Exception as e:
+                logger.error(f"Assistant message persistence task failed: {e}")
+            yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
+        else:
+            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+
     except httpx.TimeoutException:
         error = ChatError(
             error_type="timeout",
