@@ -90,7 +90,7 @@ async def web_search(
         formatted = web_search.format_for_llm(result, 'weather')
     
     else:  # instant
-        result = web_search.search_instant_answer(request.query)
+        result = await web_search.search_instant_answer(request.query)
         formatted = web_search.format_for_llm(result, 'search')
     
     # TODO: Store in search history if user has consent
