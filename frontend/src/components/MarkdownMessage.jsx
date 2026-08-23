@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -13,6 +14,13 @@ const RUNNABLE_LANGUAGES = new Set(['python', 'py', 'python3', 'julia', 'jl']);
 
 // Full-size overlay for images shown small inline (chat plots, generated
 // images) - click-to-enlarge without navigating away via window.open.
+//
+// Rendered via a portal straight into document.body: chat bubbles use
+// backdrop-filter (the glass-blur effect), which - like transform/filter -
+// creates a new containing block for `position: fixed` descendants. Without
+// the portal, this overlay would be scoped to the bubble's box instead of
+// the viewport, showing up mispositioned/invisible instead of as a proper
+// full-screen overlay.
 const ImageLightbox = ({ src, alt, onClose }) => {
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -20,7 +28,7 @@ const ImageLightbox = ({ src, alt, onClose }) => {
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="image-lightbox-backdrop" onClick={onClose}>
       <button className="image-lightbox-close" onClick={onClose} title="Schließen">✕</button>
       <img
@@ -29,7 +37,8 @@ const ImageLightbox = ({ src, alt, onClose }) => {
         className="image-lightbox-img"
         onClick={(e) => e.stopPropagation()}
       />
-    </div>
+    </div>,
+    document.body
   );
 };
 
