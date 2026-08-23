@@ -516,7 +516,7 @@ function LandingPage({ onLogin }) {
                         </div>
 
                         <div className="form-info">
-                          <p>🔒 100% lokal. Keine Cloud. Deine Daten bleiben bei dir.</p>
+                          <p>🔒 Local-first und selbst gehostet. Deine Daten bleiben bei dir - Ollama-Cloudmodelle nur bei bewusster Auswahl.</p>
                           <p>🌍 International compliant: DSGVO, UK GDPR, CCPA, PIPEDA</p>
                         </div>
                       </div>

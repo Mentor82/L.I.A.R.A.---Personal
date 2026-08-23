@@ -1,0 +1,354 @@
+.arch-root {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.arch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.arch-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.arch-tab {
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.4);
+  color: var(--text-secondary, #b6bfd1);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.15s ease;
+}
+
+.arch-tab:hover {
+  border-color: rgba(103, 232, 249, 0.6);
+}
+
+.arch-tab-active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.7);
+  color: #67e8f9;
+}
+
+.arch-search {
+  position: relative;
+  min-width: 220px;
+}
+
+.arch-search input {
+  width: 100%;
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.4);
+  color: inherit;
+  font-size: 0.9rem;
+}
+
+.arch-search-results {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.arch-search-results button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.85rem;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.arch-search-results button:hover {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+.arch-search-results button span {
+  color: var(--text-secondary, #8b93a7);
+  font-size: 0.75rem;
+}
+
+.arch-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #b6bfd1);
+}
+
+.arch-legend-title {
+  font-weight: 600;
+}
+
+.arch-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.arch-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.arch-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 1rem;
+  align-items: start;
+}
+
+.arch-diagram {
+  background: rgba(8, 12, 24, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+
+.arch-diagram svg {
+  width: 100%;
+  min-width: 900px;
+  height: auto;
+  display: block;
+}
+
+.arch-boundary-rect {
+  fill: rgba(56, 189, 248, 0.04);
+  stroke: rgba(56, 189, 248, 0.5);
+  stroke-width: 1.5;
+  stroke-dasharray: 8 6;
+}
+
+.arch-boundary-label {
+  fill: #67e8f9;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.arch-edge-label-bg {
+  fill: rgba(8, 12, 24, 0.85);
+}
+
+.arch-edge-label {
+  fill: var(--text-secondary, #b6bfd1);
+  font-size: 11px;
+}
+
+.arch-node {
+  cursor: pointer;
+}
+
+.arch-node-rect {
+  fill: rgba(15, 23, 42, 0.9);
+  stroke-width: 2;
+  transition: filter 0.15s ease;
+}
+
+.arch-node-rect.arch-node-cloud {
+  fill: rgba(88, 28, 135, 0.35);
+}
+
+.arch-node-rect.arch-node-client {
+  fill: rgba(51, 65, 85, 0.6);
+}
+
+.arch-node:hover .arch-node-rect {
+  filter: brightness(1.25);
+}
+
+.arch-node-selected .arch-node-rect {
+  filter: brightness(1.4);
+  stroke-width: 3;
+}
+
+.arch-node-title {
+  fill: #f1f5f9;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.arch-node-subtitle {
+  fill: var(--text-secondary, #94a3b8);
+  font-size: 10.5px;
+}
+
+.arch-mobile-list {
+  display: none;
+}
+
+.arch-detail-panel {
+  background: rgba(8, 12, 24, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  padding: 1.1rem;
+  min-height: 200px;
+}
+
+.arch-detail-header h3 {
+  margin: 0 0 0.15rem;
+}
+
+.arch-detail-header span {
+  color: var(--text-secondary, #94a3b8);
+  font-size: 0.85rem;
+}
+
+.arch-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.65rem 0;
+}
+
+.arch-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.arch-badge-boundary {
+  border-color: rgba(103, 232, 249, 0.5);
+  color: #67e8f9;
+}
+
+.arch-badge-layer {
+  border-style: dashed;
+}
+
+.arch-detail-hint {
+  font-size: 0.8rem;
+  color: #f2bd58;
+  background: rgba(242, 189, 88, 0.1);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.arch-detail-description {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #cbd5e1);
+}
+
+.arch-detail-panel h4 {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.arch-detail-panel ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.arch-detail-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.arch-detail-paths code {
+  font-size: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  word-break: break-all;
+}
+
+.arch-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.arch-relations button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.arch-relations button:hover {
+  border-color: rgba(56, 189, 248, 0.6);
+}
+
+.arch-relations button small {
+  color: var(--text-secondary, #8b93a7);
+}
+
+@media (max-width: 900px) {
+  .arch-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .arch-diagram {
+    display: none;
+  }
+
+  .arch-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .arch-mobile-list button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(15, 23, 42, 0.5);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .arch-mobile-list .arch-mobile-selected {
+    border-color: rgba(56, 189, 248, 0.7);
+    background: rgba(56, 189, 248, 0.15);
+  }
+}

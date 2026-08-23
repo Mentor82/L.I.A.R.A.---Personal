@@ -165,7 +165,8 @@ function PageLayout({ children, showGuestCTA = false }) {
           <div className="footer-section">
             <h4>Open Source & Privacy</h4>
             <p className="footer-description">
-              100% lokal. Keine Cloud. Keine Tracking-Cookies. Open-Source unter MIT-Lizenz.
+              Local-first und selbst gehostet. Optionale Ollama-Cloudmodelle nur bei bewusster
+              Auswahl. Keine Tracking-Cookies. Open-Source unter MIT-Lizenz.
               International compliant: DSGVO, UK GDPR, CCPA, PIPEDA & APAC.
             </p>
             <a 
