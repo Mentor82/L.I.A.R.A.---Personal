@@ -47,6 +47,11 @@ mlogger = get_mirko_logger()
 # Web search intent list
 SEARCH_INTENTS = ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']
 
+# How many prior messages of the current session to include as real
+# conversation turns (not just long-term semantic-memory retrieval) in every
+# request to the model - see the comment at its usage for why this exists.
+HISTORY_TURNS_LIMIT = 20
+
 
 def get_location_context(db: Session, user_id: int) -> Optional[str]:
     """
@@ -223,7 +228,8 @@ async def stream_ollama_response(
     custom_instructions: Optional[str] = None,
     user_message_id: Optional[int] = None,
     memory_enabled: bool = True,
-    used_tools: bool = False
+    used_tools: bool = False,
+    conversation_history: Optional[List[Dict]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -308,6 +314,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
+            *(conversation_history or []),
             {"role": "user", "content": message}
         ],
         "stream": True,
@@ -726,6 +733,7 @@ async def stream_chat(
     # these - stream_ollama_response() must never NameError on them.
     message_id = None
     used_tools = False
+    conversation_history = []
 
     try:
         # Get or create session_id
@@ -750,7 +758,25 @@ async def stream_chat(
                 raise HTTPException(status_code=404, detail="Session not found or access denied")
             
             session_id = request.session_id
-        
+
+        # Short-term conversational history: without this, every request sent
+        # only (system prompt + the single current message) with no prior
+        # turns at all - the model had zero visibility into anything said
+        # earlier in the same session beyond whatever the *long-term* Neo4j
+        # semantic-similarity search (min_similarity=0.6) happened to surface,
+        # which a short/generic follow-up often doesn't clear. Confirmed live:
+        # telling Liara a custom nickname, then one message later asking for
+        # it back, got answered with "Liara" instead of the actual name.
+        history_rows = db.execute(text("""
+            SELECT role, content FROM chat_messages
+            WHERE session_id = :session_id
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        """), {'session_id': session_id, 'limit': HISTORY_TURNS_LIMIT}).all()
+        conversation_history = [
+            {'role': row.role, 'content': row.content} for row in reversed(history_rows)
+        ]
+
         # Create message record in PostgreSQL
         message_insert = text("""
             INSERT INTO chat_messages 
@@ -857,6 +883,7 @@ async def stream_chat(
             web_search_risk_score=web_search_risk_score,
             action_result=action_result,
             memory_context=relevant_concepts,
+            conversation_history=conversation_history,
             session_id=session_id,  # NEW: Send session_id to frontend
             user_id=current_user.id,
             username=current_user.username,

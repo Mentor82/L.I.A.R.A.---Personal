@@ -52,6 +52,12 @@ function Chat() {
   const abortControllerRef = useRef(null);
   const fileInputRef = useRef(null);
   const isSendingRef = useRef(false);  // Atomarer Flag gegen Race Conditions
+  // Guards against the mount-time session loader (loadSessions, below)
+  // clobbering a session the user explicitly created/switched to in the
+  // meantime - both are async and unordered, so without this, whichever one
+  // resolves last wins and silently reinstates the old conversation history
+  // on top of a just-created "new chat".
+  const sessionActionTakenRef = useRef(false);
   
   const activeSession = chatSessions.find(s => s.id === activeSessionId) || chatSessions[0];
   const messages = activeSession?.messages || [];
@@ -136,6 +142,10 @@ function Chat() {
     const loadSessions = async () => {
       try {
         const dbSessions = await getChatSessions();
+        // The user already created/switched a session while this was in
+        // flight - applying this stale result now would silently revert
+        // them back to whatever was previously active.
+        if (sessionActionTakenRef.current) return;
         if (dbSessions && dbSessions.length > 0) {
           // Convert DB sessions to local format with preview
           const sessions = dbSessions.map(s => ({
@@ -160,6 +170,7 @@ function Chat() {
           if (activeId && sessions.find(s => s.id === activeId)?.messageCount > 0) {
             try {
               const messages = await getSessionMessages(activeId);
+              if (sessionActionTakenRef.current) return;
               setChatSessions(prev => prev.map(s =>
                 s.id === activeId ? { ...s, messages } : s
               ));
@@ -183,6 +194,7 @@ function Chat() {
           // very first conversation look fine in the UI while never
           // actually being persisted.
           const dbSession = await createChatSession('Neue Konversation');
+          if (sessionActionTakenRef.current) return;
           const freshSession = { id: dbSession.id, title: dbSession.title, messages: [], timestamp: dbSession.created_at };
           setChatSessions([freshSession]);
           setActiveSessionId(freshSession.id);
@@ -668,8 +680,9 @@ function Chat() {
   };
 
   const createNewChat = async () => {
+    sessionActionTakenRef.current = true;
     const title = `Chat ${chatSessions.length + 1}`;
-    
+
     try {
       // Create session in database
       const dbSession = await createChatSession(title);
@@ -697,6 +710,7 @@ function Chat() {
   };
 
   const switchSession = async (sessionId) => {
+    sessionActionTakenRef.current = true;
     setActiveSessionId(sessionId);
     setHistorySidebarOpen(false);
     

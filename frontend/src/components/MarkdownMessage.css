@@ -29,7 +29,7 @@
 .code-copy-btn {
   background: var(--bg-purple-hover);
   border: 1px solid rgba(139, 92, 246, 0.3);
-  color: #a0a0b0;
+  color: var(--color-text-muted);
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 11px;
@@ -96,7 +96,7 @@
   border-radius: 8px;
   background: var(--bg-purple-subtle);
   border: 1px solid rgba(139, 92, 246, 0.2);
-  color: #a0a0b0;
+  color: var(--color-text-muted);
   font-size: 13px;
   font-style: italic;
 }
@@ -136,7 +136,7 @@
   gap: 8px;
   padding: 8px 16px;
   font-size: 13px;
-  color: #a0a0b0;
+  color: var(--color-text-muted);
 }
 
 .code-run-result {
@@ -227,7 +227,7 @@
 .markdown-table td {
   padding: 10px 16px;
   border-bottom: 1px solid rgba(139, 92, 246, 0.1);
-  color: #d0d0e0;
+  color: var(--color-text);
 }
 
 .markdown-table tbody tr:hover {
@@ -245,7 +245,7 @@
   border-left: 4px solid #8b5cf6;
   background: var(--bg-purple-subtle);
   border-radius: 0 8px 8px 0;
-  color: #c0c0d0;
+  color: var(--color-text-muted);
   font-style: italic;
 }
 
@@ -270,7 +270,7 @@
 .markdown-h1 {
   font-size: 28px;
   font-weight: 700;
-  color: #e0e0e0;
+  color: var(--color-text);
   margin: 24px 0 16px 0;
   padding-bottom: 8px;
   border-bottom: 2px solid rgba(139, 92, 246, 0.3);
@@ -279,7 +279,7 @@
 .markdown-h2 {
   font-size: 24px;
   font-weight: 600;
-  color: #d0d0e0;
+  color: var(--color-text);
   margin: 20px 0 12px 0;
   padding-bottom: 6px;
   border-bottom: 1px solid rgba(139, 92, 246, 0.2);
@@ -288,14 +288,14 @@
 .markdown-h3 {
   font-size: 20px;
   font-weight: 600;
-  color: #c0c0d0;
+  color: var(--color-text);
   margin: 16px 0 10px 0;
 }
 
 .markdown-h4 {
   font-size: 18px;
   font-weight: 600;
-  color: #b0b0c0;
+  color: var(--color-text-muted);
   margin: 14px 0 8px 0;
 }
 
@@ -304,7 +304,7 @@
 .markdown-ol {
   margin: 12px 0;
   padding-left: 24px;
-  color: #d0d0e0;
+  color: var(--color-text);
   line-height: 1.8;
 }
 
@@ -334,7 +334,7 @@
 .markdown-p {
   margin: 12px 0;
   line-height: 1.7;
-  color: #d0d0e0;
+  color: var(--color-text);
 }
 
 /* Images (generierte Bilder) */
@@ -363,7 +363,7 @@
 .markdown-image-caption {
   margin-top: 8px;
   font-size: 13px;
-  color: #a0a0b0;
+  color: var(--color-text-muted);
   font-style: italic;
 }
 
