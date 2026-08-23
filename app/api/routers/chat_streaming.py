@@ -37,6 +37,7 @@ from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
 from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions
+from services.session_workspace import build_workspace_manifest
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -631,7 +632,18 @@ async def stream_chat(
     location_context = get_location_context(db, current_user.id)
     if location_context:
         enhanced_context += location_context
-    
+
+    # 1b. Session Workspace manifest (files the "Run" button has generated in
+    # this session) - a directory on disk isn't "visible to the LLM" by
+    # itself, this is what actually surfaces it.
+    if request.session_id:
+        try:
+            workspace_manifest = build_workspace_manifest(current_user.id, request.session_id)
+            if workspace_manifest:
+                enhanced_context += f"\n\n{workspace_manifest}"
+        except Exception as e:
+            logger.warning(f"Workspace manifest lookup failed: {e}")
+
     # ✨ 2. NEU: Add Semantic Context from Neo4j (Top-5 similar concepts)
     # Gated by memory_enabled too, not just memory *creation* below - if a
     # user turns "Erinnerung" off, retrieving old memories into context

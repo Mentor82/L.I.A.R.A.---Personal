@@ -1146,7 +1146,7 @@ function Chat() {
                   both duplicated the same line twice in the same bubble. */}
               {!msg.actionResult?.success && (
                 <div className="bubble-text">
-                  <MarkdownMessage content={msg.content} />
+                  <MarkdownMessage content={msg.content} sessionId={activeSessionId} />
                 </div>
               )}
               {msg.model && (

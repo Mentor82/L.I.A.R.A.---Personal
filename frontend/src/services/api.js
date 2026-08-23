@@ -501,6 +501,48 @@ export const personaAPI = {
 };
 
 /**
+ * Code Execution API (chat "Run" button for Python/Julia code blocks)
+ */
+export const codeExecAPI = {
+  /**
+   * Führt Code sandboxed auf dem Server aus.
+   */
+  async run(sessionId, language, code) {
+    return apiFetch('/code-exec/run', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, language, code }),
+    });
+  },
+
+  /**
+   * Listet die Workspace-Dateien einer Session.
+   */
+  async listFiles(sessionId) {
+    return apiFetch(`/code-exec/sessions/${sessionId}/files`);
+  },
+
+  /**
+   * Lädt eine Workspace-Datei herunter (Blob, kein JSON - apiFetch passt hier nicht).
+   */
+  async downloadFile(sessionId, filename) {
+    const token = localStorage.getItem('liara_token');
+    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      throw new Error(`Download fehlgeschlagen: ${response.status}`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+};
+
+/**
  * System API
  */
 export const systemAPI = {

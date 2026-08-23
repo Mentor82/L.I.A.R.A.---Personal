@@ -6,6 +6,7 @@ from api.dashboard import router as dashboard_router
 from api.routers.chat import router as chat_router
 from api.routers.chat_streaming import router as chat_streaming_router
 from api.routers.chat_sessions import router as chat_sessions_router
+from api.routers.code_exec_router import router as code_exec_router
 from api.routers.liara_router import router as liara_router
 from api.routers.mood_router import router as mood_router
 from api.routers.sentiment_router import router as sentiment_router
@@ -187,6 +188,7 @@ app.include_router(vision_router)  # Vision API - Bildanalyse mit LLaVA
 app.include_router(chat_router)
 app.include_router(chat_streaming_router)
 app.include_router(chat_sessions_router)
+app.include_router(code_exec_router)  # Sandboxed Code Execution (chat "Run" button) + session workspace files
 app.include_router(liara_router)
 app.include_router(mood_router)
 app.include_router(sentiment_router)  # Live Sentiment Analysis

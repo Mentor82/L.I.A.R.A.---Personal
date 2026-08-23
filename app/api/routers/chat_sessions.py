@@ -3,6 +3,8 @@ Chat Sessions API
 Manages chat conversation sessions and message history
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -13,6 +15,9 @@ from datetime import datetime
 from core.dependencies import require_active_user
 from core.database import get_db
 from api.models.base_models import User
+from services.session_workspace import delete_session_workspace
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["Chat Sessions"])
 
@@ -325,5 +330,10 @@ async def delete_chat_session(
     """), {'session_id': session_id})
 
     db.commit()
-    
+
+    # Best-effort - a workspace cleanup failure shouldn't block the session
+    # delete the user actually asked for.
+    if not delete_session_workspace(current_user.id, session_id):
+        logger.warning(f"Failed to delete workspace for session {session_id} (user {current_user.id})")
+
     return {"message": "Session deleted successfully"}

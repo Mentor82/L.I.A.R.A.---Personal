@@ -22,3 +22,6 @@ httpx>=0.28.0
 # Image Generation (Stable Diffusion via Replicate)
 # Optional: Nur wenn Bild-Generierung gewünscht
 # Keine zusätzlichen Pakete nötig (httpx schon vorhanden)
+
+# Sandboxed Code Execution (chat "Run" button) - plotting in Python
+matplotlib==3.9.2

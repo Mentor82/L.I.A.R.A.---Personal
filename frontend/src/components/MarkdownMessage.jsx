@@ -4,7 +4,12 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import { codeExecAPI } from '../services/api';
 import './MarkdownMessage.css';
+
+// Languages the "Run" button supports - matches the sandboxed executor's
+// language aliases on the backend (app/services/code_sandbox.py).
+const RUNNABLE_LANGUAGES = new Set(['python', 'py', 'python3', 'julia', 'jl']);
 
 // LLMs commonly write LaTeX using \( \)/\[ \] (common in OpenAI-style
 // training data) instead of the $ $/$$ $$ delimiters remark-math expects.
@@ -175,7 +180,86 @@ const MermaidDiagram = memo(({ code }) => {
 });
 MermaidDiagram.displayName = 'MermaidDiagram';
 
-const MarkdownMessage = memo(({ content }) => {
+// Result of a "Run" button click: success/error badge (reusing Chat.jsx's
+// action-result convention) plus stdout/stderr, inline images, and a
+// download-linked list for any other produced files.
+const CodeRunResult = ({ result, sessionId }) => {
+  const [downloadError, setDownloadError] = useState(null);
+
+  if (result.error) {
+    return (
+      <div className="action-result error">
+        <span className="action-icon">❌</span>
+        <span className="action-message">{result.error}</span>
+      </div>
+    );
+  }
+
+  const success = !result.timed_out && result.exit_code === 0;
+  const files = result.files || [];
+  const inlineImages = files.filter((f) => f.inline && f.inline_base64);
+  const otherFiles = files.filter((f) => !(f.inline && f.inline_base64));
+
+  const handleDownload = async (filename) => {
+    try {
+      await codeExecAPI.downloadFile(sessionId, filename);
+    } catch (err) {
+      setDownloadError(err.message || 'Download fehlgeschlagen.');
+    }
+  };
+
+  return (
+    <div className="code-run-result">
+      <div className={`action-result ${success ? 'success' : 'error'}`}>
+        <span className="action-icon">{success ? '✅' : '❌'}</span>
+        <span className="action-message">
+          {result.timed_out
+            ? 'Zeitüberschreitung - Ausführung abgebrochen.'
+            : success
+              ? 'Erfolgreich ausgeführt.'
+              : `Fehlgeschlagen (Exit-Code ${result.exit_code}).`}
+        </span>
+      </div>
+      {(result.stdout || result.stderr) && (
+        <pre className="code-run-output">
+          {result.stdout}
+          {result.stderr && <span className="code-run-stderr">{result.stderr}</span>}
+        </pre>
+      )}
+      {inlineImages.map((f) => (
+        <div className="markdown-image-wrapper" key={f.name}>
+          <img
+            src={f.inline_base64}
+            alt={f.name}
+            className="markdown-image"
+            onClick={() => window.open(f.inline_base64, '_blank')}
+            title="Klicken zum Vergrößern"
+          />
+          <p className="markdown-image-caption">
+            {f.name}{' '}
+            <button className="code-file-download-btn" onClick={() => handleDownload(f.name)}>
+              ⬇ Download
+            </button>
+          </p>
+        </div>
+      ))}
+      {otherFiles.length > 0 && (
+        <ul className="code-run-files">
+          {otherFiles.map((f) => (
+            <li key={f.name}>
+              <button className="code-file-download-btn" onClick={() => handleDownload(f.name)}>
+                ⬇ {f.name} ({Math.ceil(f.size / 1024)} KB)
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {downloadError && <div className="action-result error"><span className="action-message">{downloadError}</span></div>}
+    </div>
+  );
+};
+
+const MarkdownMessage = memo(({ content, sessionId }) => {
   const { syntaxHighlighter: SyntaxHighlighter, syntaxStyle, ensureLanguage } = useLazySyntax();
   const normalizedContent = useMemo(() => normalizeMathDelimiters(content), [content]);
 
@@ -201,6 +285,22 @@ const MarkdownMessage = memo(({ content }) => {
           
           const codeText = String(children).replace(/\n$/, '');
           const isMermaid = normalizedLanguage === 'mermaid';
+          const isRunnable = RUNNABLE_LANGUAGES.has(normalizedLanguage) && !!sessionId;
+          const [running, setRunning] = useState(false);
+          const [runResult, setRunResult] = useState(null);
+
+          const handleRun = async () => {
+            setRunning(true);
+            setRunResult(null);
+            try {
+              const result = await codeExecAPI.run(sessionId, normalizedLanguage, codeText);
+              setRunResult(result);
+            } catch (err) {
+              setRunResult({ error: err.message || 'Ausführung fehlgeschlagen.' });
+            } finally {
+              setRunning(false);
+            }
+          };
 
           // Hooks below must run unconditionally on every render of this
           // component instance (Rules of Hooks) - the mermaid branch is
@@ -252,15 +352,27 @@ const MarkdownMessage = memo(({ content }) => {
             <div className="code-block-wrapper">
               <div className="code-block-header">
                 <span className="code-language">{language}</span>
-                <button 
-                  className="code-copy-btn"
-                  onClick={() => {
-                    navigator.clipboard.writeText(codeText);
-                  }}
-                  title="Code kopieren"
-                >
-                  📋 Kopieren
-                </button>
+                <span className="code-block-actions">
+                  {isRunnable && (
+                    <button
+                      className="code-run-btn"
+                      onClick={handleRun}
+                      disabled={running}
+                      title="Code ausführen"
+                    >
+                      {running ? '⏳ Läuft…' : '▶ Ausführen'}
+                    </button>
+                  )}
+                  <button
+                    className="code-copy-btn"
+                    onClick={() => {
+                      navigator.clipboard.writeText(codeText);
+                    }}
+                    title="Code kopieren"
+                  >
+                    📋 Kopieren
+                  </button>
+                </span>
               </div>
               <SyntaxHighlighter
                 style={syntaxStyle}
@@ -271,6 +383,13 @@ const MarkdownMessage = memo(({ content }) => {
               >
                 {codeText}
               </SyntaxHighlighter>
+              {running && (
+                <div className="code-run-loading">
+                  <div className="loading-dots"><span></span><span></span><span></span></div>
+                  <span>Wird ausgeführt…</span>
+                </div>
+              )}
+              {runResult && <CodeRunResult result={runResult} sessionId={sessionId} />}
             </div>
           );
         },
