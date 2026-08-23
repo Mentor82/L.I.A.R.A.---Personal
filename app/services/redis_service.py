@@ -7,6 +7,8 @@ Manages conversation context windows and temporary state in Redis.
 
 import redis
 import json
+import time
+import uuid
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 import logging
@@ -321,7 +323,56 @@ class RedisSessionService:
         """Get counter value"""
         value = self.client.get(counter_key)
         return int(value) if value else 0
-    
+
+    def check_sliding_window_rate_limit(self, key: str, max_requests: int, window_seconds: int = 60) -> bool:
+        """
+        Sliding-window rate limiter backed by a Redis sorted set - shared
+        across every gunicorn worker process, unlike an in-process
+        dict+threading.Lock (each worker would keep its own counter, so a
+        user's effective limit silently multiplies by the worker count).
+
+        Not perfectly atomic (there's a small check-then-act gap between the
+        count read and the write below, so two near-simultaneous requests
+        from different workers could in theory both slip through right at
+        the limit) - acceptable here since this is light abuse-prevention
+        for a single-household assistant, not a security boundary. A Lua
+        script would close that gap if it's ever needed.
+
+        Returns True if this request is allowed (and records it), False if
+        the caller is currently over the limit.
+        """
+        now = time.time()
+        cutoff = now - window_seconds
+
+        pipe = self.client.pipeline()
+        pipe.zremrangebyscore(key, 0, cutoff)
+        pipe.zcard(key)
+        _, current_count = pipe.execute()
+
+        if current_count >= max_requests:
+            return False
+
+        member = f"{now}:{uuid.uuid4().hex}"
+        pipe = self.client.pipeline()
+        pipe.zadd(key, {member: now})
+        # Safety-net TTL so an abandoned key doesn't linger past its window.
+        pipe.expire(key, window_seconds * 2)
+        pipe.execute()
+        return True
+
+    def get_sliding_window_status(self, key: str, max_requests: int, window_seconds: int = 60) -> Dict:
+        """Read-only status for check_sliding_window_rate_limit's key, without recording a request."""
+        now = time.time()
+        cutoff = now - window_seconds
+        self.client.zremrangebyscore(key, 0, cutoff)
+        current_count = self.client.zcard(key)
+        return {
+            'requests_last_minute': current_count,
+            'max_requests': max_requests,
+            'remaining': max(0, max_requests - current_count),
+            'reset_in_seconds': window_seconds if current_count else 0
+        }
+
     def close(self):
         """Close Redis connection"""
         if self._client:

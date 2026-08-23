@@ -3,27 +3,22 @@
 Prüft User-Absicht, blockiert unsafe topics, Rate-Limiting
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 import re
-from collections import defaultdict
-import threading
+
+from services.redis_service import get_redis_service
 
 
 class IntentSafetyChecker:
     """
     Layer 1: Intent & Safety Check
-    
+
     - Analysiert User-Absicht
     - Blockiert unsafe topics (Hacking, Malware, Waffen, illegale Inhalte)
-    - Rate-Limiting pro User
+    - Rate-Limiting pro User (Redis-backed, siehe _check_rate_limit)
     - Query-Rewrite (entschärft gefährliche Anfragen)
     """
-    
-    # Rate-Limiting: User → [(timestamp, count)]
-    _rate_limits: Dict[int, List[datetime]] = defaultdict(list)
-    _lock = threading.Lock()
-    
+
     # Blocked Keywords (Unsafe Topics)
     BLOCKED_KEYWORDS = {
         # Hacking & Malware
@@ -165,25 +160,18 @@ class IntentSafetyChecker:
     
     def _check_rate_limit(self, user_id: int) -> bool:
         """
-        Rate-Limiting: Max N Anfragen pro Minute
+        Rate-Limiting: Max N Anfragen pro Minute.
+
+        Redis-backed (sliding window) so the limit is shared across every
+        gunicorn worker process - the previous in-process dict+lock only
+        rate-limited within a single worker, so a user's effective limit
+        was silently multiplied by the worker count (6 here).
         """
-        with self._lock:
-            now = datetime.utcnow()
-            cutoff = now - timedelta(minutes=1)
-            
-            # Cleanup alte Einträge
-            self._rate_limits[user_id] = [
-                ts for ts in self._rate_limits[user_id] 
-                if ts > cutoff
-            ]
-            
-            # Check limit
-            if len(self._rate_limits[user_id]) >= self.max_requests_per_minute:
-                return False
-            
-            # Add current request
-            self._rate_limits[user_id].append(now)
-            return True
+        return get_redis_service().check_sliding_window_rate_limit(
+            key=f"ratelimit:web_safety:{user_id}",
+            max_requests=self.max_requests_per_minute,
+            window_seconds=60
+        )
     
     def _contains_download_pattern(self, query: str) -> bool:
         """Erkennt Download-Aufforderungen"""
@@ -223,22 +211,13 @@ class IntentSafetyChecker:
         """
         Gibt Rate-Limit Status zurück
         """
-        with self._lock:
-            now = datetime.utcnow()
-            cutoff = now - timedelta(minutes=1)
-            
-            recent_requests = [
-                ts for ts in self._rate_limits.get(user_id, [])
-                if ts > cutoff
-            ]
-            
-            return {
-                'user_id': user_id,
-                'requests_last_minute': len(recent_requests),
-                'max_requests': self.max_requests_per_minute,
-                'remaining': max(0, self.max_requests_per_minute - len(recent_requests)),
-                'reset_in_seconds': 60 if recent_requests else 0
-            }
+        status = get_redis_service().get_sliding_window_status(
+            key=f"ratelimit:web_safety:{user_id}",
+            max_requests=self.max_requests_per_minute,
+            window_seconds=60
+        )
+        status['user_id'] = user_id
+        return status
 
 
 # Singleton Instance
