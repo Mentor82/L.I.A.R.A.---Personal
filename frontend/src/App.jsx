@@ -18,6 +18,7 @@ const FeaturesPage = lazy(() => import('./components/FeaturesPage'))
 const IdentityPage = lazy(() => import('./components/IdentityPage'))
 const PrivacyPage = lazy(() => import('./components/PrivacyPage'))
 const TechnologyPage = lazy(() => import('./components/TechnologyPage'))
+const ArchitecturePage = lazy(() => import('./components/ArchitecturePage'))
 const MoodDashboard = lazy(() => import('./components/MoodDashboard'))
 const Config = lazy(() => import('./components/Config'))
 const Tasks = lazy(() => import('./components/Tasks'))
@@ -86,7 +87,7 @@ function restoreUserFromStorage() {
 // treated as an attempted protected route, so it can be restored after
 // login instead of silently discarded (see the !user branch in App()).
 const PUBLIC_PATHS = new Set([
-  '/', '/features', '/identity', '/privacy', '/technology', '/login',
+  '/', '/features', '/identity', '/privacy', '/technology', '/architecture', '/login',
   '/impressum', '/datenschutz', '/agb', '/cookies'
 ])
 
@@ -209,6 +210,7 @@ function App() {
             <Route path="/identity" element={<IdentityPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/technology" element={<TechnologyPage />} />
+            <Route path="/architecture" element={<ArchitecturePage />} />
             <Route path="/login" element={<Login onLogin={handleLogin} />} />
             <Route path="/impressum" element={<Impressum />} />
             <Route path="/datenschutz" element={<Datenschutz />} />
@@ -261,6 +263,9 @@ function App() {
                 <div className="user-role">{user.role}</div>
               </div>
               <div className="user-actions">
+                <NavLink to="/architecture" className="btn btn-ghost btn-sm" title="Architektur-Übersicht">
+                  🧭
+                </NavLink>
                 <LanguageSwitcher />
                 <ThemeToggle />
                 <button onClick={handleLogout} className="btn btn-ghost btn-sm logout-btn">
@@ -348,6 +353,8 @@ function App() {
                   </Route>
                 </>
               )}
+
+              <Route path="/architecture" element={<ArchitecturePage />} />
 
               {/* Legal Pages */}
               <Route path="/impressum" element={<Impressum />} />

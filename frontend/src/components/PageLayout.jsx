@@ -94,6 +94,10 @@ function PageLayout({ children, showGuestCTA = false }) {
               <span className="sidebar-icon">🤖</span>
               Technologie
             </NavLink>
+            <NavLink to="/architecture" className="sidebar-link">
+              <span className="sidebar-icon">🧭</span>
+              Architektur
+            </NavLink>
             <NavLink to="/impressum" className="sidebar-link">
               <span className="sidebar-icon">📄</span>
               Impressum
@@ -134,6 +138,7 @@ function PageLayout({ children, showGuestCTA = false }) {
               <NavLink to="/features">Features</NavLink>
               <NavLink to="/privacy">Datenschutz</NavLink>
               <NavLink to="/technology">Technologie</NavLink>
+              <NavLink to="/architecture">Architektur</NavLink>
             </nav>
           </div>
 
