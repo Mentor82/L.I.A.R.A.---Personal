@@ -26,7 +26,7 @@ from services.tool_parser import get_tool_parser
 from services.tool_executor import get_tool_executor
 from services.image_generation import get_image_generation_service
 from services.user_preferences_service import get_user_preferences
-from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions
 
 # === Hailo-8L Backend Router Integration ===
 from services.backend_router import get_backend_router, BackendRouter, BackendType
@@ -779,7 +779,7 @@ async def chat_with_liara(
 
         personality_instructions_block = build_personality_and_instructions_block(
             current_user.username, user_prefs["personality"], user_prefs["custom_instructions"]
-        ) + "\n\n" + build_diagram_instructions()
+        ) + "\n\n" + build_diagram_instructions() + "\n\n" + build_safety_dimensioning_instructions()
 
         # 8. Normaler Chat wenn keine Aktion oder Aktion fehlgeschlagen
         from liara_engine.nlp.ollama_client import ask_liara, LIARA_SYSTEM_PROMPT

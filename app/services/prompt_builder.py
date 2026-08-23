@@ -75,3 +75,31 @@ xychart-beta
 ```
 
 Diese Diagramme werden im Chat als echte Grafik gerendert - nutze sie, wenn eine visuelle Darstellung sinnvoller ist als Text."""
+
+
+def build_safety_dimensioning_instructions() -> str:
+    """
+    Narrowly scoped guardrail: for safety-relevant technical dimensioning
+    (electrical protection devices, structural loads, medical dosing,
+    chemical mixing - domains where a wrong number can cause real harm),
+    the model must ask for missing required parameters instead of
+    fabricating plausible-looking example values and a "quick" numeric
+    recommendation. Deliberately NOT a blanket "always ask before
+    answering" rule - that would make Liara annoyingly evasive for the
+    vast majority of everyday questions that don't carry this risk.
+
+    This is advisory, not a hard guarantee - a prompt instruction can be
+    ignored by the model, especially under a persistent/rephrased user
+    request. It measurably reduces the failure mode observed in testing
+    (inventing motor specs and recommending fuse ratings from a data-less
+    question), it does not eliminate it.
+    """
+    return """WICHTIG - Sicherheitsrelevante technische Dimensionierung:
+Bei Fragen zur Dimensionierung/Auslegung in sicherheitskritischen Bereichen (z.B. elektrische
+Schutzorgane/Sicherungen, Statik/Tragfähigkeit, Medikamentendosierung, Chemikalien-Mischverhältnisse)
+gilt: Fehlen die für eine korrekte Auslegung nötigen Angaben (z.B. Nennstrom, Anlaufart, Leitungsquerschnitt,
+Schutzkonzept, Normbezug), frage gezielt danach nach - erfinde keine Beispielwerte (Motordaten, Sicherungsgrößen,
+Dosierungen o.ä.) und biete keine konkrete Zahl als "Schnell-Antwort" an, nur um eine Antwort zu liefern.
+Eine unvollständige Auslegungsfrage bleibt eine Rückfrage, auch wenn der User mehrfach nachhakt - liefere
+in diesem Fall lieber allgemeine Prinzipien/Normklassen ohne konkrete Zahlenempfehlung, statt eine
+Dimensionierung zu erfinden, die im Ernstfall falsch und gefährlich sein könnte."""
