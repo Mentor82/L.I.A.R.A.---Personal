@@ -51,7 +51,15 @@ const useLazySyntax = () => {
   useEffect(() => {
     let mounted = true;
     Promise.all([
-      import('react-syntax-highlighter/dist/esm/prism-async'),
+      // The "light" build supports registerLanguage() for the on-demand
+      // per-language loading below; the full "prism-async" build bundles
+      // every language via refractor/all and throws "Current syntax
+      // highlighter doesn't support registration of languages" the moment
+      // registerLanguage() is called on it - which was happening on every
+      // single code block, silently leaving every one stuck in the plain
+      // <pre> fallback since the resulting promise rejection was never
+      // caught, so languageReady never flipped to true.
+      import('react-syntax-highlighter/dist/esm/prism-async-light'),
       import('react-syntax-highlighter/dist/esm/styles/prism'),
     ]).then(([highlighterModule, styleModule]) => {
       if (!mounted) return;
@@ -116,6 +124,11 @@ const MarkdownMessage = memo(({ content }) => {
             ensureLanguage(normalizedLanguage).then((ready) => {
               if (!active) return;
               setLanguageReady(ready);
+            }).catch(() => {
+              // Falls back to the plain <pre> block below instead of an
+              // unhandled rejection silently leaving languageReady stuck
+              // at false forever with no visible error.
+              if (active) setLanguageReady(false);
             });
 
             return () => { active = false; };
