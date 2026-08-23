@@ -38,6 +38,28 @@ function ThinkingBlock({ thinking, isAnswering }) {
   );
 }
 
+// Task labels are short model-written strings that often carry inline
+// **bold**/`code`/*italic* markdown (the model has no reason to know this
+// checklist doesn't run through the full MarkdownMessage renderer). Rather
+// than pull react-markdown into every list item, handle just this small,
+// safe subset inline.
+function renderInlineMarkdown(text) {
+  const parts = [];
+  const regex = /\*\*(.+?)\*\*|`(.+?)`|\*(.+?)\*/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    if (match[1] !== undefined) parts.push(<strong key={key++}>{match[1]}</strong>);
+    else if (match[2] !== undefined) parts.push(<code key={key++}>{match[2]}</code>);
+    else if (match[3] !== undefined) parts.push(<em key={key++}>{match[3]}</em>);
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
 // Collapsible checklist from the model's <tasks> block(s) - see
 // task_splitter.py. This is a MODEL-AUTHORED plan display, not a verified
 // execution record: a checked item only means the model claims to have
@@ -60,7 +82,7 @@ function TaskListBlock({ tasks }) {
           {tasks.map((item) => (
             <li key={item.id} className={`task-list-item ${item.done ? 'done' : ''}`}>
               <input type="checkbox" checked={item.done} disabled readOnly />
-              <span>{item.label}</span>
+              <span>{renderInlineMarkdown(item.label)}</span>
             </li>
           ))}
         </ul>
