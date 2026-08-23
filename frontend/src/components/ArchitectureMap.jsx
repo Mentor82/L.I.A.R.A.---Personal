@@ -4,7 +4,8 @@ import {
   architectureNodes,
   architectureViews,
   boundaryLabels,
-  kindLabels,
+  flowStyles,
+  kindFlow,
   statusLabels,
 } from '../data/architectureData';
 import './ArchitectureMap.css';
@@ -12,6 +13,7 @@ import './ArchitectureMap.css';
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 64;
 const BOUNDARY_PADDING = 55;
+const FEEDBACK_BOW = 55;
 
 const statusColors = {
   implemented: '#3ddc84',
@@ -19,12 +21,13 @@ const statusColors = {
   planned: '#8b93a7',
 };
 
-const kindColors = {
-  data: '#62dff5',
-  decision: '#f2bd58',
-  mutation: '#ff7a9c',
-  validation: '#77e6ae',
-};
+// Outgoing edges of these kinds represent this node causing a decision or
+// state change elsewhere (vs. just passing data through) - shown in the
+// detail panel's "Influences" bucket.
+const INFLUENCE_KINDS = ['tool-call', 'memory-write', 'auth-consent', 'optional-cloud'];
+// Incoming edges of these kinds are inputs this node actually needs to do
+// its job (vs. e.g. a plain stream relay) - shown under "Depends on".
+const DEPENDENCY_KINDS = ['request', 'context', 'memory-read', 'tool-result', 'evidence', 'model-inference', 'auth-consent'];
 
 function edgeKey(edge) {
   return `${edge.from}->${edge.to}:${edge.label}`;
@@ -74,10 +77,25 @@ function ArchitectureMap() {
   const selected = nodesById[selectedId];
   const selectedVisible = selected && selected.views.includes(view);
 
-  const relatedEdges = useMemo(() => {
-    if (!selected) return [];
-    return architectureEdges.filter((e) => e.from === selected.id || e.to === selected.id);
-  }, [selected]);
+  // Flow-shaped relations instead of one flat list: who feeds this node,
+  // what it hands onward, which decisions/state it drives, and what it
+  // structurally needs to function.
+  const incoming = useMemo(
+    () => (selected ? architectureEdges.filter((e) => e.to === selected.id) : []),
+    [selected]
+  );
+  const outgoing = useMemo(
+    () => (selected ? architectureEdges.filter((e) => e.from === selected.id) : []),
+    [selected]
+  );
+  const dependsOn = useMemo(
+    () => incoming.filter((e) => DEPENDENCY_KINDS.includes(e.kind)),
+    [incoming]
+  );
+  const influences = useMemo(
+    () => outgoing.filter((e) => INFLUENCE_KINDS.includes(e.kind)),
+    [outgoing]
+  );
 
   const chooseNode = (id) => {
     setSelectedId(id);
@@ -86,6 +104,27 @@ function ArchitectureMap() {
     if (node && !node.views.includes(view)) {
       setView(node.views[0]);
     }
+  };
+
+  const renderRelationGroup = (title, edges, direction) => {
+    if (edges.length === 0) return null;
+    return (
+      <>
+        <h4>{title}</h4>
+        <div className="arch-relations">
+          {edges.map((edge) => {
+            const otherId = direction === 'in' ? edge.from : edge.to;
+            const otherNode = nodesById[otherId];
+            const arrow = direction === 'in' ? '←' : '→';
+            return (
+              <button key={`${title}-${edgeKey(edge)}`} type="button" onClick={() => chooseNode(otherId)}>
+                {arrow} {otherNode?.title} <small>{edge.label}</small>
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
   };
 
   return (
@@ -144,24 +183,27 @@ function ArchitectureMap() {
           </span>
         ))}
         <span className="arch-legend-divider" aria-hidden="true" />
-        {Object.entries(kindLabels).map(([key, label]) => (
+        {Object.entries(flowStyles).map(([key, style]) => (
           <span key={key} className="arch-legend-item">
-            <span className="arch-legend-line" style={{ background: kindColors[key] }} />
-            {label}
+            <span
+              className="arch-legend-line"
+              style={{ borderTopColor: style.color, borderTopStyle: style.dash ? 'dashed' : 'solid' }}
+            />
+            {style.label}
           </span>
         ))}
       </div>
 
       <div className="arch-workspace">
         <div className="arch-diagram" aria-label={`${architectureViews.find((v) => v.id === view)?.label} Diagramm`}>
-          <svg viewBox="0 0 1560 620" role="img" aria-labelledby="architecture-title">
+          <svg viewBox="-80 0 1800 620" role="img" aria-labelledby="architecture-title">
             <title id="architecture-title">Architektur-Diagramm: {view}</title>
 
             <defs>
-              {Object.entries(kindColors).map(([kind, color]) => (
+              {Object.entries(flowStyles).map(([role, style]) => (
                 <marker
-                  key={kind}
-                  id={`arch-arrow-${kind}`}
+                  key={role}
+                  id={`arch-arrow-${role}`}
                   viewBox="0 0 10 10"
                   refX="8"
                   refY="5"
@@ -169,7 +211,7 @@ function ArchitectureMap() {
                   markerHeight="7"
                   orient="auto-start-reverse"
                 >
-                  <path d="M0,0 L10,5 L0,10 z" fill={color} />
+                  <path d="M0,0 L10,5 L0,10 z" fill={style.color} />
                 </marker>
               ))}
             </defs>
@@ -186,15 +228,19 @@ function ArchitectureMap() {
               Self-hosted / Local-first Perimeter
             </text>
 
-            {/* Edges - smooth horizontal-tangent curves (like a node-link/flow
-                diagram) instead of straight lines, pulled back from each
-                node's center to its border so the arrowhead lands on the box
-                edge rather than inside it. */}
+            {/* Edges - forward flow uses a horizontal-tangent curve pulled
+                back to each node's border; feedback edges (a result/response
+                going back against the main direction) bow out to the side
+                instead, so a forward and its matching return edge between
+                the same two nodes never sit on top of each other. */}
             {visibleEdges.map((edge) => {
               const from = nodesById[edge.from];
               const to = nodesById[edge.to];
               if (!from || !to) return null;
               const key = edgeKey(edge);
+
+              const flowRole = kindFlow[edge.kind] || 'main';
+              const style = flowStyles[flowRole];
 
               const dx = to.x - from.x;
               const dy = to.y - from.y;
@@ -206,24 +252,41 @@ function ArchitectureMap() {
               const sy = from.y + uy * inset;
               const ex = to.x - ux * inset;
               const ey = to.y - uy * inset;
-              const midX = (sx + ex) / 2;
-              const midY = (sy + ey) / 2;
-              const color = kindColors[edge.kind] || '#8b93a7';
+
+              let d;
+              let labelX;
+              let labelY;
+              if (style.bow) {
+                // Perpendicular offset from the straight line, bowing the
+                // return path out and around the forward one.
+                const px = -uy;
+                const py = ux;
+                const midX = (sx + ex) / 2 + px * FEEDBACK_BOW;
+                const midY = (sy + ey) / 2 + py * FEEDBACK_BOW;
+                d = `M ${sx},${sy} Q ${midX},${midY} ${ex},${ey}`;
+                labelX = midX;
+                labelY = midY;
+              } else {
+                const midX = (sx + ex) / 2;
+                d = `M ${sx},${sy} C ${midX},${sy} ${midX},${ey} ${ex},${ey}`;
+                labelX = midX;
+                labelY = (sy + ey) / 2 - 6;
+              }
 
               return (
                 <g key={key} className="arch-edge-group">
                   <path
-                    d={`M ${sx},${sy} C ${midX},${sy} ${midX},${ey} ${ex},${ey}`}
+                    d={d}
                     fill="none"
-                    stroke={color}
+                    stroke={style.color}
                     strokeWidth={2}
-                    strokeDasharray={edge.crossesBoundary ? '6 5' : undefined}
+                    strokeDasharray={style.dash || undefined}
                     opacity={0.85}
-                    markerEnd={`url(#arch-arrow-${edge.kind})`}
+                    markerEnd={`url(#arch-arrow-${flowRole})`}
                   />
                   <text
-                    x={midX}
-                    y={midY - 6}
+                    x={labelX}
+                    y={labelY}
                     textAnchor="middle"
                     className="arch-edge-label"
                     paintOrder="stroke"
@@ -322,23 +385,10 @@ function ArchitectureMap() {
                   {selected.paths.map((path) => <code key={path}>{path}</code>)}
                 </div>
               )}
-              {relatedEdges.length > 0 && (
-                <>
-                  <h4>Beziehungen</h4>
-                  <div className="arch-relations">
-                    {relatedEdges.map((edge) => {
-                      const other = edge.from === selected.id ? edge.to : edge.from;
-                      const otherNode = nodesById[other];
-                      const direction = edge.from === selected.id ? '→' : '←';
-                      return (
-                        <button key={edgeKey(edge)} type="button" onClick={() => chooseNode(other)}>
-                          {direction} {otherNode?.title} <small>{edge.label}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
+              {renderRelationGroup('Incoming', incoming, 'in')}
+              {renderRelationGroup('Outgoing', outgoing, 'out')}
+              {renderRelationGroup('Influences', influences, 'out')}
+              {renderRelationGroup('Depends on', dependsOn, 'in')}
             </>
           </aside>
         )}

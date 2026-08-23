@@ -130,10 +130,11 @@
 }
 
 .arch-legend-line {
-  width: 16px;
-  height: 2px;
+  width: 18px;
+  height: 0;
   display: inline-block;
   flex-shrink: 0;
+  border-top-width: 2px;
 }
 
 .arch-legend-divider {
