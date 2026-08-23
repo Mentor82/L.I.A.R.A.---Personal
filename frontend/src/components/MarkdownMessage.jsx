@@ -1,7 +1,22 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import './MarkdownMessage.css';
+
+// LLMs commonly write LaTeX using \( \)/\[ \] (common in OpenAI-style
+// training data) instead of the $ $/$$ $$ delimiters remark-math expects.
+// Without this, those blocks are not just left unstyled - markdown's own
+// backslash-escaping strips the backslashes, mangling "\(e\)" into "(e)"
+// before it ever reaches the math renderer. Convert to $ syntax first.
+const normalizeMathDelimiters = (text) => {
+  if (!text) return text;
+  return text
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, expr) => `$$${expr}$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, expr) => `$${expr}$`);
+};
 
 // Map of supported languages to on-demand imports so each language stays in its own tiny chunk.
 const prismLanguageImports = {
@@ -100,10 +115,12 @@ const useLazySyntax = () => {
 
 const MarkdownMessage = memo(({ content }) => {
   const { syntaxHighlighter: SyntaxHighlighter, syntaxStyle, ensureLanguage } = useLazySyntax();
+  const normalizedContent = useMemo(() => normalizeMathDelimiters(content), [content]);
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
       components={{
         // Custom Code Block Renderer
         code({ node, inline, className, children, ...props }) {
@@ -252,7 +269,7 @@ const MarkdownMessage = memo(({ content }) => {
         }
       }}
     >
-      {content}
+      {normalizedContent}
     </ReactMarkdown>
   );
 });
