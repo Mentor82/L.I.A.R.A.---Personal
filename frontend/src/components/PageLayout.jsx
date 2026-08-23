@@ -8,6 +8,14 @@ function PageLayout({ children, showGuestCTA = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isLandingPage = location.pathname === '/';
+  // Legal pages and /architecture are mounted in BOTH route trees (App.jsx)
+  // so they stay reachable while logged in too. When logged in, App.jsx's
+  // own header (logo, theme toggle, logout) is already on screen - showing
+  // this layout's header on top of it duplicated the logo and, worse, showed
+  // "Anmelden"/"Registrieren" buttons for a user who is already signed in.
+  const isAuthenticated = Boolean(
+    localStorage.getItem('liara_token') || localStorage.getItem('liara_guest_mode') === 'true'
+  );
 
   // Theme State - shares the same liara_theme key/resolution as the
   // authenticated app (ThemeToggle.jsx) instead of its own separate
@@ -32,39 +40,41 @@ function PageLayout({ children, showGuestCTA = false }) {
 
   return (
     <div className="page-layout">
-      {/* Header */}
-      <header className="layout-header">
-        <div className="layout-header-content">
-          <NavLink to="/" className="layout-logo">
-            <img src={liaraLogo} alt="LIARA" className="layout-logo-icon" />
-            <span className="layout-logo-text">LIARA</span>
-            <span className="layout-logo-tagline">Digitalbegleiterin</span>
-          </NavLink>
-          
-          <div className="layout-header-buttons">
-            <button 
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-              aria-label="Toggle theme"
-            >
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-            <button 
-              className="btn btn-ghost" 
-              onClick={() => navigate('/?showAuth=true&register=true')}
-            >
-              Registrieren
-            </button>
-            <button 
-              className="btn btn-primary" 
-              onClick={() => navigate('/?showAuth=true')}
-            >
-              Anmelden
-            </button>
+      {/* Header - App.jsx already renders its own when logged in */}
+      {!isAuthenticated && (
+        <header className="layout-header">
+          <div className="layout-header-content">
+            <NavLink to="/" className="layout-logo">
+              <img src={liaraLogo} alt="LIARA" className="layout-logo-icon" />
+              <span className="layout-logo-text">LIARA</span>
+              <span className="layout-logo-tagline">Digitalbegleiterin</span>
+            </NavLink>
+
+            <div className="layout-header-buttons">
+              <button
+                className="theme-toggle-btn"
+                onClick={toggleTheme}
+                title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                aria-label="Toggle theme"
+              >
+                {theme === 'dark' ? '☀️' : '🌙'}
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => navigate('/?showAuth=true&register=true')}
+              >
+                Registrieren
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate('/?showAuth=true')}
+              >
+                Anmelden
+              </button>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       <div className="layout-content">
         {/* Sidebar */}
