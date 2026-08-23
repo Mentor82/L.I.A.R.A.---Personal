@@ -25,6 +25,13 @@ export const boundaryLabels = {
   cloud: 'Ollama Cloud',
 };
 
+export const kindLabels = {
+  data: 'Daten',
+  decision: 'Entscheidung',
+  mutation: 'Mutation',
+  validation: 'Prüfung',
+};
+
 // {id, title, subtitle, layer, status, boundary, description,
 //  responsibilities[], paths[], views[], x, y}
 // No port numbers / worker counts / runtime IDs in any text field here -

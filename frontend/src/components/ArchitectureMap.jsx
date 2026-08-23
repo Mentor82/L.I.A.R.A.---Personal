@@ -4,6 +4,7 @@ import {
   architectureNodes,
   architectureViews,
   boundaryLabels,
+  kindLabels,
   statusLabels,
 } from '../data/architectureData';
 import './ArchitectureMap.css';
@@ -107,11 +108,13 @@ function ArchitectureMap() {
         </div>
 
         <div className="arch-search">
+          <label className="arch-search-label" htmlFor="arch-search-input">Komponente finden</label>
           <input
+            id="arch-search-input"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Komponente suchen…"
+            placeholder="z. B. Tool Calling"
             aria-label="Komponente suchen"
           />
           {searchMatches.length > 0 && (
@@ -134,10 +137,16 @@ function ArchitectureMap() {
       </section>
 
       <div className="arch-legend" aria-label="Legende">
-        <span className="arch-legend-title">Status:</span>
         {Object.entries(statusLabels).map(([key, label]) => (
           <span key={key} className="arch-legend-item">
             <span className="arch-legend-dot" style={{ background: statusColors[key] }} />
+            {label}
+          </span>
+        ))}
+        <span className="arch-legend-divider" aria-hidden="true" />
+        {Object.entries(kindLabels).map(([key, label]) => (
+          <span key={key} className="arch-legend-item">
+            <span className="arch-legend-line" style={{ background: kindColors[key] }} />
             {label}
           </span>
         ))}
@@ -147,6 +156,23 @@ function ArchitectureMap() {
         <div className="arch-diagram" aria-label={`${architectureViews.find((v) => v.id === view)?.label} Diagramm`}>
           <svg viewBox="0 0 1560 620" role="img" aria-labelledby="architecture-title">
             <title id="architecture-title">Architektur-Diagramm: {view}</title>
+
+            <defs>
+              {Object.entries(kindColors).map(([kind, color]) => (
+                <marker
+                  key={kind}
+                  id={`arch-arrow-${kind}`}
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M0,0 L10,5 L0,10 z" fill={color} />
+                </marker>
+              ))}
+            </defs>
 
             {/* Trust boundary: everything inside is Liara's self-hosted perimeter */}
             <rect
@@ -160,34 +186,48 @@ function ArchitectureMap() {
               Self-hosted / Local-first Perimeter
             </text>
 
-            {/* Edges */}
+            {/* Edges - smooth horizontal-tangent curves (like a node-link/flow
+                diagram) instead of straight lines, pulled back from each
+                node's center to its border so the arrowhead lands on the box
+                edge rather than inside it. */}
             {visibleEdges.map((edge) => {
               const from = nodesById[edge.from];
               const to = nodesById[edge.to];
               if (!from || !to) return null;
               const key = edgeKey(edge);
-              const midX = (from.x + to.x) / 2;
-              const midY = (from.y + to.y) / 2;
+
+              const dx = to.x - from.x;
+              const dy = to.y - from.y;
+              const dist = Math.hypot(dx, dy) || 1;
+              const inset = NODE_WIDTH / 2 + 6;
+              const ux = dx / dist;
+              const uy = dy / dist;
+              const sx = from.x + ux * inset;
+              const sy = from.y + uy * inset;
+              const ex = to.x - ux * inset;
+              const ey = to.y - uy * inset;
+              const midX = (sx + ex) / 2;
+              const midY = (sy + ey) / 2;
+              const color = kindColors[edge.kind] || '#8b93a7';
+
               return (
                 <g key={key} className="arch-edge-group">
-                  <line
-                    x1={from.x}
-                    y1={from.y}
-                    x2={to.x}
-                    y2={to.y}
-                    stroke={kindColors[edge.kind] || '#8b93a7'}
+                  <path
+                    d={`M ${sx},${sy} C ${midX},${sy} ${midX},${ey} ${ex},${ey}`}
+                    fill="none"
+                    stroke={color}
                     strokeWidth={2}
                     strokeDasharray={edge.crossesBoundary ? '6 5' : undefined}
                     opacity={0.85}
+                    markerEnd={`url(#arch-arrow-${edge.kind})`}
                   />
-                  <rect
-                    x={midX - edge.label.length * 3.4 - 6}
-                    y={midY - 10}
-                    width={edge.label.length * 6.8 + 12}
-                    height={18}
-                    className="arch-edge-label-bg"
-                  />
-                  <text x={midX} y={midY + 4} textAnchor="middle" className="arch-edge-label">
+                  <text
+                    x={midX}
+                    y={midY - 6}
+                    textAnchor="middle"
+                    className="arch-edge-label"
+                    paintOrder="stroke"
+                  >
                     {edge.label}
                   </text>
                 </g>
@@ -312,6 +352,13 @@ function ArchitectureMap() {
             ℹ️ {selected.title}
           </button>
         )}
+      </div>
+
+      <div className="arch-stats-bar">
+        <span>Quelle: implementierter Code und diese Session verifizierte Fakten</span>
+        <span>
+          {architectureNodes.length} Komponenten · {architectureEdges.length} Beziehungen · datengetrieben erweiterbar
+        </span>
       </div>
     </div>
   );

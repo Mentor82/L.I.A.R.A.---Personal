@@ -44,6 +44,15 @@
   min-width: 220px;
 }
 
+.arch-search-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary, #8b93a7);
+  margin-bottom: 0.3rem;
+}
+
 .arch-search input {
   width: 100%;
   padding: 0.5rem 0.85rem;
@@ -96,7 +105,9 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 0.9rem;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--text-secondary, #b6bfd1);
 }
 
@@ -116,6 +127,20 @@
   border-radius: 999px;
   display: inline-block;
   flex-shrink: 0;
+}
+
+.arch-legend-line {
+  width: 16px;
+  height: 2px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.arch-legend-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(148, 163, 184, 0.3);
+  display: inline-block;
 }
 
 .arch-workspace {
@@ -151,13 +176,12 @@
   letter-spacing: 0.02em;
 }
 
-.arch-edge-label-bg {
-  fill: rgba(8, 12, 24, 0.85);
-}
-
 .arch-edge-label {
-  fill: var(--text-secondary, #b6bfd1);
+  fill: var(--text-secondary, #cbd5e1);
   font-size: 11px;
+  stroke: #0b1120;
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 
 .arch-node {
@@ -363,6 +387,18 @@
 
 .arch-relations button small {
   color: var(--text-secondary, #8b93a7);
+}
+
+.arch-stats-bar {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #6b7690);
+  padding-top: 0.25rem;
 }
 
 @media (max-width: 768px) {
