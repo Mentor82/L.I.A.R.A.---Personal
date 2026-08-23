@@ -75,23 +75,41 @@ def get_preferences_personality_insights(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Insight-only: how each personality preset has landed for this user so
-    far, based on the sentiment of the message that followed each reply
-    (see chat_streaming.py's outcome-tagging). Nothing reads this back to
-    change Liara's behavior - it's purely for the user to look at.
+    Insight-only: how Liara's replies have landed with this user so far
+    ("Wirkung der Antwort"), based on the sentiment of the message that
+    followed each reply (see chat_streaming.py's outcome-tagging).
+    Broken down both by personality alone and by personality+mood pair,
+    since the situation (mood) is often what actually determines whether
+    a given personality lands well. Nothing reads this back to change
+    Liara's behavior - it's purely for the user to look at.
     """
+    neo4j = get_neo4j_service()
     try:
-        effectiveness = get_neo4j_service().get_personality_effectiveness(current_user.id)
+        effectiveness = neo4j.get_personality_effectiveness(current_user.id)
     except Exception:
         effectiveness = []
+
+    try:
+        combinations = neo4j.get_personality_mood_effectiveness(current_user.id)
+    except Exception:
+        combinations = []
 
     qualified = [e for e in effectiveness if e['sample_count'] >= MIN_OUTCOME_SAMPLES]
     best_personality = qualified[0]['personality'] if len(qualified) >= 2 else None
 
+    # Personality+mood pairs are a narrower bucket than personality alone,
+    # so naturally collect fewer samples each - same threshold, but only
+    # requires one qualifying combination to surface (there's no single
+    # "always active" combination to compare it against, unlike personality).
+    qualified_combos = [c for c in combinations if c['sample_count'] >= MIN_OUTCOME_SAMPLES]
+    best_combination = qualified_combos[0] if qualified_combos else None
+
     return {
         "personalities": effectiveness,
+        "combinations": combinations,
         "min_samples_required": MIN_OUTCOME_SAMPLES,
-        "best_personality": best_personality
+        "best_personality": best_personality,
+        "best_combination": best_combination
     }
 
 

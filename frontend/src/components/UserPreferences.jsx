@@ -236,12 +236,12 @@ function UserPreferences() {
                 />
                 <span className="personality-option-label">
                   {option.label}
-                  {isBest && <span title="Kommt bei dir bisher am besten an"> ⭐</span>}
+                  {isBest && <span title="Wirkt bei dir bisher am besten"> ⭐</span>}
                 </span>
                 <span className="personality-option-desc">{option.description}</span>
                 {insight && (
                   <span className="personality-option-insight">
-                    Ø-Stimmung danach: {insight.avg_score > 0 ? '+' : ''}{insight.avg_score} ({insight.sample_count} Antworten)
+                    Wirkung der Antwort: {insight.avg_score > 0 ? '+' : ''}{insight.avg_score} ({insight.sample_count} Antworten)
                   </span>
                 )}
               </label>
@@ -250,9 +250,43 @@ function UserPreferences() {
         </div>
         <span className="form-hint">
           Legt Liaras grundlegenden Kommunikationsstil fest, unabhängig von der automatischen Stimmung.
-          {personalityInsights?.best_personality && ' ⭐ zeigt, welche Personality bisher am positivsten bei dir ankam.'}
+          {personalityInsights?.best_personality && ' ⭐ zeigt, welche Personality bisher am besten bei dir wirkt.'}
         </span>
       </div>
+
+      {/* Wirkung nach Personality + Stimmung - feinere Aufschlüsselung als
+          oben: welche Kombination in welcher Situation wirkt, statt nur
+          "Personality X insgesamt am besten" */}
+      {personalityInsights?.combinations?.some(c => c.sample_count >= personalityInsights.min_samples_required) && (
+        <div className="settings-card">
+          <h3 className="settings-card-title">🔍 Wirkung nach Situation</h3>
+          <p className="form-hint" style={{ marginBottom: 'var(--space-sm)' }}>
+            Manche Personality-Stimmungs-Kombinationen wirken besser als andere, je nach Situation.
+          </p>
+          <div className="personality-combo-list">
+            {personalityInsights.combinations
+              .filter(c => c.sample_count >= personalityInsights.min_samples_required)
+              .slice(0, 5)
+              .map((combo, idx) => {
+                const label = personalityOptions.find(o => o.value === combo.personality)?.label || combo.personality
+                const isBestCombo = personalityInsights.best_combination
+                  && personalityInsights.best_combination.personality === combo.personality
+                  && personalityInsights.best_combination.mood === combo.mood
+                return (
+                  <div key={idx} className="personality-combo-row">
+                    <span>
+                      {label} + {combo.mood}
+                      {isBestCombo && <span title="Wirkt bei dir bisher am besten in dieser Situation"> ⭐</span>}
+                    </span>
+                    <span className="personality-option-insight">
+                      {combo.avg_score > 0 ? '+' : ''}{combo.avg_score} ({combo.sample_count} Antworten)
+                    </span>
+                  </div>
+                )
+              })}
+          </div>
+        </div>
+      )}
 
       {/* Erinnerung */}
       <div className="settings-card">

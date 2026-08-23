@@ -177,6 +177,35 @@ class Neo4jGraphService:
                 for record in result
             ]
 
+    def get_personality_mood_effectiveness(self, user_id: int) -> List[Dict]:
+        """
+        Same idea as get_personality_effectiveness(), but broken down by
+        personality+mood pair rather than personality alone - "direkt
+        insgesamt am besten" is a much weaker signal than "direkt kommt
+        vor allem gut an, wenn Liara focused ist", since the situation
+        (reflected here by mood) is what actually determines whether a
+        given personality works. Still insight-only.
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (:Message)-[r:RESULTED_IN]->(a:Message {user_id: $user_id})
+                WHERE a.outcome_score IS NOT NULL AND r.personality IS NOT NULL AND r.mood IS NOT NULL
+                RETURN r.personality as personality, r.mood as mood,
+                       avg(a.outcome_score) as avg_score,
+                       count(*) as sample_count
+                ORDER BY avg_score DESC
+            """, user_id=user_id)
+
+            return [
+                {
+                    'personality': record['personality'],
+                    'mood': record['mood'],
+                    'avg_score': round(record['avg_score'], 3),
+                    'sample_count': record['sample_count']
+                }
+                for record in result
+            ]
+
     def get_last_assistant_message_id(self, user_id: int, session_id: int) -> Optional[int]:
         """
         Find the most recent assistant Message node in a specific
