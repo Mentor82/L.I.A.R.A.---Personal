@@ -1,0 +1,25 @@
+# SearXNG config for Liara's self-hosted general web search (issue #4
+# phase 1). Copy this to settings.yml (git-ignored) and replace secret_key
+# with a real random value before starting the container:
+#
+#   cp searxng/settings.yml.example searxng/settings.yml
+#   python3 -c "import secrets; print(secrets.token_hex(32))"
+#   # paste the output in as secret_key below
+#
+# use_default_settings merges this with SearXNG's built-in defaults - we
+# only need to override what actually differs.
+
+use_default_settings: true
+
+server:
+  secret_key: "REPLACE_WITH_A_REAL_RANDOM_SECRET_SEE_HEADER_COMMENT"
+  limiter: false
+  image_proxy: false
+
+search:
+  # json is disabled by default upstream (security default) - Liara's
+  # SearchBroker needs it. html stays enabled too, harmless, useful for
+  # manually poking at http://127.0.0.1:8080 from the server itself.
+  formats:
+    - html
+    - json

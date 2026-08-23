@@ -2,6 +2,7 @@
 ⚙️ Tool Executor
 Automatische Ausführung von Tool-Calls mit Privacy-Checks
 """
+import asyncio
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -13,6 +14,14 @@ from services.tool_registry import get_tool_registry, ToolDefinition
 from services.tool_parser import ToolCall
 from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
+from services.search_broker import get_search_broker
+from services.web_safety.proxy_sandbox import get_proxy_sandbox
+
+# How many top SearXNG results get a real fetch-and-extract enrichment pass
+# via the (SSRF-hardened) ProxySandbox - kept small since each one is a real
+# HTTP request with its own timeout, not just a cheap snippet lookup.
+WEB_SEARCH_ENRICH_TOP_N = 3
+WEB_SEARCH_SOURCE_TEXT_CAP = 2000
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +54,8 @@ class ToolExecutor:
         self.registry = get_tool_registry()
         self.web_search = get_web_search_service()
         self.location_service = get_location_service()
+        self.search_broker = get_search_broker()
+        self.proxy_sandbox = get_proxy_sandbox()
     
     async def execute(
         self,
@@ -157,18 +168,78 @@ class ToolExecutor:
         query = params.get("query")
         search_type = params.get("search_type", "instant")
         language = params.get("language", "de")
-        
+
+        if search_type == "web":
+            return await self._execute_web_search_general(query, language)
+
         if search_type == "wikipedia":
             result = self.web_search.search_wikipedia(query, language)
         else:
             result = await self.web_search.search_instant_answer(query)
-        
+
         # Formatiere für LLM-Konsum
         return {
             "query": query,
             "type": search_type,
             "summary": self._format_search_result(result),
             "raw": result
+        }
+
+    async def _execute_web_search_general(self, query: str, language: str) -> Dict:
+        """
+        General/research-style web search (issue #4 phase 1) - SearXNG via
+        SearchBroker for discovery, then real fetch-and-extract enrichment
+        of the top few results via the (SSRF-hardened) ProxySandbox, so the
+        model gets actual source text with URL/title/retrieval time instead
+        of just a short snippet. Degrades gracefully (empty sources list,
+        not an exception) if SearXNG is unreachable - the caller/model
+        should be able to say "couldn't find anything" rather than the
+        whole tool call failing.
+        """
+        broker_results = await self.search_broker.search(query, language=language)
+        to_enrich = broker_results[:WEB_SEARCH_ENRICH_TOP_N]
+
+        # fetch_safe() is a synchronous, blocking call (real HTTP request,
+        # up to its own 10s timeout) - run each in a thread, concurrently,
+        # so this doesn't block the event loop for every other request this
+        # worker is serving, and so N sources cost ~one fetch's worth of
+        # wall-clock time instead of N times that.
+        fetched_pages = await asyncio.gather(
+            *[asyncio.to_thread(self.proxy_sandbox.fetch_safe, item["url"]) for item in to_enrich],
+            return_exceptions=True
+        )
+
+        sources = []
+        for item, fetched in zip(to_enrich, fetched_pages):
+            if isinstance(fetched, Exception) or fetched.get("error"):
+                # Fetch failed for this one source (blocked, timed out,
+                # non-HTML, etc.) - fall back to just the search snippet
+                # rather than dropping the source entirely.
+                text = item.get("snippet", "")
+                title = item.get("title", "")
+            else:
+                text = fetched.get("text_content", "")[:WEB_SEARCH_SOURCE_TEXT_CAP]
+                title = item.get("title") or fetched.get("title", "")
+
+            sources.append({
+                "url": item["url"],
+                "title": title,
+                "domain": item.get("domain", ""),
+                "published_at": item.get("published_at"),
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "source_type": "search_result",
+                "text": text,
+                "search_rank": item.get("rank")
+            })
+
+        return {
+            "query": query,
+            "type": "web",
+            "sources": sources,
+            "summary": (
+                f"{len(sources)} Quelle(n) gefunden für '{query}'." if sources
+                else f"Keine Ergebnisse für '{query}' gefunden (Suche nicht verfügbar oder keine Treffer)."
+            )
         }
     
     async def _execute_weather(self, params: Dict[str, Any]) -> Dict:

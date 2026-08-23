@@ -96,6 +96,10 @@ yarn-error.log*
 .env.*
 !.env.example
 
+# SearXNG config - contains a generated secret_key, created on the server
+# via searxng/README.md, never committed.
+searxng/settings.yml
+
 # Database files
 *.db
 *.sqlite3

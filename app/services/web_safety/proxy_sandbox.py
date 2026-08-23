@@ -4,11 +4,19 @@ Serverseitiger sicherer HTML-Abruf ohne JS, Cookies, Sessions
 """
 
 from typing import Dict, Optional
+import ipaddress
+import socket
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 import re
 from datetime import datetime
+
+
+class SSRFError(Exception):
+    """Raised when a target URL resolves to a non-public address, or uses
+    a non-HTTP(S) scheme - see ProxySandbox._check_target_is_public."""
+    pass
 
 
 class ProxySandbox:
@@ -53,7 +61,40 @@ class ProxySandbox:
         
         # Disable cookies
         self.session.cookies.clear()
-    
+
+    def _check_target_is_public(self, url: str) -> None:
+        """
+        Rejects non-http(s) schemes and any hostname that resolves to a
+        private/loopback/link-local/reserved/multicast address - closes an
+        SSRF gap that existed regardless of the same-domain redirect check
+        below (that only compares hostname strings, never resolves DNS).
+        Without this, a model deciding which URL to fetch based on search
+        results could be steered (via page content, or a malicious/rebound
+        DNS entry) into requesting http://127.0.0.1:..., an internal
+        service, or a cloud metadata endpoint (169.254.169.254).
+
+        Raises SSRFError if the target isn't safe to fetch.
+        """
+        parsed = urlparse(url)
+
+        if parsed.scheme not in ('http', 'https'):
+            raise SSRFError(f'Unsupported scheme: {parsed.scheme or "(none)"}')
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise SSRFError('URL has no hostname')
+
+        try:
+            addresses = {info[4][0] for info in socket.getaddrinfo(hostname, None)}
+        except socket.gaierror as e:
+            raise SSRFError(f'Could not resolve host: {hostname}') from e
+
+        for addr in addresses:
+            ip = ipaddress.ip_address(addr)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                raise SSRFError(f'Host "{hostname}" resolves to a non-public address ({addr})')
+
+
     def fetch_safe(self, url: str, allow_redirects: bool = True) -> Dict:
         """
         Sicherer HTML-Abruf
@@ -102,6 +143,13 @@ class ProxySandbox:
         }
         
         try:
+            # SSRF check: reject non-http(s) schemes and any hostname that
+            # resolves to a private/loopback/link-local/reserved address
+            # (127.0.0.1, RFC1918 ranges, 169.254.169.254 cloud metadata,
+            # etc.) - previously unchecked entirely. Must happen before the
+            # request is ever made, not just on the response.
+            self._check_target_is_public(url)
+
             # Safe GET request
             response = self.session.get(
                 url,
@@ -109,19 +157,25 @@ class ProxySandbox:
                 allow_redirects=allow_redirects,
                 stream=True  # Für Size-Check
             )
-            
+
             result['status_code'] = response.status_code
             result['final_url'] = response.url
             result['content_type'] = response.headers.get('Content-Type', '')
-            
+
             # Check redirect safety (same domain only)
             if allow_redirects and response.url != url:
                 original_domain = urlparse(url).netloc
                 final_domain = urlparse(response.url).netloc
-                
+
                 if original_domain != final_domain:
                     result['error'] = f'Cross-domain redirect blocked: {original_domain} → {final_domain}'
                     return result
+
+                # Same-domain redirects still need the same SSRF check -
+                # DNS for that domain could differ per-request (rebinding)
+                # or simply not have been resolved yet if this is the
+                # first time we've seen it redirect anywhere.
+                self._check_target_is_public(response.url)
             
             # Check Content-Type (nur HTML)
             if 'text/html' not in result['content_type']:
@@ -163,6 +217,8 @@ class ProxySandbox:
             result['images'] = self._extract_images(soup, url)
             result['text_content'] = self._extract_text_content(soup)
             
+        except SSRFError as e:
+            result['error'] = f'Blocked: {str(e)}'
         except requests.exceptions.Timeout:
             result['error'] = f'Request timeout after {self.TIMEOUT}s'
         except requests.exceptions.ConnectionError:

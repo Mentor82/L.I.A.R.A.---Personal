@@ -51,7 +51,13 @@ class ToolRegistry:
         # 🌍 Web Search Tool
         self.register_tool(ToolDefinition(
             name="web_search",
-            description="Durchsucht das Internet mit DuckDuckGo nach aktuellen Informationen, Fakten und Definitionen",
+            description=(
+                "Durchsucht das Internet nach Informationen. search_type='instant' (Standard) "
+                "für schnelle Fakten/Definitionen via DuckDuckGo. search_type='web' für "
+                "Recherche-Fragen zu aktuellen Ereignissen oder Themen, die mehrere echte Quellen "
+                "brauchen - durchsucht das offene Web (SearXNG) und liefert tatsächlich abgerufene "
+                "Quellentexte mit URL/Titel statt nur einem kurzen Snippet."
+            ),
             category=ToolCategory.INFORMATION,
             parameters=[
                 ToolParameter(
@@ -66,7 +72,7 @@ class ToolRegistry:
                     description="Art der Suche",
                     required=False,
                     default="instant",
-                    enum=["instant", "wikipedia"]
+                    enum=["instant", "web", "wikipedia"]
                 ),
                 ToolParameter(
                     name="language",

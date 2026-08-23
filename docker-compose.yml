@@ -14,6 +14,24 @@ services:
     networks:
       - liara_network
 
+  # SearXNG - self-hosted, keyless general web search (issue #4 phase 1).
+  # Bound to 127.0.0.1 only, deliberately unlike redis/neo4j above - this
+  # must never be reachable from the LAN/internet, only from the Liara
+  # backend process on this same host. settings.yml is NOT committed to the
+  # repo (contains a generated secret_key) - see searxng/README.md.
+  searxng:
+    image: searxng/searxng:latest
+    container_name: liara_searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    networks:
+      - liara_network
+
   # Neo4j - Knowledge Graph & Relations
   neo4j:
     image: neo4j:5-community

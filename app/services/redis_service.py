@@ -306,6 +306,22 @@ class RedisSessionService:
             return json.loads(data)
         return None
     
+    def cache_json(self, key: str, value: Any, ttl: int = 600):
+        """
+        Generic "cache this JSON-serializable value under this exact key"
+        helper - unlike cache_embedding/store_user_state above, this
+        doesn't impose its own key namespace or scope (e.g. per-user), so
+        callers own their own key convention. Used by search_broker.py to
+        cache SearXNG result sets (shared across users for the same query),
+        which doesn't fit user_id-scoped keys like store_user_state's.
+        """
+        self.client.setex(key, timedelta(seconds=ttl), json.dumps(value))
+
+    def get_cached_json(self, key: str) -> Optional[Any]:
+        """Read back a value stored via cache_json, or None if absent/expired."""
+        data = self.client.get(key)
+        return json.loads(data) if data else None
+
     def increment_counter(self, counter_key: str, amount: int = 1) -> int:
         """
         Increment counter (useful for rate limiting, stats, etc.)
