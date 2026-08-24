@@ -573,11 +573,34 @@
   color: var(--color-danger);
 }
 
+/* Split editor - .workspace-body's second grid column holds this row, which
+   lays out one (normal) or two (split) .workspace-main panes side by side. */
+.workspace-editor-row {
+  display: flex;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
 .workspace-main {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
+  flex: 1;
+}
+
+.workspace-split-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .workspace-tabs {
@@ -806,5 +829,10 @@
 
   .workspace-sidebar {
     max-height: 220px;
+  }
+
+  /* Side-by-side split panes don't fit a narrow screen - stack instead. */
+  .workspace-editor-row {
+    flex-direction: column;
   }
 }

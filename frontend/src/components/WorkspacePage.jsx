@@ -195,6 +195,77 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
   );
 }
 
+/**
+ * One editor group (tab strip + toolbar + CodeMirror + run output). The
+ * Workspace renders one of these normally, or two side by side once split -
+ * both panes share the same global `tabs` pool, each just tracking its own
+ * active tab, so the same or different files can sit in either pane.
+ */
+function EditorPane({
+  tabs, activeTabName, tabData, activeLang,
+  onSelectTab, onCloseTab, onChangeContent, onCreateEditor,
+  running, runResult, onSave, onRun,
+  sessionId, isSecondary, onSplit, onCloseSplitPane,
+}) {
+  return (
+    <section className="workspace-main">
+      {isSecondary && (
+        <div className="workspace-split-header">
+          <span>Geteilte Ansicht</span>
+          <button className="workspace-icon-btn" title="Geteilte Ansicht schließen" onClick={onCloseSplitPane}>✕</button>
+        </div>
+      )}
+      <div className="workspace-tabs">
+        {tabs.map((t) => (
+          <button
+            key={t.name}
+            className={`workspace-tab ${activeTabName === t.name ? 'active' : ''}`}
+            onClick={() => onSelectTab(t.name)}
+          >
+            {t.name}{t.dirty ? ' •' : ''}
+            <span className="workspace-tab-close" onClick={(e) => { e.stopPropagation(); onCloseTab(t.name); }}>✕</span>
+          </button>
+        ))}
+      </div>
+
+      {tabData ? (
+        <>
+          <div className="workspace-toolbar">
+            <button className="workspace-btn-secondary" onClick={onSave} disabled={!tabData.dirty}>💾 Speichern</button>
+            <button className="workspace-btn-primary" onClick={onRun} disabled={!activeLang || running}>
+              {running ? 'Läuft…' : '▶ Ausführen'}
+            </button>
+            {!isSecondary && (
+              <button className="workspace-btn-secondary" onClick={onSplit} title="Datei zusätzlich rechts daneben öffnen">🗗 Teilen</button>
+            )}
+          </div>
+          <div className="workspace-editor-wrapper">
+            <CodeMirror
+              value={tabData.content}
+              height="420px"
+              theme="dark"
+              extensions={activeLang ? [activeLang.cm] : []}
+              onChange={onChangeContent}
+              onCreateEditor={onCreateEditor}
+            />
+          </div>
+          {runResult && (
+            <div className="workspace-output">
+              <CodeRunResult result={runResult} sessionId={sessionId} />
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="workspace-empty">
+          <div className="workspace-empty-icon">📄</div>
+          <p className="workspace-empty-title">Keine Datei geöffnet</p>
+          <p className="workspace-empty-subtitle">Datei aus der Liste öffnen oder eine neue anlegen.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WorkspacePage() {
   const [sessions, setSessions] = useState([]);
   const [sessionId, setSessionId] = useState(null);
@@ -250,6 +321,17 @@ function WorkspacePage() {
   // without needing the editor to expose that as a declarative prop.
   const editorViewRef = useRef(null);
   const [pendingScrollLine, setPendingScrollLine] = useState(null); // { path, line }
+
+  // Split editor - capped at exactly two panes (left/primary + right/split),
+  // not a general N-way pane system: `splitTab` is the right pane's active
+  // file, or null when not split at all. Both panes share the same `tabs`
+  // pool (opening/closing a file affects both strips), each just tracks its
+  // own active tab and has its own run state/editor view, mirroring the
+  // primary pane's activeTab/running/runResult/editorViewRef.
+  const [splitTab, setSplitTab] = useState(null);
+  const [splitRunning, setSplitRunning] = useState(false);
+  const [splitRunResult, setSplitRunResult] = useState(null);
+  const splitEditorViewRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -390,6 +472,10 @@ function WorkspacePage() {
   const activeExt = activeTab ? extensionOf(activeTab) : '';
   const activeLang = LANGUAGE_BY_EXTENSION[activeExt];
 
+  const splitTabData = useMemo(() => tabs.find((t) => t.name === splitTab), [tabs, splitTab]);
+  const splitExt = splitTab ? extensionOf(splitTab) : '';
+  const splitLang = LANGUAGE_BY_EXTENSION[splitExt];
+
   // Performs the actual scroll-to-line once the editor is showing the file
   // the pending search-result click asked for (openSearchResult may have
   // had to wait on an async file fetch first, so this can't happen inline).
@@ -415,20 +501,34 @@ function WorkspacePage() {
     setPendingScrollLine(null);
   }, [pendingScrollLine, activeTabData]);
 
-  const openFile = async (filename) => {
-    const existing = tabs.find((t) => t.name === filename);
-    if (existing) {
-      setActiveTab(filename);
-      return;
-    }
+  // Fetches a file's content into the shared `tabs` pool if it isn't already
+  // open - both openFile (left pane) and openInSplit (right pane) build on
+  // this, so a file already open in one pane opens instantly in the other.
+  const ensureTabLoaded = async (filename) => {
+    if (tabs.some((t) => t.name === filename)) return true;
     try {
       const content = await workspaceAPI.getFileContent(sessionId, filename);
       setTabs((prev) => [...prev, { name: filename, content, dirty: false }]);
-      setActiveTab(filename);
+      return true;
     } catch (err) {
       setError(err.message || 'Datei konnte nicht geöffnet werden.');
+      return false;
     }
   };
+
+  const openFile = async (filename) => {
+    if (await ensureTabLoaded(filename)) setActiveTab(filename);
+  };
+
+  // Opens (or switches to) a file in the second, split pane - via the tab
+  // strip there, or the primary pane's "🗗 Teilen" button duplicating its
+  // current file. Explorer/search clicks always target the primary pane;
+  // this is the only way a file lands in the split one.
+  const openInSplit = async (filename) => {
+    if (await ensureTabLoaded(filename)) setSplitTab(filename);
+  };
+
+  const closeSplit = () => setSplitTab(null);
 
   // Opens a search result - a bare path-match just opens the file, a
   // content-match also jumps to (and selects) the matching line once the
@@ -441,9 +541,12 @@ function WorkspacePage() {
 
   const closeTab = (filename) => {
     setTabs((prev) => prev.filter((t) => t.name !== filename));
+    const remaining = tabs.filter((t) => t.name !== filename);
     if (activeTab === filename) {
-      const remaining = tabs.filter((t) => t.name !== filename);
       setActiveTab(remaining.length ? remaining[remaining.length - 1].name : null);
+    }
+    if (splitTab === filename) {
+      setSplitTab(remaining.length ? remaining[remaining.length - 1].name : null);
     }
   };
 
@@ -456,39 +559,44 @@ function WorkspacePage() {
     const prefix = `${path}/`;
     const isUnderPath = (name) => name === path || name.startsWith(prefix);
     setTabs((prev) => prev.filter((t) => !isUnderPath(t.name)));
+    const remaining = tabs.filter((t) => !isUnderPath(t.name));
     if (activeTab && isUnderPath(activeTab)) {
-      const remaining = tabs.filter((t) => !isUnderPath(t.name));
       setActiveTab(remaining.length ? remaining[remaining.length - 1].name : null);
+    }
+    if (splitTab && isUnderPath(splitTab)) {
+      setSplitTab(remaining.length ? remaining[remaining.length - 1].name : null);
     }
   };
 
-  const updateActiveContent = (value) => {
-    setTabs((prev) => prev.map((t) => (t.name === activeTab ? { ...t, content: value, dirty: true } : t)));
+  const updateTabContent = (filename, value) => {
+    setTabs((prev) => prev.map((t) => (t.name === filename ? { ...t, content: value, dirty: true } : t)));
   };
 
-  const saveActiveTab = async () => {
-    if (!activeTabData) return;
+  const saveTab = async (filename) => {
+    const tabData = tabs.find((t) => t.name === filename);
+    if (!tabData) return;
     try {
-      await workspaceAPI.saveFile(sessionId, activeTabData.name, activeTabData.content);
-      setTabs((prev) => prev.map((t) => (t.name === activeTab ? { ...t, dirty: false } : t)));
+      await workspaceAPI.saveFile(sessionId, filename, tabData.content);
+      setTabs((prev) => prev.map((t) => (t.name === filename ? { ...t, dirty: false } : t)));
       loadFiles(sessionId);
     } catch (err) {
       setError(err.message || 'Speichern fehlgeschlagen.');
     }
   };
 
-  const runActiveTab = async () => {
-    if (!activeTabData || !activeLang) return;
-    setRunning(true);
-    setRunResult(null);
+  const runTab = async (filename, lang, setRunningState, setRunResultState) => {
+    const tabData = tabs.find((t) => t.name === filename);
+    if (!tabData || !lang) return;
+    setRunningState(true);
+    setRunResultState(null);
     try {
-      const result = await codeExecAPI.run(sessionId, activeLang.runLanguage, activeTabData.content);
-      setRunResult(result);
+      const result = await codeExecAPI.run(sessionId, lang.runLanguage, tabData.content);
+      setRunResultState(result);
       loadFiles(sessionId);
     } catch (err) {
-      setRunResult({ error: err.message || 'Ausführung fehlgeschlagen.' });
+      setRunResultState({ error: err.message || 'Ausführung fehlgeschlagen.' });
     } finally {
-      setRunning(false);
+      setRunningState(false);
     }
   };
 
@@ -581,6 +689,11 @@ function WorkspacePage() {
         setActiveTab(newFullPath);
       } else if (renameTargetType === 'folder' && activeTab && activeTab.startsWith(oldPrefix)) {
         setActiveTab(newFullPath + activeTab.slice(renameTarget.length));
+      }
+      if (splitTab === renameTarget) {
+        setSplitTab(newFullPath);
+      } else if (renameTargetType === 'folder' && splitTab && splitTab.startsWith(oldPrefix)) {
+        setSplitTab(newFullPath + splitTab.slice(renameTarget.length));
       }
       setRenameTarget(null);
       setRenameValue('');
@@ -837,52 +950,44 @@ function WorkspacePage() {
           )}
         </aside>
 
-        <section className="workspace-main">
-          <div className="workspace-tabs">
-            {tabs.map((t) => (
-              <button
-                key={t.name}
-                className={`workspace-tab ${activeTab === t.name ? 'active' : ''}`}
-                onClick={() => setActiveTab(t.name)}
-              >
-                {t.name}{t.dirty ? ' •' : ''}
-                <span className="workspace-tab-close" onClick={(e) => { e.stopPropagation(); closeTab(t.name); }}>✕</span>
-              </button>
-            ))}
-          </div>
-
-          {activeTabData ? (
-            <>
-              <div className="workspace-toolbar">
-                <button className="workspace-btn-secondary" onClick={saveActiveTab} disabled={!activeTabData.dirty}>💾 Speichern</button>
-                <button className="workspace-btn-primary" onClick={runActiveTab} disabled={!activeLang || running}>
-                  {running ? 'Läuft…' : '▶ Ausführen'}
-                </button>
-              </div>
-              <div className="workspace-editor-wrapper">
-                <CodeMirror
-                  value={activeTabData.content}
-                  height="420px"
-                  theme="dark"
-                  extensions={activeLang ? [activeLang.cm] : []}
-                  onChange={updateActiveContent}
-                  onCreateEditor={(view) => { editorViewRef.current = view; }}
-                />
-              </div>
-              {runResult && (
-                <div className="workspace-output">
-                  <CodeRunResult result={runResult} sessionId={sessionId} />
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="workspace-empty">
-              <div className="workspace-empty-icon">📄</div>
-              <p className="workspace-empty-title">Keine Datei geöffnet</p>
-              <p className="workspace-empty-subtitle">Datei aus der Liste öffnen oder eine neue anlegen.</p>
-            </div>
+        <div className="workspace-editor-row">
+          <EditorPane
+            tabs={tabs}
+            activeTabName={activeTab}
+            tabData={activeTabData}
+            activeLang={activeLang}
+            onSelectTab={setActiveTab}
+            onCloseTab={closeTab}
+            onChangeContent={(value) => updateTabContent(activeTab, value)}
+            onCreateEditor={(view) => { editorViewRef.current = view; }}
+            running={running}
+            runResult={runResult}
+            onSave={() => saveTab(activeTab)}
+            onRun={() => runTab(activeTab, activeLang, setRunning, setRunResult)}
+            sessionId={sessionId}
+            isSecondary={false}
+            onSplit={() => activeTab && openInSplit(activeTab)}
+          />
+          {splitTab && (
+            <EditorPane
+              tabs={tabs}
+              activeTabName={splitTab}
+              tabData={splitTabData}
+              activeLang={splitLang}
+              onSelectTab={setSplitTab}
+              onCloseTab={closeTab}
+              onChangeContent={(value) => updateTabContent(splitTab, value)}
+              onCreateEditor={(view) => { splitEditorViewRef.current = view; }}
+              running={splitRunning}
+              runResult={splitRunResult}
+              onSave={() => saveTab(splitTab)}
+              onRun={() => runTab(splitTab, splitLang, setSplitRunning, setSplitRunResult)}
+              sessionId={sessionId}
+              isSecondary={true}
+              onCloseSplitPane={closeSplit}
+            />
           )}
-        </section>
+        </div>
       </div>
 
       {newFileOpen && (
