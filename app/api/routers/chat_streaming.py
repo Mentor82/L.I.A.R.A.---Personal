@@ -210,6 +210,12 @@ def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
         return f'Wikipedia: "{arguments.get("query", "")}"'
     if tool_name == "get_current_time":
         return "Aktuelle Zeit abrufen"
+    if tool_name == "workspace_list_files":
+        return "Workspace-Dateien auflisten"
+    if tool_name == "workspace_read_file":
+        return f'Workspace-Datei lesen: "{arguments.get("filename", "")}"'
+    if tool_name == "workspace_propose_change":
+        return f'Änderung vorschlagen: "{arguments.get("filename", "")}"'
     return tool_name
 
 
@@ -556,7 +562,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                     tool_call = ToolCall(tool_name=tool_name, parameters=arguments, raw_text="", confidence=1.0)
                     try:
-                        tool_result = await tool_executor.execute(tool_call, user_id or 0, db=db)
+                        tool_result = await tool_executor.execute(tool_call, user_id or 0, db=db, session_id=session_id)
                     except Exception as e:
                         logger.error(f"Agent tool execution failed: {tool_name}: {e}")
                         tool_result = {"success": False, "error": str(e)}
@@ -584,6 +590,14 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             for i, s in enumerate(inner_result.get("sources", []))
                         ]
                         yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
+
+                    # Structured proposal card (Workspace Agent-Vorbereitung
+                    # v1) - same pattern as web_sources above: the tool result
+                    # already tells the model what happened, this gives the
+                    # frontend a reliable, structured event to render a "review
+                    # in Workspace" card from, independent of chat prose.
+                    if tool_name == "workspace_propose_change" and tool_result.get("success") and inner_result.get("proposed"):
+                        yield f"data: {json.dumps({'type': 'workspace_proposal', 'proposal_id': inner_result.get('proposal_id'), 'filename': inner_result.get('filename'), 'action': inner_result.get('action'), 'session_id': session_id})}\n\n"
 
                     tool_message = {"role": "tool", "content": json.dumps(tool_result)}
                     if tc.get("id"):

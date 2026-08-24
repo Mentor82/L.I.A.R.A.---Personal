@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from services.session_workspace import SESSION_FILES_DIR, MANIFEST_FILENAME, record_file_event
+from services.session_workspace import SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, record_file_event
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ def _snapshot(workspace_dir: Path) -> Dict[str, Tuple[int, float]]:
     if not workspace_dir.exists():
         return snapshot
     for entry in workspace_dir.iterdir():
-        if entry.is_file() and not entry.is_symlink() and entry.name != MANIFEST_FILENAME:
+        if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
             stat = entry.stat()
             snapshot[entry.name] = (stat.st_size, stat.st_mtime)
     return snapshot
@@ -118,7 +118,7 @@ def _diff_snapshot(
         # Symlinks are rejected outright, both for downloads and here - a
         # script could otherwise os.symlink() a sensitive path into its
         # workspace and have it show up as a normal "generated file".
-        if entry.is_symlink() or not entry.is_file() or entry.name == MANIFEST_FILENAME:
+        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
             continue
         stat = entry.stat()
         current = (stat.st_size, stat.st_mtime)

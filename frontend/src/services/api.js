@@ -623,6 +623,26 @@ export const workspaceAPI = {
       body: JSON.stringify({ filenames }),
     });
   },
+
+  /**
+   * LIARA's proposed-but-not-yet-applied changes (Agent-Vorbereitung v1).
+   */
+  async listProposals(sessionId, status = null) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return apiFetch(`/workspace/sessions/${sessionId}/proposals${query}`);
+  },
+
+  async approveProposal(sessionId, proposalId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/proposals/${proposalId}/approve`, {
+      method: 'POST',
+    });
+  },
+
+  async rejectProposal(sessionId, proposalId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/proposals/${proposalId}/reject`, {
+      method: 'POST',
+    });
+  },
 };
 
 /**

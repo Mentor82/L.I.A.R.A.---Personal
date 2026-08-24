@@ -13,7 +13,8 @@ function UserPreferences() {
     personality: 'warmherzig',
     memory_enabled: true,
     tool_memory_enabled: true,
-    workspace_enabled: true
+    workspace_enabled: true,
+    workspace_agent_enabled: false
   })
   const [models, setModels] = useState([])
   const [personalityOptions, setPersonalityOptions] = useState([])
@@ -351,6 +352,23 @@ function UserPreferences() {
           <div
             className={`switch ${preferences.workspace_enabled ? 'active' : ''}`}
             onClick={() => togglePreference('workspace_enabled')}
+          >
+            <div className="switch-toggle"></div>
+          </div>
+        </div>
+
+        <div className="switch-group">
+          <div className="switch-label">
+            <span className="switch-title">LIARA darf im Workspace arbeiten</span>
+            <span className="switch-desc">
+              Erlaubt LIARA, Workspace-Dateien zu lesen und Änderungen vorzuschlagen -
+              jeder Vorschlag muss von dir mit Diff im Workspace-Tab angenommen werden,
+              bevor er wirksam wird
+            </span>
+          </div>
+          <div
+            className={`switch ${preferences.workspace_agent_enabled ? 'active' : ''} ${!preferences.workspace_enabled ? 'disabled' : ''}`}
+            onClick={() => preferences.workspace_enabled && togglePreference('workspace_agent_enabled')}
           >
             <div className="switch-toggle"></div>
           </div>

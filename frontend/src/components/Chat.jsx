@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { chatAPI, moodAPI } from '../services/api';
 import { getChatSessions, createChatSession, saveChatMessage, getSessionMessages, deleteChatSession } from '../services/chatService';
 import { analyzeSentimentDebounced } from '../services/sentimentService';
@@ -166,6 +167,35 @@ function WebSourcesBlock({ sources }) {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+const PROPOSAL_ACTION_LABELS = { create: 'anlegen', update: 'überschreiben', delete: 'löschen' };
+
+// LIARA proposed a workspace change (Agent-Vorbereitung v1) - nothing on
+// disk changed yet, this just points at where to review/approve it. Same
+// collapsible-card shape as WebSourcesBlock above.
+function WorkspaceProposalsBlock({ proposals }) {
+  if (!proposals || proposals.length === 0) return null;
+
+  return (
+    <div className="web-sources-block">
+      <div className="web-sources-toggle" style={{ cursor: 'default' }}>
+        <span>📝 Workspace-Vorschläge ({proposals.length})</span>
+      </div>
+      <ul className="web-sources-content">
+        {proposals.map((p) => (
+          <li key={p.proposal_id} className="web-sources-item">
+            <span className="web-sources-title">
+              {p.filename} {PROPOSAL_ACTION_LABELS[p.action] || p.action}
+            </span>
+            <div className="web-sources-meta">
+              <Link to="/workspace" className="web-sources-domain">Im Workspace prüfen →</Link>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -741,6 +771,28 @@ function Chat() {
                 // state each time, same replace-wholesale contract as
                 // 'agent_steps'/'tasks'.
                 liaraMessage.webSources = parsed.items;
+
+                if (!messageAdded) {
+                  messageAdded = true;
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages, liaraMessage] }
+                      : session
+                  ));
+                } else {
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                      : session
+                  ));
+                }
+              } else if (parsed.type === 'workspace_proposal') {
+                // LIARA proposed a workspace change via the workspace_propose_change
+                // tool (Agent-Vorbereitung v1) - nothing on disk changed yet, this
+                // just tells the user where to go review/approve it. Each event is
+                // one proposal, so accumulate rather than replace-wholesale.
+                liaraMessage.workspaceProposals = [...(liaraMessage.workspaceProposals || []), parsed];
 
                 if (!messageAdded) {
                   messageAdded = true;
@@ -1429,6 +1481,9 @@ function Chat() {
               )}
               {msg.role === 'assistant' && (
                 <WebSourcesBlock sources={msg.webSources} />
+              )}
+              {msg.role === 'assistant' && (
+                <WorkspaceProposalsBlock proposals={msg.workspaceProposals} />
               )}
               {msg.role === 'assistant' && (
                 <TaskListBlock tasks={msg.tasks} />

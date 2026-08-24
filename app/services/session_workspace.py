@@ -7,6 +7,7 @@ A directory on disk is not, by itself, "visible to the LLM" - this module is
 what actually makes generated files something the model can be told about and
 read the (text) content of, not just a user-facing download list.
 """
+import difflib
 import json
 import mimetypes
 import os
@@ -34,6 +35,13 @@ MAX_SESSION_TOTAL = 500 * 1024 * 1024  # 500 MiB per session workspace
 # for content/size/mtime/mime-type, this is a thin overlay only. Excluded
 # from every directory listing/diff so it never shows up as a "file".
 MANIFEST_FILENAME = ".liara_manifest.json"
+
+# LIARA's proposed-but-not-yet-applied workspace changes (Agent-Vorbereitung
+# v1) - deliberately a separate sidecar from MANIFEST_FILENAME, not folded
+# into it: a proposal isn't a file yet (it may never become one, if rejected),
+# so it shouldn't share a schema/lifecycle with real, already-on-disk files.
+# Also excluded from every directory listing/diff.
+PROPOSALS_FILENAME = ".liara_proposals.json"
 
 
 def _session_dir(user_id: int, session_id: int) -> Path:
@@ -154,7 +162,7 @@ def _workspace_total_size(workspace: Path) -> int:
     total = 0
     if workspace.exists():
         for entry in workspace.iterdir():
-            if entry.is_file() and not entry.is_symlink() and entry.name != MANIFEST_FILENAME:
+            if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
                 total += entry.stat().st_size
     return total
 
@@ -231,7 +239,7 @@ def list_session_files(user_id: int, session_id: int) -> List[dict]:
     manifest = _load_manifest(user_id, session_id)
     files = []
     for entry in sorted(workspace.iterdir()):
-        if not entry.is_file() or entry.is_symlink() or entry.name == MANIFEST_FILENAME:
+        if not entry.is_file() or entry.is_symlink() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
             continue
         stat = entry.stat()
         mime_type, _ = mimetypes.guess_type(entry.name)
@@ -291,6 +299,133 @@ def read_session_file(user_id: int, session_id: int, filename: str) -> dict:
         except OSError:
             pass
     return result
+
+
+def _proposals_path(user_id: int, session_id: int) -> Path:
+    return _workspace_dir(user_id, session_id) / PROPOSALS_FILENAME
+
+
+def _load_proposals(user_id: int, session_id: int) -> List[dict]:
+    path = _proposals_path(user_id, session_id)
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+
+def _save_proposals(user_id: int, session_id: int, proposals: List[dict]) -> None:
+    path = _proposals_path(user_id, session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(proposals), encoding="utf-8")
+
+
+def create_proposal(
+    user_id: int,
+    session_id: int,
+    filename: str,
+    action: str,
+    new_content: Optional[str],
+    description: str,
+) -> dict:
+    """
+    LIARA proposes a create/update/delete on a workspace file - never touches
+    the real file, only appends a pending entry to the proposals sidecar. The
+    diff is computed now (against whatever is on disk at proposal time) so
+    the user reviews exactly what was proposed even if the file changes again
+    before they get to it.
+    """
+    if action not in ("create", "update", "delete"):
+        return {"ok": False, "error": f"Ungültige Aktion: {action}"}
+    safe_name = _validate_filename(filename)
+    if safe_name is None:
+        return {"ok": False, "error": "Ungültiger Dateiname"}
+
+    existing = read_session_file(user_id, session_id, safe_name)
+    exists_on_disk = existing.get("found", False)
+
+    if action == "create" and exists_on_disk:
+        return {"ok": False, "error": "Datei existiert bereits"}
+    if action in ("update", "delete") and not exists_on_disk:
+        return {"ok": False, "error": "Datei nicht gefunden"}
+    if action in ("create", "update"):
+        if new_content is None:
+            return {"ok": False, "error": "content ist erforderlich für create/update"}
+        if len(new_content.encode("utf-8")) > MAX_SESSION_FILE:
+            return {"ok": False, "error": f"Vorschlag zu groß (Limit {MAX_SESSION_FILE // (1024 * 1024)} MiB)"}
+
+    old_text = existing.get("content") or "" if exists_on_disk else ""
+    new_text = new_content if action != "delete" else ""
+    diff = "\n".join(difflib.unified_diff(
+        old_text.splitlines(),
+        new_text.splitlines(),
+        fromfile=f"a/{safe_name}" if exists_on_disk else "/dev/null",
+        tofile="/dev/null" if action == "delete" else f"b/{safe_name}",
+        lineterm="",
+    ))
+
+    proposal = {
+        "id": uuid.uuid4().hex,
+        "filename": safe_name,
+        "action": action,
+        "new_content": new_content if action != "delete" else None,
+        "diff": diff,
+        "description": description,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+        "resolved_at": None,
+    }
+    proposals = _load_proposals(user_id, session_id)
+    proposals.append(proposal)
+    _save_proposals(user_id, session_id, proposals)
+    return {"ok": True, "proposal_id": proposal["id"], "diff": diff}
+
+
+def list_proposals(user_id: int, session_id: int, status: Optional[str] = None) -> List[dict]:
+    proposals = _load_proposals(user_id, session_id)
+    if status is None:
+        return proposals
+    return [p for p in proposals if p.get("status") == status]
+
+
+def resolve_proposal(user_id: int, session_id: int, proposal_id: str, approve: bool) -> dict:
+    """
+    Applies (approve=True) or discards (approve=False) a pending proposal.
+    Approval dispatches to the same create/write/delete_workspace_file
+    functions every other workspace write already goes through - no separate
+    mutation path, so proposals get the exact same size/traversal checks.
+    """
+    proposals = _load_proposals(user_id, session_id)
+    proposal = next((p for p in proposals if p.get("id") == proposal_id), None)
+    if proposal is None:
+        return {"ok": False, "error": "Vorschlag nicht gefunden"}
+    if proposal.get("status") != "pending":
+        return {"ok": False, "error": f"Vorschlag ist bereits {proposal.get('status')}"}
+
+    if approve:
+        action = proposal["action"]
+        filename = proposal["filename"]
+        if action == "create":
+            result = create_workspace_file(user_id, session_id, filename, proposal["new_content"])
+        elif action == "update":
+            result = write_workspace_file(user_id, session_id, filename, proposal["new_content"])
+        else:  # delete
+            result = delete_workspace_file(user_id, session_id, filename)
+
+        if not result.get("ok"):
+            return result
+
+        if action in ("create", "update"):
+            record_file_event(user_id, session_id, filename, source="liara")
+
+        proposal["status"] = "approved"
+    else:
+        proposal["status"] = "rejected"
+
+    proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+    _save_proposals(user_id, session_id, proposals)
+    return {"ok": True}
 
 
 def delete_session_workspace(user_id: int, session_id: int) -> bool:

@@ -28,6 +28,7 @@ class UserPreferences(TypedDict):
     memory_enabled: bool
     tool_memory_enabled: bool
     workspace_enabled: bool
+    workspace_agent_enabled: bool
 
 
 DEFAULT_PREFERENCES: UserPreferences = {
@@ -41,6 +42,10 @@ DEFAULT_PREFERENCES: UserPreferences = {
     "memory_enabled": True,
     "tool_memory_enabled": True,
     "workspace_enabled": True,
+    # Opt-in, unlike workspace_enabled: this lets LIARA read/propose changes
+    # to the user's own workspace files via tool-calling, a bigger step than
+    # just showing the tab, so it defaults off.
+    "workspace_agent_enabled": False,
 }
 
 
@@ -48,7 +53,7 @@ def get_user_preferences(db: Session, user_id: int) -> UserPreferences:
     row = db.execute(text("""
         SELECT ai_model, language, theme, notifications, sound_effects,
                custom_instructions, personality, memory_enabled, tool_memory_enabled,
-               workspace_enabled
+               workspace_enabled, workspace_agent_enabled
         FROM user_preferences
         WHERE user_id = :user_id
     """), {"user_id": user_id}).first()
@@ -67,4 +72,5 @@ def get_user_preferences(db: Session, user_id: int) -> UserPreferences:
         "memory_enabled": row.memory_enabled,
         "tool_memory_enabled": row.tool_memory_enabled,
         "workspace_enabled": row.workspace_enabled,
+        "workspace_agent_enabled": row.workspace_agent_enabled,
     }

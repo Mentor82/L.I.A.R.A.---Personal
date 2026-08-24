@@ -16,6 +16,9 @@ from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 from services.search_broker import get_search_broker
 from services.web_safety.proxy_sandbox import get_proxy_sandbox
+from services import session_workspace
+
+WORKSPACE_AGENT_TOOLS = ("workspace_list_files", "workspace_read_file", "workspace_propose_change")
 
 # How many top SearXNG results get a real fetch-and-extract enrichment pass
 # via the (SSRF-hardened) ProxySandbox - kept small since each one is a real
@@ -62,7 +65,8 @@ class ToolExecutor:
         tool_call: ToolCall,
         user_id: int,
         check_consent: bool = True,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        session_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Führt Tool-Call aus
@@ -74,6 +78,11 @@ class ToolExecutor:
             db: DB-Session, nötig für Tools mit echter Consent-Prüfung
                 (aktuell nur detect_location) - optional, da die meisten
                 Aufrufer (z.B. Agent) sie nie brauchen.
+            session_id: Aktuelle Chat-Session, nötig für die workspace_*-Tools.
+                Kommt ausschließlich vom Aufrufer (chat_streaming.py's eigener,
+                serverseitig bekannter session_id) - das Modell selbst liefert
+                das nie als Tool-Parameter, damit es nie eine fremde Session
+                ansprechen kann.
 
         Returns:
             Tool-Execution Result
@@ -108,11 +117,17 @@ class ToolExecutor:
                 validation_error
             )
 
+        if tool_def.name in WORKSPACE_AGENT_TOOLS and session_id is None:
+            return self._error_result(
+                tool_call.tool_name,
+                "Kein aktiver Workspace (keine Chat-Session)"
+            )
+
         # Tool ausführen
         try:
             logger.info(f"Executing tool: {tool_call.tool_name} for user {user_id}")
 
-            result = await self._execute_tool(tool_def, tool_call.parameters, user_id, db)
+            result = await self._execute_tool(tool_def, tool_call.parameters, user_id, db, session_id)
             
             return {
                 "success": True,
@@ -134,7 +149,8 @@ class ToolExecutor:
         tool_def: ToolDefinition,
         parameters: Dict[str, Any],
         user_id: int,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        session_id: Optional[int] = None
     ) -> Any:
         """
         Routing zu echten Tool-Implementierungen
@@ -150,18 +166,56 @@ class ToolExecutor:
         # Location Detection
         elif tool_def.name == "detect_location":
             return await self._execute_location(user_id, db)
-        
+
         # Wikipedia
         elif tool_def.name == "wikipedia_search":
             return await self._execute_wikipedia(parameters)
-        
+
         # Current Time
         elif tool_def.name == "get_current_time":
             return await self._execute_current_time(parameters)
-        
+
+        # Workspace: inspect
+        elif tool_def.name == "workspace_list_files":
+            return self._execute_workspace_list(user_id, session_id)
+
+        elif tool_def.name == "workspace_read_file":
+            return self._execute_workspace_read(user_id, session_id, parameters)
+
+        # Workspace: propose (never mutates directly - see session_workspace.create_proposal)
+        elif tool_def.name == "workspace_propose_change":
+            return self._execute_workspace_propose(user_id, session_id, parameters)
+
         # Fallback to stub function
         else:
             return await tool_def.function(**parameters)
+
+    def _execute_workspace_list(self, user_id: int, session_id: int) -> Dict:
+        files = session_workspace.list_session_files(user_id, session_id)
+        return {"files": files}
+
+    def _execute_workspace_read(self, user_id: int, session_id: int, params: Dict[str, Any]) -> Dict:
+        filename = params.get("filename", "")
+        return session_workspace.read_session_file(user_id, session_id, filename)
+
+    def _execute_workspace_propose(self, user_id: int, session_id: int, params: Dict[str, Any]) -> Dict:
+        result = session_workspace.create_proposal(
+            user_id,
+            session_id,
+            filename=params.get("filename", ""),
+            action=params.get("action", ""),
+            new_content=params.get("content"),
+            description=params.get("description", ""),
+        )
+        if not result.get("ok"):
+            return {"error": result.get("error", "Vorschlag fehlgeschlagen")}
+        return {
+            "proposed": True,
+            "proposal_id": result["proposal_id"],
+            "filename": params.get("filename", ""),
+            "action": params.get("action", ""),
+            "message": "Vorschlag wurde erstellt. Der Nutzer muss ihn im Workspace-Tab annehmen, bevor er wirksam wird.",
+        }
     
     async def _execute_web_search(self, params: Dict[str, Any]) -> Dict:
         """Führt Web-Suche aus"""
@@ -459,6 +513,14 @@ class ToolExecutor:
         if tool_def.name in ("web_search", "wikipedia_search"):
             return self._check_web_search_consent(user_id, db)
 
+        # workspace_* tools need their own dedicated opt-in
+        # (user_preferences.workspace_agent_enabled) - unlike web_search this
+        # defaults to False (opt-in, not opt-out): letting a model read/
+        # propose changes to a user's own files is a bigger step than a
+        # public web lookup, so silence should mean "off" here.
+        if tool_def.name in WORKSPACE_AGENT_TOOLS:
+            return self._check_workspace_agent_consent(user_id, db)
+
         # detect_location has a real, already-shipped consent mechanism
         # (user_location_preferences / PrivacySettings.jsx / location_router.py)
         # - just check whether this user has actually granted it, instead of
@@ -493,7 +555,24 @@ class ToolExecutor:
         if row is None:
             return True
         return bool(row[0])
-    
+
+    def _check_workspace_agent_consent(self, user_id: int, db: Optional[Session]) -> bool:
+        """
+        Checks user_preferences.workspace_agent_enabled. Opt-in: defaults to
+        False when there's no db session or no row yet - opposite default
+        direction from _check_web_search_consent, deliberately, since this
+        gates the model reading/proposing changes to the user's own files.
+        """
+        if db is None:
+            return False
+        row = db.execute(
+            text("SELECT workspace_agent_enabled FROM user_preferences WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).first()
+        if row is None:
+            return False
+        return bool(row[0])
+
     def _error_result(
         self,
         tool_name: str,

@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     -- Workspace v1 feature toggle (shared file/code editing + execution tab)
     workspace_enabled BOOLEAN NOT NULL DEFAULT TRUE,
 
+    -- Agent-Vorbereitung v1: opt-in consent letting LIARA read/propose
+    -- changes to workspace files via tool-calling. Separate from and
+    -- defaulting opposite to workspace_enabled (tab visibility) - this
+    -- gates an actual capability, not just UI.
+    workspace_agent_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

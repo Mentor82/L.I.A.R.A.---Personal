@@ -3,9 +3,16 @@ import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
 import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
-import { chatAPI, workspaceAPI, codeExecAPI } from '../services/api';
+import { chatAPI, workspaceAPI, codeExecAPI, preferencesAPI } from '../services/api';
 import CodeRunResult from './CodeRunResult';
+import DiffView from './DiffView';
 import './WorkspacePage.css';
+
+const PROPOSAL_ACTION_LABELS = {
+  create: 'Neu anlegen',
+  update: 'Überschreiben',
+  delete: 'Löschen',
+};
 
 const juliaLanguage = StreamLanguage.define(juliaLegacyMode);
 
@@ -58,6 +65,9 @@ function WorkspacePage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [modalError, setModalError] = useState(null);
 
+  const [agentEnabled, setAgentEnabled] = useState(false);
+  const [proposals, setProposals] = useState([]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -70,6 +80,9 @@ function WorkspacePage() {
         setError(err.message || 'Sessions konnten nicht geladen werden.');
       }
     })();
+    preferencesAPI.get()
+      .then((prefs) => setAgentEnabled(!!prefs?.workspace_agent_enabled))
+      .catch(() => {});
   }, []);
 
   const loadFiles = async (id) => {
@@ -85,9 +98,40 @@ function WorkspacePage() {
     }
   };
 
+  const loadProposals = async (id) => {
+    try {
+      const { proposals: list } = await workspaceAPI.listProposals(id, 'pending');
+      setProposals(list);
+    } catch (err) {
+      // Non-fatal - the proposals panel simply stays empty/stale.
+    }
+  };
+
   useEffect(() => {
-    if (sessionId) loadFiles(sessionId);
-  }, [sessionId]);
+    if (sessionId) {
+      loadFiles(sessionId);
+      if (agentEnabled) loadProposals(sessionId);
+    }
+  }, [sessionId, agentEnabled]);
+
+  const handleApproveProposal = async (proposalId) => {
+    try {
+      await workspaceAPI.approveProposal(sessionId, proposalId);
+      loadProposals(sessionId);
+      loadFiles(sessionId);
+    } catch (err) {
+      setError(err.message || 'Annehmen fehlgeschlagen.');
+    }
+  };
+
+  const handleRejectProposal = async (proposalId) => {
+    try {
+      await workspaceAPI.rejectProposal(sessionId, proposalId);
+      loadProposals(sessionId);
+    } catch (err) {
+      setError(err.message || 'Ablehnen fehlgeschlagen.');
+    }
+  };
 
   const activeTabData = useMemo(() => tabs.find((t) => t.name === activeTab), [tabs, activeTab]);
   const activeExt = activeTab ? extensionOf(activeTab) : '';
@@ -216,6 +260,30 @@ function WorkspacePage() {
       </div>
 
       {error && <div className="workspace-error">{error} <button onClick={() => setError(null)}>✕</button></div>}
+
+      {agentEnabled && proposals.length > 0 && (
+        <div className="workspace-proposals">
+          <div className="workspace-sidebar-header">
+            <span>📝 Vorschläge von LIARA ({proposals.length})</span>
+          </div>
+          <ul className="workspace-proposal-list">
+            {proposals.map((p) => (
+              <li key={p.id} className="workspace-proposal">
+                <div className="workspace-proposal-header">
+                  <span className="workspace-proposal-action">{PROPOSAL_ACTION_LABELS[p.action] || p.action}</span>
+                  <span className="workspace-file-name">{p.filename}</span>
+                </div>
+                {p.description && <p className="workspace-proposal-description">{p.description}</p>}
+                <DiffView diff={p.diff} />
+                <div className="workspace-modal-actions">
+                  <button onClick={() => handleRejectProposal(p.id)}>Ablehnen</button>
+                  <button className="primary" onClick={() => handleApproveProposal(p.id)}>Annehmen</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="workspace-body">
         <aside className="workspace-sidebar">

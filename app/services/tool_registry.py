@@ -13,6 +13,7 @@ class ToolCategory(str, Enum):
     LOCATION = "location"        # Standort, Wetter
     SYSTEM = "system"            # Systemabfragen
     UTILITY = "utility"          # Hilfsfunktionen
+    WORKSPACE = "workspace"      # Workspace-Dateien lesen/vorschlagen
 
 
 @dataclass
@@ -203,7 +204,85 @@ class ToolRegistry:
             requires_consent=False,
             privacy_level="low"
         ))
-    
+
+        # 🗂️ Workspace: inspect + propose (Agent-Vorbereitung v1). Reading
+        # and proposing are both gated behind the same opt-in consent
+        # (user_preferences.workspace_agent_enabled, default False) - see
+        # ToolExecutor._check_workspace_agent_consent. privacy_level stays
+        # "low" so get_tools_for_ollama() actually offers these to the model;
+        # the real gate is requires_consent, exactly like web_search.
+        self.register_tool(ToolDefinition(
+            name="workspace_list_files",
+            description=(
+                "Listet die Dateien im Workspace der aktuellen Chat-Session auf "
+                "(Name, Größe, Herkunft). Nur möglich, wenn der Nutzer LIARA "
+                "Workspace-Zugriff erlaubt hat."
+            ),
+            category=ToolCategory.WORKSPACE,
+            parameters=[],
+            function=self._workspace_list_stub,
+            requires_consent=True,
+            privacy_level="low"
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="workspace_read_file",
+            description="Liest den Inhalt einer Datei im Workspace der aktuellen Chat-Session.",
+            category=ToolCategory.WORKSPACE,
+            parameters=[
+                ToolParameter(
+                    name="filename",
+                    type="string",
+                    description="Name der zu lesenden Datei (nur Dateien direkt im Workspace, keine Pfade)",
+                    required=True
+                )
+            ],
+            function=self._workspace_read_stub,
+            requires_consent=True,
+            privacy_level="low"
+        ))
+
+        self.register_tool(ToolDefinition(
+            name="workspace_propose_change",
+            description=(
+                "Schlägt eine Änderung an einer Workspace-Datei vor (anlegen, "
+                "überschreiben oder löschen). Ändert NICHTS direkt - der Nutzer "
+                "sieht den Vorschlag mit Diff im Workspace-Tab und muss ihn "
+                "explizit annehmen, bevor er wirksam wird."
+            ),
+            category=ToolCategory.WORKSPACE,
+            parameters=[
+                ToolParameter(
+                    name="filename",
+                    type="string",
+                    description="Name der betroffenen Datei",
+                    required=True
+                ),
+                ToolParameter(
+                    name="action",
+                    type="string",
+                    description="Art der vorgeschlagenen Änderung",
+                    required=True,
+                    enum=["create", "update", "delete"]
+                ),
+                ToolParameter(
+                    name="content",
+                    type="string",
+                    description="Neuer Dateiinhalt (erforderlich bei create/update, entfällt bei delete)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="description",
+                    type="string",
+                    description="Kurze Begründung, warum diese Änderung vorgeschlagen wird",
+                    required=True
+                )
+            ],
+            function=self._workspace_propose_stub,
+            requires_consent=True,
+            privacy_level="low"
+        ))
+
     def register_tool(self, tool: ToolDefinition):
         """Registriere neues Tool"""
         self._tools[tool.name] = tool
@@ -329,6 +408,18 @@ class ToolRegistry:
         """Placeholder für Wikipedia"""
         return {"error": "Not implemented", "tool": "wikipedia_search"}
     
+    async def _workspace_list_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "workspace_list_files"}
+
+    async def _workspace_read_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "workspace_read_file"}
+
+    async def _workspace_propose_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "workspace_propose_change"}
+
     async def _time_stub(self, **kwargs):
         """Placeholder für Time"""
         from datetime import datetime

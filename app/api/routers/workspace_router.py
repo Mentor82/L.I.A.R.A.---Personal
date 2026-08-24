@@ -24,6 +24,8 @@ from services.session_workspace import (
     delete_workspace_file,
     set_context_selection,
     get_context_selected_files,
+    list_proposals,
+    resolve_proposal,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,3 +126,47 @@ async def update_context_selection(
     _verify_session_ownership(db, session_id, current_user.id)
     set_context_selection(current_user.id, session_id, req.filenames)
     return {"filenames": get_context_selected_files(current_user.id, session_id)}
+
+
+@router.get("/sessions/{session_id}/proposals")
+async def get_proposals(
+    session_id: int,
+    status: Optional[str] = None,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    LIARA's proposed-but-not-yet-applied changes (Agent-Vorbereitung v1).
+    Nothing here has touched the filesystem yet - see approve/reject below.
+    """
+    _verify_session_ownership(db, session_id, current_user.id)
+    return {"proposals": list_proposals(current_user.id, session_id, status)}
+
+
+@router.post("/sessions/{session_id}/proposals/{proposal_id}/approve")
+async def approve_proposal(
+    session_id: int,
+    proposal_id: str,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Only this endpoint - triggered by an explicit user click - ever turns a
+    proposal into a real filesystem change (create/write/delete_workspace_file,
+    the same functions every other workspace write already goes through).
+    """
+    _verify_session_ownership(db, session_id, current_user.id)
+    result = _ok_or_400(resolve_proposal(current_user.id, session_id, proposal_id, approve=True))
+    return result
+
+
+@router.post("/sessions/{session_id}/proposals/{proposal_id}/reject")
+async def reject_proposal(
+    session_id: int,
+    proposal_id: str,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    _verify_session_ownership(db, session_id, current_user.id)
+    result = _ok_or_400(resolve_proposal(current_user.id, session_id, proposal_id, approve=False))
+    return result
