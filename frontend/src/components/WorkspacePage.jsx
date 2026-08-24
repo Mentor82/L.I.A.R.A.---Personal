@@ -46,6 +46,18 @@ const SOURCE_LABELS = {
   unknown: 'Unbekannte Herkunft',
 };
 
+// Color-codes the same source values (badge look matches Tasks.jsx's
+// category/priority pill convention) instead of plain gray meta text.
+const SOURCE_BADGE_CLASS = {
+  user: 'workspace-badge-user',
+  code_runner: 'workspace-badge-code-runner',
+  liara: 'workspace-badge-liara',
+  agent: 'workspace-badge-liara',
+  web_research: 'workspace-badge-liara',
+  generated: 'workspace-badge-code-runner',
+  unknown: 'workspace-badge-unknown',
+};
+
 function WorkspacePage() {
   const [sessions, setSessions] = useState([]);
   const [sessionId, setSessionId] = useState(null);
@@ -247,7 +259,9 @@ function WorkspacePage() {
   return (
     <div className="workspace-page">
       <div className="workspace-header">
-        <h1>Workspace</h1>
+        <div className="workspace-header-left">
+          <h1>🗂️ Workspace</h1>
+        </div>
         <select
           className="workspace-session-select"
           value={sessionId || ''}
@@ -263,8 +277,9 @@ function WorkspacePage() {
 
       {agentEnabled && proposals.length > 0 && (
         <div className="workspace-proposals">
-          <div className="workspace-sidebar-header">
-            <span>📝 Vorschläge von LIARA ({proposals.length})</span>
+          <div className="workspace-proposals-header">
+            <span>📝 Vorschläge von LIARA</span>
+            <span className="workspace-proposals-count">{proposals.length}</span>
           </div>
           <ul className="workspace-proposal-list">
             {proposals.map((p) => (
@@ -276,7 +291,7 @@ function WorkspacePage() {
                 {p.description && <p className="workspace-proposal-description">{p.description}</p>}
                 <DiffView diff={p.diff} />
                 <div className="workspace-modal-actions">
-                  <button onClick={() => handleRejectProposal(p.id)}>Ablehnen</button>
+                  <button className="workspace-btn-secondary" onClick={() => handleRejectProposal(p.id)}>Ablehnen</button>
                   <button className="primary" onClick={() => handleApproveProposal(p.id)}>Annehmen</button>
                 </div>
               </li>
@@ -292,13 +307,24 @@ function WorkspacePage() {
             <button className="workspace-icon-btn" onClick={() => setNewFileOpen(true)} title="Neue Datei">➕</button>
           </div>
           {loadingFiles && <p className="workspace-hint">Lade…</p>}
-          {!loadingFiles && files.length === 0 && <p className="workspace-hint">Noch keine Dateien in diesem Workspace.</p>}
+          {!loadingFiles && files.length === 0 && (
+            <div className="workspace-empty">
+              <div className="workspace-empty-icon">🗂️</div>
+              <p className="workspace-empty-title">Noch keine Dateien</p>
+              <p className="workspace-empty-subtitle">Lege eine neue Datei an oder lass LIARA eine vorschlagen.</p>
+            </div>
+          )}
           <ul className="workspace-file-list">
             {files.map((f) => (
               <li key={f.name} className={activeTab === f.name ? 'active' : ''}>
                 <button className="workspace-file-open" onClick={() => openFile(f.name)}>
                   <span className="workspace-file-name">{f.name}</span>
-                  <span className="workspace-file-meta">{formatBytes(f.size)} · {SOURCE_LABELS[f.source] || f.source}</span>
+                  <span className="workspace-file-badges">
+                    <span className="workspace-file-size">{formatBytes(f.size)}</span>
+                    <span className={`workspace-source-badge ${SOURCE_BADGE_CLASS[f.source] || 'workspace-badge-unknown'}`}>
+                      {SOURCE_LABELS[f.source] || f.source}
+                    </span>
+                  </span>
                 </button>
                 <div className="workspace-file-actions">
                   <button
@@ -332,18 +358,20 @@ function WorkspacePage() {
           {activeTabData ? (
             <>
               <div className="workspace-toolbar">
-                <button onClick={saveActiveTab} disabled={!activeTabData.dirty}>💾 Speichern</button>
-                <button onClick={runActiveTab} disabled={!activeLang || running}>
+                <button className="workspace-btn-secondary" onClick={saveActiveTab} disabled={!activeTabData.dirty}>💾 Speichern</button>
+                <button className="workspace-btn-primary" onClick={runActiveTab} disabled={!activeLang || running}>
                   {running ? 'Läuft…' : '▶ Ausführen'}
                 </button>
               </div>
-              <CodeMirror
-                value={activeTabData.content}
-                height="420px"
-                theme="dark"
-                extensions={activeLang ? [activeLang.cm] : []}
-                onChange={updateActiveContent}
-              />
+              <div className="workspace-editor-wrapper">
+                <CodeMirror
+                  value={activeTabData.content}
+                  height="420px"
+                  theme="dark"
+                  extensions={activeLang ? [activeLang.cm] : []}
+                  onChange={updateActiveContent}
+                />
+              </div>
               {runResult && (
                 <div className="workspace-output">
                   <CodeRunResult result={runResult} sessionId={sessionId} />
@@ -351,7 +379,11 @@ function WorkspacePage() {
               )}
             </>
           ) : (
-            <p className="workspace-hint">Datei aus der Liste öffnen oder eine neue anlegen.</p>
+            <div className="workspace-empty">
+              <div className="workspace-empty-icon">📄</div>
+              <p className="workspace-empty-title">Keine Datei geöffnet</p>
+              <p className="workspace-empty-subtitle">Datei aus der Liste öffnen oder eine neue anlegen.</p>
+            </div>
           )}
         </section>
       </div>
@@ -369,7 +401,7 @@ function WorkspacePage() {
             />
             {modalError && <p className="workspace-modal-error">{modalError}</p>}
             <div className="workspace-modal-actions">
-              <button onClick={() => { setNewFileOpen(false); setModalError(null); }}>Abbrechen</button>
+              <button className="workspace-btn-secondary" onClick={() => { setNewFileOpen(false); setModalError(null); }}>Abbrechen</button>
               <button className="primary" onClick={handleCreateFile}>Anlegen</button>
             </div>
           </div>
@@ -383,7 +415,7 @@ function WorkspacePage() {
             <input type="text" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus />
             {modalError && <p className="workspace-modal-error">{modalError}</p>}
             <div className="workspace-modal-actions">
-              <button onClick={() => { setRenameTarget(null); setModalError(null); }}>Abbrechen</button>
+              <button className="workspace-btn-secondary" onClick={() => { setRenameTarget(null); setModalError(null); }}>Abbrechen</button>
               <button className="primary" onClick={handleRename}>Umbenennen</button>
             </div>
           </div>
@@ -396,7 +428,7 @@ function WorkspacePage() {
             <h3>Datei löschen?</h3>
             <p>„{deleteTarget}" wird unwiderruflich gelöscht.</p>
             <div className="workspace-modal-actions">
-              <button onClick={() => setDeleteTarget(null)}>Abbrechen</button>
+              <button className="workspace-btn-secondary" onClick={() => setDeleteTarget(null)}>Abbrechen</button>
               <button className="danger" onClick={handleDelete}>Löschen</button>
             </div>
           </div>
