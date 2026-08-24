@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
-import { preferencesAPI } from './services/api'
+import { preferencesAPI, workspaceAPI } from './services/api'
 import liaraLogo from './assets/LIARA-LOGO.png'
 
 // Eager loaded components (needed immediately)
@@ -150,6 +150,11 @@ function App() {
   // UserPreferences.jsx) - defaults to true so the nav item doesn't flicker
   // away for a split second on every load while the real value is fetched.
   const [workspaceEnabled, setWorkspaceEnabled] = useState(true)
+  // Agent-Vorbereitung v1: separate opt-in from workspaceEnabled above -
+  // defaults false (matches the preference's own default), only used to
+  // decide whether the pending-proposals badge polling below is worth doing.
+  const [workspaceAgentEnabled, setWorkspaceAgentEnabled] = useState(false)
+  const [pendingProposalsCount, setPendingProposalsCount] = useState(0)
   // Captured once, before any redirect can change it, so a reload of a
   // protected route can be restored after login instead of silently
   // falling back to /chat (see the !user branch and handleLogin below).
@@ -158,9 +163,33 @@ function App() {
   useEffect(() => {
     if (!user || user.is_guest) return
     preferencesAPI.get()
-      .then((prefs) => setWorkspaceEnabled(prefs?.workspace_enabled !== false))
-      .catch(() => {}) // keep the default (true) if this fails - non-critical
+      .then((prefs) => {
+        setWorkspaceEnabled(prefs?.workspace_enabled !== false)
+        setWorkspaceAgentEnabled(!!prefs?.workspace_agent_enabled)
+      })
+      .catch(() => {}) // keep the defaults if this fails - non-critical
   }, [user])
+
+  // Small pending-proposals badge on the Workspace nav item - lets the user
+  // notice a proposal from any tab, not just while already on /workspace.
+  // Same polling pattern as Chat.jsx's mood refresh (plain setInterval), just
+  // a longer interval since this is polish, not something latency-sensitive.
+  useEffect(() => {
+    if (!user || user.is_guest || !workspaceAgentEnabled) {
+      setPendingProposalsCount(0)
+      return
+    }
+    const checkPending = () => {
+      const sessionId = parseInt(localStorage.getItem('liara_active_session'), 10)
+      if (!sessionId) return
+      workspaceAPI.listProposals(sessionId, 'pending')
+        .then(({ proposals }) => setPendingProposalsCount(proposals?.length || 0))
+        .catch(() => {})
+    }
+    checkPending()
+    const interval = setInterval(checkPending, 15000)
+    return () => clearInterval(interval)
+  }, [user, workspaceAgentEnabled])
 
   const handleLogin = (userData) => {
     setUser(userData)
@@ -309,6 +338,11 @@ function App() {
               {workspaceEnabled && (
                 <NavLink to="/workspace" className="nav-link">
                   <span>🗂️</span> <span>Workspace</span>
+                  {pendingProposalsCount > 0 && (
+                    <span className="nav-badge" title={`${pendingProposalsCount} Vorschlag/Vorschläge von LIARA wartet/warten auf Prüfung`}>
+                      {pendingProposalsCount}
+                    </span>
+                  )}
                 </NavLink>
               )}
               <NavLink to="/mood" className="nav-link">
