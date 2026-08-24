@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
@@ -71,6 +71,7 @@ function formatBytes(size) {
 
 const SOURCE_LABELS = {
   user: 'Selbst erstellt',
+  upload: 'Hochgeladen',
   code_runner: 'Von Code-Ausführung erzeugt',
   liara: 'Von LIARA erstellt',
   agent: 'Vom Agent erstellt',
@@ -83,6 +84,7 @@ const SOURCE_LABELS = {
 // category/priority pill convention) instead of plain gray meta text.
 const SOURCE_BADGE_CLASS = {
   user: 'workspace-badge-user',
+  upload: 'workspace-badge-user',
   code_runner: 'workspace-badge-code-runner',
   liara: 'workspace-badge-liara',
   agent: 'workspace-badge-liara',
@@ -98,14 +100,21 @@ const SOURCE_BADGE_CLASS = {
  * are passed down as a single `handlers` object rather than drilled
  * individually, since every recursive call needs the exact same set.
  */
-function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, handlers }) {
+function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverTarget, handlers }) {
   const indent = { paddingLeft: `${depth * 1.1}rem` };
 
   if (node.type === 'folder') {
     const collapsed = collapsedFolders.has(node.path);
     return (
       <li className="workspace-tree-folder">
-        <div className="workspace-tree-row" style={indent}>
+        <div
+          className={`workspace-tree-row ${dragOverTarget === node.path ? 'workspace-drag-over' : ''}`}
+          style={indent}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); handlers.onFolderDragEnter(node.path); }}
+          onDragLeave={(e) => { e.stopPropagation(); handlers.onFolderDragLeave(); }}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handlers.onFolderDrop(node.path, e.dataTransfer.files); }}
+        >
           <button
             className="workspace-file-open workspace-folder-open"
             onClick={() => handlers.onToggleCollapse(node.path)}
@@ -117,6 +126,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, handlers 
           <div className="workspace-file-actions">
             <button className="workspace-icon-btn" title="Neue Datei hier" onClick={() => handlers.onNewFileHere(node.path)}>➕</button>
             <button className="workspace-icon-btn" title="Neuer Ordner hier" onClick={() => handlers.onNewFolderHere(node.path)}>📁</button>
+            <button className="workspace-icon-btn" title="Hierher hochladen" onClick={() => handlers.onUploadHere(node.path)}>⬆️</button>
             <button className="workspace-icon-btn" title="Umbenennen" onClick={() => handlers.onRename(node.path, node.name)}>✏️</button>
             <button className="workspace-icon-btn danger" title="Löschen" onClick={() => handlers.onDelete(node.path, 'folder')}>🗑️</button>
           </div>
@@ -130,6 +140,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, handlers 
                 depth={depth + 1}
                 activeTab={activeTab}
                 collapsedFolders={collapsedFolders}
+                dragOverTarget={dragOverTarget}
                 handlers={handlers}
               />
             ))}
@@ -198,6 +209,14 @@ function WorkspacePage() {
   const [proposals, setProposals] = useState([]);
   const [selectedProposalIds, setSelectedProposalIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Upload from the local computer - either the hidden <input type="file">
+  // (triggered per-folder or at root) or drag & drop onto the Explorer.
+  // dragOverTarget is a folder path, "root", or null - purely cosmetic
+  // (hover highlight), the actual drop target is whatever fired onDrop.
+  const uploadInputRef = useRef(null);
+  const uploadTargetRef = useRef('');
+  const [dragOverTarget, setDragOverTarget] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -495,6 +514,34 @@ function WorkspacePage() {
     }
   };
 
+  // Shared by the file-picker input and drag & drop - both just hand over a
+  // FileList/File[] and a target folder ("" for workspace root).
+  const handleUpload = async (fileList, folder = '') => {
+    if (!fileList || fileList.length === 0) return;
+    setError(null);
+    try {
+      const { results } = await workspaceAPI.uploadFiles(sessionId, fileList, folder);
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        setError(`${failed.length} von ${results.length} Datei(en) konnten nicht hochgeladen werden: ${failed.map((f) => `${f.filename} (${f.error})`).join(', ')}`);
+      }
+    } catch (err) {
+      setError(err.message || 'Upload fehlgeschlagen.');
+    } finally {
+      loadFiles(sessionId);
+    }
+  };
+
+  const triggerUpload = (folder = '') => {
+    uploadTargetRef.current = folder;
+    uploadInputRef.current?.click();
+  };
+
+  const handleUploadInputChange = (e) => {
+    handleUpload(e.target.files, uploadTargetRef.current);
+    e.target.value = ''; // allow picking the exact same file(s) again later
+  };
+
   const toggleFolderCollapse = (path) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);
@@ -514,6 +561,10 @@ function WorkspacePage() {
     onDelete: (path, type) => openDeleteModal(path, type),
     onNewFileHere: openNewFileModal,
     onNewFolderHere: openNewFolderModal,
+    onUploadHere: triggerUpload,
+    onFolderDragEnter: (path) => setDragOverTarget(path),
+    onFolderDragLeave: () => setDragOverTarget(null),
+    onFolderDrop: (path, fileList) => { setDragOverTarget(null); handleUpload(fileList, path); },
   };
 
   return (
@@ -586,20 +637,34 @@ function WorkspacePage() {
       )}
 
       <div className="workspace-body">
-        <aside className="workspace-sidebar">
+        <aside
+          className={`workspace-sidebar ${dragOverTarget === 'root' ? 'workspace-drag-over' : ''}`}
+          onDragOver={(e) => e.preventDefault()}
+          onDragEnter={(e) => { e.preventDefault(); setDragOverTarget('root'); }}
+          onDragLeave={() => setDragOverTarget(null)}
+          onDrop={(e) => { e.preventDefault(); setDragOverTarget(null); handleUpload(e.dataTransfer.files, ''); }}
+        >
           <div className="workspace-sidebar-header">
             <span>Explorer</span>
             <div className="workspace-sidebar-header-actions">
               <button className="workspace-icon-btn" onClick={() => openNewFileModal()} title="Neue Datei">➕</button>
               <button className="workspace-icon-btn" onClick={() => openNewFolderModal()} title="Neuer Ordner">📁</button>
+              <button className="workspace-icon-btn" onClick={() => triggerUpload('')} title="Hochladen">⬆️</button>
             </div>
           </div>
+          <input
+            type="file"
+            multiple
+            ref={uploadInputRef}
+            style={{ display: 'none' }}
+            onChange={handleUploadInputChange}
+          />
           {loadingFiles && <p className="workspace-hint">Lade…</p>}
           {!loadingFiles && files.length === 0 && (
             <div className="workspace-empty">
               <div className="workspace-empty-icon">🗂️</div>
               <p className="workspace-empty-title">Noch keine Dateien</p>
-              <p className="workspace-empty-subtitle">Lege eine neue Datei/Ordner an oder lass LIARA eine Datei vorschlagen.</p>
+              <p className="workspace-empty-subtitle">Lege eine neue Datei/Ordner an, lade eine hoch (auch per Drag &amp; Drop) oder lass LIARA eine vorschlagen.</p>
             </div>
           )}
           <ul className="workspace-file-list">
@@ -610,6 +675,7 @@ function WorkspacePage() {
                 depth={0}
                 activeTab={activeTab}
                 collapsedFolders={collapsedFolders}
+                dragOverTarget={dragOverTarget}
                 handlers={treeHandlers}
               />
             ))}

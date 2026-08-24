@@ -107,8 +107,8 @@ def record_file_event(user_id: int, session_id: int, filename: str, source: str,
     """
     Called whenever a file is created/overwritten by any workspace-writing
     path (user create/save, or code_sandbox's run-diff) so the manifest
-    knows who/what produced it. `source` is one of: user, code_runner,
-    liara, agent, web_research, generated.
+    knows who/what produced it. `source` is one of: user, upload,
+    code_runner, liara, agent, web_research, generated.
     """
     manifest = _load_manifest(user_id, session_id)
     entry = manifest.get(filename, {})
@@ -231,7 +231,13 @@ def _workspace_total_size(workspace: Path) -> int:
     return total
 
 
-def create_workspace_file(user_id: int, session_id: int, filename: str, content: str) -> dict:
+def _create_file_bytes(user_id: int, session_id: int, filename: str, data: bytes) -> dict:
+    """
+    Shared validate+write path for both create_workspace_file (editor "new
+    file", text) and upload_workspace_file (raw bytes from a local upload) -
+    same size/traversal/existing-file checks either way, only the source
+    tag recorded afterwards differs.
+    """
     safe_name = _validate_filename(filename)
     if safe_name is None:
         return {"ok": False, "error": "Ungültiger Dateiname"}
@@ -244,13 +250,30 @@ def create_workspace_file(user_id: int, session_id: int, filename: str, content:
     _ensure_writable_by_runner(target.parent, workspace)
     if target.exists():
         return {"ok": False, "error": "Datei existiert bereits"}
-    data = content.encode("utf-8")
     if len(data) > MAX_SESSION_FILE:
         return {"ok": False, "error": f"Datei zu groß (Limit {MAX_SESSION_FILE // (1024 * 1024)} MiB)"}
     if _workspace_total_size(workspace) + len(data) > MAX_SESSION_TOTAL:
         return {"ok": False, "error": "Workspace-Speicherlimit erreicht"}
     target.write_bytes(data)
-    record_file_event(user_id, session_id, safe_name, source="user")
+    return {"ok": True, "safe_name": safe_name}
+
+
+def create_workspace_file(user_id: int, session_id: int, filename: str, content: str) -> dict:
+    result = _create_file_bytes(user_id, session_id, filename, content.encode("utf-8"))
+    if not result.get("ok"):
+        return result
+    record_file_event(user_id, session_id, result["safe_name"], source="user")
+    return {"ok": True}
+
+
+def upload_workspace_file(user_id: int, session_id: int, filename: str, data: bytes) -> dict:
+    """Writes a raw-bytes upload from the user's own computer - same checks
+    as create_workspace_file, just tagged with a distinct source so the
+    Explorer can show "Hochgeladen" instead of "Selbst erstellt"."""
+    result = _create_file_bytes(user_id, session_id, filename, data)
+    if not result.get("ok"):
+        return result
+    record_file_event(user_id, session_id, result["safe_name"], source="upload")
     return {"ok": True}
 
 

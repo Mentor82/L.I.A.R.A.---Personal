@@ -224,6 +224,21 @@
   border-radius: 12px;
   padding: 1rem;
   overflow-y: auto;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* Drag & drop upload target highlight - applied to .workspace-sidebar
+   itself for a root-level drop, or to a folder's .workspace-tree-row when
+   dragging over that specific folder. */
+.workspace-sidebar.workspace-drag-over {
+  border-color: var(--color-purple);
+  background: var(--bg-purple-muted);
+}
+
+.workspace-tree-row.workspace-drag-over {
+  border-color: var(--color-purple);
+  background: var(--bg-purple-muted);
+  box-shadow: 0 0 0 1px var(--color-purple);
 }
 
 .workspace-sidebar-header {

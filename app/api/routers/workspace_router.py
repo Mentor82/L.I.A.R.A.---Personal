@@ -7,7 +7,7 @@ untouched.
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
@@ -23,6 +23,7 @@ from services.session_workspace import (
     rename_workspace_file,
     delete_workspace_file,
     create_workspace_folder,
+    upload_workspace_file,
     set_context_selection,
     get_context_selected_files,
     list_proposals,
@@ -93,6 +94,36 @@ async def create_folder(
     _verify_session_ownership(db, session_id, current_user.id)
     result = _ok_or_400(create_workspace_folder(current_user.id, session_id, req.path))
     return result
+
+
+@router.post("/sessions/{session_id}/upload")
+async def upload_files(
+    session_id: int,
+    files: List[UploadFile] = File(...),
+    folder: str = Form(""),
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload from the user's own computer - one or more files at once (drag &
+    drop or a multi-select file picker), landing directly at the workspace
+    root or inside `folder` if given. Each file gets the exact same
+    validation/size-limit path as create_workspace_file - a browser-supplied
+    filename is untrusted input like any other. Partial success is reported
+    per file rather than failing the whole batch over one bad file.
+    """
+    _verify_session_ownership(db, session_id, current_user.id)
+    results = []
+    for upload in files:
+        data = await upload.read()
+        target_path = f"{folder}/{upload.filename}" if folder else upload.filename
+        result = upload_workspace_file(current_user.id, session_id, target_path, data)
+        results.append({
+            "filename": upload.filename,
+            "ok": result.get("ok", False),
+            "error": result.get("error"),
+        })
+    return {"results": results}
 
 
 @router.put("/sessions/{session_id}/files/{filename:path}")

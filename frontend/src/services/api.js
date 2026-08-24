@@ -622,6 +622,29 @@ export const workspaceAPI = {
     });
   },
 
+  /**
+   * Lädt eine oder mehrere Dateien vom eigenen Rechner hoch (Dateiauswahl
+   * oder Drag & Drop) - multipart/form-data, deshalb ein eigener fetch()
+   * statt apiFetch (das immer Content-Type: application/json setzt; der
+   * Browser muss hier selbst die multipart-Boundary setzen).
+   */
+  async uploadFiles(sessionId, fileList, folder = '') {
+    const token = localStorage.getItem('liara_token');
+    const formData = new FormData();
+    for (const file of fileList) formData.append('files', file);
+    formData.append('folder', folder);
+    const response = await fetch(`${API_BASE}/workspace/sessions/${sessionId}/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || `Upload fehlgeschlagen: ${response.status}`);
+    }
+    return response.json();
+  },
+
   async saveFile(sessionId, filename, content) {
     return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
       method: 'PUT',
