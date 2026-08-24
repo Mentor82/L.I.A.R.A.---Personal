@@ -195,8 +195,61 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
   );
 }
 
+function formatClockTime(date) {
+  return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 /**
- * One editor group (tab strip + toolbar + CodeMirror + run output). The
+ * Terminal-styled execution panel: the scrollback of every run in this pane
+ * (not just the last one), each entry labeled with what was run and when.
+ * Purely a UX change on top of the exact same sandboxed codeExecAPI.run()
+ * call the old single-result view already used - no new execution
+ * capability, no shell, just remembering more than one result at a time.
+ */
+function TerminalPanel({ history, onClear, sessionId }) {
+  const [expanded, setExpanded] = useState(true);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (expanded && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [history.length, expanded]);
+
+  return (
+    <div className="workspace-terminal">
+      <div className="workspace-terminal-header">
+        <button className="workspace-terminal-toggle" onClick={() => setExpanded((v) => !v)}>
+          <span className="workspace-tree-chevron">{expanded ? '▾' : '▸'}</span>
+          <span>🖥 Terminal{history.length > 0 ? ` (${history.length})` : ''}</span>
+        </button>
+        {history.length > 0 && (
+          <button className="workspace-icon-btn" title="Terminal leeren" onClick={onClear}>🗑️</button>
+        )}
+      </div>
+      {expanded && (
+        <div className="workspace-terminal-body" ref={scrollRef}>
+          {history.length === 0 ? (
+            <p className="workspace-hint">Noch keine Ausführung in dieser Ansicht.</p>
+          ) : (
+            history.map((entry) => (
+              <div key={entry.id} className="workspace-terminal-entry">
+                <div className="workspace-terminal-prompt">
+                  <span className="workspace-terminal-prompt-symbol">$</span> {entry.filename}
+                  <span className="workspace-terminal-timestamp">{formatClockTime(entry.timestamp)}</span>
+                </div>
+                <CodeRunResult result={entry.result} sessionId={sessionId} />
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One editor group (tab strip + toolbar + CodeMirror + terminal panel). The
  * Workspace renders one of these normally, or two side by side once split -
  * both panes share the same global `tabs` pool, each just tracking its own
  * active tab, so the same or different files can sit in either pane.
@@ -204,7 +257,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
 function EditorPane({
   tabs, activeTabName, tabData, activeLang,
   onSelectTab, onCloseTab, onChangeContent, onCreateEditor,
-  running, runResult, onSave, onRun,
+  running, runHistory, onClearHistory, onSave, onRun,
   sessionId, isSecondary, onSplit, onCloseSplitPane,
 }) {
   return (
@@ -242,18 +295,14 @@ function EditorPane({
           <div className="workspace-editor-wrapper">
             <CodeMirror
               value={tabData.content}
-              height="420px"
+              height="360px"
               theme="dark"
               extensions={activeLang ? [activeLang.cm] : []}
               onChange={onChangeContent}
               onCreateEditor={onCreateEditor}
             />
           </div>
-          {runResult && (
-            <div className="workspace-output">
-              <CodeRunResult result={runResult} sessionId={sessionId} />
-            </div>
-          )}
+          <TerminalPanel history={runHistory} onClear={onClearHistory} sessionId={sessionId} />
         </>
       ) : (
         <div className="workspace-empty">
@@ -276,7 +325,9 @@ function WorkspacePage() {
   const [tabs, setTabs] = useState([]); // [{name, content, dirty}]
   const [activeTab, setActiveTab] = useState(null);
   const [running, setRunning] = useState(false);
-  const [runResult, setRunResult] = useState(null);
+  // Terminal scrollback for this pane - every run, not just the last one
+  // (see runTab below). Capped client-side; nothing persisted server-side.
+  const [runHistory, setRunHistory] = useState([]);
 
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFileName, setNewFileName] = useState('');
@@ -327,10 +378,10 @@ function WorkspacePage() {
   // file, or null when not split at all. Both panes share the same `tabs`
   // pool (opening/closing a file affects both strips), each just tracks its
   // own active tab and has its own run state/editor view, mirroring the
-  // primary pane's activeTab/running/runResult/editorViewRef.
+  // primary pane's activeTab/running/runHistory/editorViewRef.
   const [splitTab, setSplitTab] = useState(null);
   const [splitRunning, setSplitRunning] = useState(false);
-  const [splitRunResult, setSplitRunResult] = useState(null);
+  const [splitRunHistory, setSplitRunHistory] = useState([]);
   const splitEditorViewRef = useRef(null);
 
   useEffect(() => {
@@ -584,17 +635,31 @@ function WorkspacePage() {
     }
   };
 
-  const runTab = async (filename, lang, setRunningState, setRunResultState) => {
+  // Same codeExecAPI.run() call as before - the only change is appending the
+  // result to that pane's terminal scrollback instead of replacing a single
+  // "last result" slot. Capped at the most recent 20 entries per pane so a
+  // long session doesn't grow this state unboundedly.
+  const runTab = async (filename, lang, setRunningState, setHistoryState) => {
     const tabData = tabs.find((t) => t.name === filename);
     if (!tabData || !lang) return;
     setRunningState(true);
-    setRunResultState(null);
     try {
       const result = await codeExecAPI.run(sessionId, lang.runLanguage, tabData.content);
-      setRunResultState(result);
+      setHistoryState((prev) => [
+        ...prev,
+        { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, filename, timestamp: new Date(), result },
+      ].slice(-20));
       loadFiles(sessionId);
     } catch (err) {
-      setRunResultState({ error: err.message || 'Ausführung fehlgeschlagen.' });
+      setHistoryState((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          filename,
+          timestamp: new Date(),
+          result: { error: err.message || 'Ausführung fehlgeschlagen.' },
+        },
+      ].slice(-20));
     } finally {
       setRunningState(false);
     }
@@ -961,9 +1026,10 @@ function WorkspacePage() {
             onChangeContent={(value) => updateTabContent(activeTab, value)}
             onCreateEditor={(view) => { editorViewRef.current = view; }}
             running={running}
-            runResult={runResult}
+            runHistory={runHistory}
+            onClearHistory={() => setRunHistory([])}
             onSave={() => saveTab(activeTab)}
-            onRun={() => runTab(activeTab, activeLang, setRunning, setRunResult)}
+            onRun={() => runTab(activeTab, activeLang, setRunning, setRunHistory)}
             sessionId={sessionId}
             isSecondary={false}
             onSplit={() => activeTab && openInSplit(activeTab)}
@@ -979,9 +1045,10 @@ function WorkspacePage() {
               onChangeContent={(value) => updateTabContent(splitTab, value)}
               onCreateEditor={(view) => { splitEditorViewRef.current = view; }}
               running={splitRunning}
-              runResult={splitRunResult}
+              runHistory={splitRunHistory}
+              onClearHistory={() => setSplitRunHistory([])}
               onSave={() => saveTab(splitTab)}
-              onRun={() => runTab(splitTab, splitLang, setSplitRunning, setSplitRunResult)}
+              onRun={() => runTab(splitTab, splitLang, setSplitRunning, setSplitRunHistory)}
               sessionId={sessionId}
               isSecondary={true}
               onCloseSplitPane={closeSplit}
