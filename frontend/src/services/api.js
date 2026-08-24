@@ -587,6 +587,14 @@ export const workspaceAPI = {
   },
 
   /**
+   * Projektweite Textsuche (Pfad + Inhalt) über alle Dateien der Session.
+   */
+  async search(sessionId, query, caseSensitive = false) {
+    const params = new URLSearchParams({ q: query, case_sensitive: caseSensitive });
+    return apiFetch(`/workspace/sessions/${sessionId}/search?${params}`);
+  },
+
+  /**
    * Lädt den Textinhalt einer Workspace-Datei für den Editor - reuses the
    * existing code-exec download endpoint as plain text (fetch() ignores
    * Content-Disposition, so the same "attachment" endpoint works fine here

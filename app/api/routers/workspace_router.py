@@ -24,6 +24,7 @@ from services.session_workspace import (
     delete_workspace_file,
     create_workspace_folder,
     upload_workspace_file,
+    search_workspace,
     set_context_selection,
     get_context_selected_files,
     list_proposals,
@@ -70,6 +71,19 @@ async def get_workspace_files(
 ):
     _verify_session_ownership(db, session_id, current_user.id)
     return {"files": list_session_files(current_user.id, session_id)}
+
+
+@router.get("/sessions/{session_id}/search")
+async def search_workspace_endpoint(
+    session_id: int,
+    q: str = "",
+    case_sensitive: bool = False,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    """Project-wide text search (path + content) across this session's workspace."""
+    _verify_session_ownership(db, session_id, current_user.id)
+    return search_workspace(current_user.id, session_id, q, case_sensitive)
 
 
 @router.post("/sessions/{session_id}/files")

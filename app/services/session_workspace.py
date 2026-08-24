@@ -44,6 +44,15 @@ MANIFEST_FILENAME = ".liara_manifest.json"
 # Also excluded from every directory listing/diff.
 PROPOSALS_FILENAME = ".liara_proposals.json"
 
+# Project-wide text search limits - a single chat session's workspace is
+# small (MAX_SESSION_TOTAL is 500 MiB across every file), but scanning
+# unbounded file sizes/counts on every keystroke-triggered search would
+# still be wasteful. Files over the size cap still exist and can still
+# match by path, they're just skipped for line-by-line content search.
+MAX_SEARCH_FILE_SIZE = 5 * 1024 * 1024  # 5 MiB
+MAX_SEARCH_RESULTS_PER_FILE = 50
+MAX_SEARCH_FILES = 100
+
 
 def _session_dir(user_id: int, session_id: int) -> Path:
     return SESSION_FILES_DIR / str(user_id) / str(session_id)
@@ -344,6 +353,65 @@ def create_workspace_folder(user_id: int, session_id: int, path: str) -> dict:
     target.mkdir(parents=True)
     _ensure_writable_by_runner(target, workspace)
     return {"ok": True}
+
+
+def search_workspace(user_id: int, session_id: int, query: str, case_sensitive: bool = False) -> dict:
+    """
+    Project-wide text search across every file in this session's workspace -
+    matches on the file's relative path (substring) and/or its text content
+    (plain line-by-line substring search, no regex - covers the common "find
+    where X is used" case without the complexity/ReDoS surface of letting
+    users supply arbitrary patterns). Uses the exact same `path` identity as
+    the Explorer tree/editor tabs/tool-calling, so a result is directly
+    openable with no translation step.
+    """
+    if not query:
+        return {"results": [], "truncated": False}
+    workspace = _workspace_dir(user_id, session_id)
+    if not workspace.exists():
+        return {"results": [], "truncated": False}
+
+    needle = query if case_sensitive else query.lower()
+    results = []
+    truncated = False
+
+    for entry in sorted(workspace.rglob("*")):
+        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
+            continue
+
+        relpath = entry.relative_to(workspace).as_posix()
+        haystack_path = relpath if case_sensitive else relpath.lower()
+        path_match = needle in haystack_path
+
+        content_matches = []
+        stat = entry.stat()
+        mime_type, _ = mimetypes.guess_type(entry.name)
+        mime_type = mime_type or "application/octet-stream"
+        if _is_text_mime(mime_type) and stat.st_size <= MAX_SEARCH_FILE_SIZE:
+            try:
+                text = entry.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = None
+            if text is not None:
+                for line_number, line in enumerate(text.splitlines(), start=1):
+                    haystack_line = line if case_sensitive else line.lower()
+                    if needle in haystack_line:
+                        content_matches.append({"line": line_number, "text": line.strip()[:300]})
+                        if len(content_matches) >= MAX_SEARCH_RESULTS_PER_FILE:
+                            break
+
+        if path_match or content_matches:
+            if len(results) >= MAX_SEARCH_FILES:
+                truncated = True
+                break
+            results.append({
+                "path": relpath,
+                "name": entry.name,
+                "path_match": path_match,
+                "content_matches": content_matches,
+            })
+
+    return {"results": results, "truncated": truncated}
 
 
 def list_session_files(user_id: int, session_id: int) -> List[dict]:

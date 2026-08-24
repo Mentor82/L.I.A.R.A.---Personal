@@ -263,6 +263,116 @@
   color: rgba(255, 255, 255, 0.5);
 }
 
+/* Project-wide search box - always visible above the Explorer tree/results */
+.workspace-search {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.workspace-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg-card);
+  color: var(--color-text);
+  font-size: 0.8rem;
+}
+
+.workspace-search-input:focus {
+  outline: none;
+  border-color: var(--color-purple);
+  background: var(--bg-active);
+}
+
+.workspace-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.workspace-search-file {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-card);
+  padding: 0.5rem 0.6rem;
+}
+
+.workspace-search-file-path {
+  width: 100%;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  word-break: break-all;
+}
+
+.workspace-search-file-path:hover {
+  color: var(--color-purple);
+}
+
+.workspace-search-matches {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.workspace-search-match {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.workspace-search-match:hover {
+  background: var(--bg-hover);
+}
+
+.workspace-search-line-number {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  min-width: 1.5rem;
+  text-align: right;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.workspace-search-line-text {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.workspace-search-highlight {
+  background: rgba(159, 122, 234, 0.4);
+  color: #fff;
+  border-radius: 3px;
+  padding: 0 0.1rem;
+}
+
 /* Empty states - icon + title + subtitle, matches Tasks' .tasks-empty */
 .workspace-empty {
   display: flex;

@@ -69,6 +69,24 @@ function formatBytes(size) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Wraps the first occurrence of `query` in `text` with <mark> - search
+// results only ever highlight one hit per line (the line itself already
+// tells the user there's a match; this is just a visual pointer to where).
+function highlightMatch(text, query, caseSensitive) {
+  if (!query) return text;
+  const haystack = caseSensitive ? text : text.toLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
+  const idx = haystack.indexOf(needle);
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="workspace-search-highlight">{text.slice(idx, idx + query.length)}</mark>
+      {text.slice(idx + query.length)}
+    </>
+  );
+}
+
 const SOURCE_LABELS = {
   user: 'Selbst erstellt',
   upload: 'Hochgeladen',
@@ -218,6 +236,21 @@ function WorkspacePage() {
   const uploadTargetRef = useRef('');
   const [dragOverTarget, setDragOverTarget] = useState(null);
 
+  // Project-wide text search - searchResults === null means "not searching,
+  // show the normal Explorer tree"; an object (even with an empty results
+  // array) means a search ran and should replace the tree view.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+
+  // CodeMirror's underlying view instance, captured once on first mount
+  // (switching tabs only changes the `value` prop, it doesn't remount the
+  // editor) - lets a search-result click imperatively scroll to a line
+  // without needing the editor to expose that as a declarative prop.
+  const editorViewRef = useRef(null);
+  const [pendingScrollLine, setPendingScrollLine] = useState(null); // { path, line }
+
   useEffect(() => {
     (async () => {
       try {
@@ -268,6 +301,31 @@ function WorkspacePage() {
       if (agentEnabled) loadProposals(sessionId);
     }
   }, [sessionId, agentEnabled]);
+
+  // Debounced project-wide search - fires 300ms after the user stops typing
+  // rather than on every keystroke. Clearing the query reverts to the
+  // normal Explorer tree (searchResults back to null).
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!sessionId || !query) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const data = await workspaceAPI.search(sessionId, query, searchCaseSensitive);
+        setSearchResults(data);
+      } catch (err) {
+        setSearchResults({ results: [], truncated: false });
+        setError(err.message || 'Suche fehlgeschlagen.');
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, searchCaseSensitive, sessionId]);
 
   const handleApproveProposal = async (proposalId) => {
     try {
@@ -332,6 +390,31 @@ function WorkspacePage() {
   const activeExt = activeTab ? extensionOf(activeTab) : '';
   const activeLang = LANGUAGE_BY_EXTENSION[activeExt];
 
+  // Performs the actual scroll-to-line once the editor is showing the file
+  // the pending search-result click asked for (openSearchResult may have
+  // had to wait on an async file fetch first, so this can't happen inline).
+  useEffect(() => {
+    if (!pendingScrollLine || !activeTabData || activeTabData.name !== pendingScrollLine.path) return;
+    const view = editorViewRef.current;
+    if (!view) {
+      setPendingScrollLine(null);
+      return;
+    }
+    try {
+      const targetLine = Math.min(Math.max(pendingScrollLine.line, 1), view.state.doc.lines);
+      const lineInfo = view.state.doc.line(targetLine);
+      view.dispatch({
+        selection: { anchor: lineInfo.from, head: lineInfo.to },
+        scrollIntoView: true,
+      });
+      view.focus();
+    } catch (err) {
+      // Line out of range or a transient editor-state mismatch - not worth
+      // surfacing as an error, the file itself still opened correctly.
+    }
+    setPendingScrollLine(null);
+  }, [pendingScrollLine, activeTabData]);
+
   const openFile = async (filename) => {
     const existing = tabs.find((t) => t.name === filename);
     if (existing) {
@@ -345,6 +428,15 @@ function WorkspacePage() {
     } catch (err) {
       setError(err.message || 'Datei konnte nicht geöffnet werden.');
     }
+  };
+
+  // Opens a search result - a bare path-match just opens the file, a
+  // content-match also jumps to (and selects) the matching line once the
+  // editor has the right content loaded (see the pendingScrollLine effect
+  // below, which fires once activeTabData actually reflects this file).
+  const openSearchResult = async (path, line = null) => {
+    await openFile(path);
+    if (line != null) setPendingScrollLine({ path, line });
   };
 
   const closeTab = (filename) => {
@@ -662,27 +754,87 @@ function WorkspacePage() {
             style={{ display: 'none' }}
             onChange={handleUploadInputChange}
           />
-          {loadingFiles && <p className="workspace-hint">Lade…</p>}
-          {!loadingFiles && files.length === 0 && (
-            <div className="workspace-empty">
-              <div className="workspace-empty-icon">🗂️</div>
-              <p className="workspace-empty-title">Noch keine Dateien</p>
-              <p className="workspace-empty-subtitle">Lege eine neue Datei/Ordner an, lade eine hoch (auch per Drag &amp; Drop) oder lass LIARA eine vorschlagen.</p>
-            </div>
+
+          <div className="workspace-search">
+            <input
+              type="text"
+              className="workspace-search-input"
+              placeholder="🔍 Im Projekt suchen…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="workspace-icon-btn" title="Suche zurücksetzen" onClick={() => setSearchQuery('')}>✕</button>
+            )}
+            <button
+              className={`workspace-icon-btn ${searchCaseSensitive ? 'active' : ''}`}
+              title="Groß-/Kleinschreibung beachten"
+              onClick={() => setSearchCaseSensitive((v) => !v)}
+            >Aa</button>
+          </div>
+
+          {searchResults !== null ? (
+            <>
+              {searching && <p className="workspace-hint">Suche…</p>}
+              {!searching && searchResults.results.length === 0 && (
+                <div className="workspace-empty">
+                  <div className="workspace-empty-icon">🔍</div>
+                  <p className="workspace-empty-title">Keine Treffer</p>
+                  <p className="workspace-empty-subtitle">Keine Datei enthält „{searchQuery.trim()}“.</p>
+                </div>
+              )}
+              {!searching && searchResults.results.length > 0 && (
+                <ul className="workspace-search-results">
+                  {searchResults.results.map((r) => (
+                    <li key={r.path} className="workspace-search-file">
+                      <button className="workspace-search-file-path" onClick={() => openSearchResult(r.path)}>
+                        📄 {r.path}
+                      </button>
+                      {r.content_matches.length > 0 && (
+                        <ul className="workspace-search-matches">
+                          {r.content_matches.map((m) => (
+                            <li key={m.line}>
+                              <button className="workspace-search-match" onClick={() => openSearchResult(r.path, m.line)}>
+                                <span className="workspace-search-line-number">{m.line}</span>
+                                <span className="workspace-search-line-text">{highlightMatch(m.text, searchQuery.trim(), searchCaseSensitive)}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                  {searchResults.truncated && (
+                    <li className="workspace-hint">Weitere Treffer nicht angezeigt (Limit erreicht).</li>
+                  )}
+                </ul>
+              )}
+            </>
+          ) : (
+            <>
+              {loadingFiles && <p className="workspace-hint">Lade…</p>}
+              {!loadingFiles && files.length === 0 && (
+                <div className="workspace-empty">
+                  <div className="workspace-empty-icon">🗂️</div>
+                  <p className="workspace-empty-title">Noch keine Dateien</p>
+                  <p className="workspace-empty-subtitle">Lege eine neue Datei/Ordner an, lade eine hoch (auch per Drag &amp; Drop) oder lass LIARA eine vorschlagen.</p>
+                </div>
+              )}
+              <ul className="workspace-file-list">
+                {tree.map((node) => (
+                  <WorkspaceTreeNode
+                    key={node.path}
+                    node={node}
+                    depth={0}
+                    activeTab={activeTab}
+                    collapsedFolders={collapsedFolders}
+                    dragOverTarget={dragOverTarget}
+                    handlers={treeHandlers}
+                  />
+                ))}
+              </ul>
+            </>
           )}
-          <ul className="workspace-file-list">
-            {tree.map((node) => (
-              <WorkspaceTreeNode
-                key={node.path}
-                node={node}
-                depth={0}
-                activeTab={activeTab}
-                collapsedFolders={collapsedFolders}
-                dragOverTarget={dragOverTarget}
-                handlers={treeHandlers}
-              />
-            ))}
-          </ul>
         </aside>
 
         <section className="workspace-main">
@@ -714,6 +866,7 @@ function WorkspacePage() {
                   theme="dark"
                   extensions={activeLang ? [activeLang.cm] : []}
                   onChange={updateActiveContent}
+                  onCreateEditor={(view) => { editorViewRef.current = view; }}
                 />
               </div>
               {runResult && (
