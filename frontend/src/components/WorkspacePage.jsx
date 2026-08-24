@@ -515,21 +515,24 @@ function WorkspacePage() {
   };
 
   // Shared by the file-picker input and drag & drop - both just hand over a
-  // FileList/File[] and a target folder ("" for workspace root).
+  // FileList/File[] and a target folder ("" for workspace root). The error
+  // (if any) is applied AFTER loadFiles(), not before/in a finally - loadFiles
+  // itself does setError(null) at its start, which would otherwise clobber
+  // the very message this function just set, in the same tick.
   const handleUpload = async (fileList, folder = '') => {
     if (!fileList || fileList.length === 0) return;
-    setError(null);
+    let uploadError = null;
     try {
       const { results } = await workspaceAPI.uploadFiles(sessionId, fileList, folder);
       const failed = results.filter((r) => !r.ok);
       if (failed.length > 0) {
-        setError(`${failed.length} von ${results.length} Datei(en) konnten nicht hochgeladen werden: ${failed.map((f) => `${f.filename} (${f.error})`).join(', ')}`);
+        uploadError = `${failed.length} von ${results.length} Datei(en) konnten nicht hochgeladen werden: ${failed.map((f) => `${f.filename} (${f.error})`).join(', ')}`;
       }
     } catch (err) {
-      setError(err.message || 'Upload fehlgeschlagen.');
-    } finally {
-      loadFiles(sessionId);
+      uploadError = err.message || 'Upload fehlgeschlagen.';
     }
+    await loadFiles(sessionId);
+    if (uploadError) setError(uploadError);
   };
 
   const triggerUpload = (folder = '') => {
