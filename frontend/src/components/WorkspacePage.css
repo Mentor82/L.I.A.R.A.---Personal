@@ -84,11 +84,75 @@
 
 .workspace-proposals-header {
   display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.workspace-proposals-title-row {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
   font-weight: 600;
   color: var(--color-text);
-  margin-bottom: 0.75rem;
+}
+
+.workspace-proposals-bulk-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.workspace-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.workspace-checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-purple);
+}
+
+.workspace-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.workspace-bulk-count {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.workspace-bulk-actions button {
+  padding: 0.4rem 0.9rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.workspace-bulk-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.workspace-proposal-checkbox {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-purple);
+  margin-right: 0.15rem;
 }
 
 .workspace-proposals-count {
@@ -525,7 +589,8 @@
   gap: 0.6rem;
 }
 
-.workspace-modal-actions button {
+.workspace-modal-actions button,
+.workspace-bulk-actions button {
   padding: 0.5rem 1.1rem;
   border-radius: 8px;
   font-weight: 600;
@@ -538,22 +603,25 @@
   padding: 0.5rem 1.1rem;
 }
 
-.workspace-modal-actions button.primary {
+/* .primary/.danger apply page-wide (not just inside modals) so the bulk
+   Annehmen/Ablehnen buttons in the proposals header share the same
+   confirm/destructive color language as the per-proposal/modal ones. */
+.workspace-page button.primary {
   background: var(--color-success);
   color: #fff;
 }
 
-.workspace-modal-actions button.primary:hover {
+.workspace-page button.primary:hover:not(:disabled) {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
-.workspace-modal-actions button.danger {
+.workspace-page button.danger {
   background: #e53e3e;
   color: #fff;
 }
 
-.workspace-modal-actions button.danger:hover {
+.workspace-page button.danger:hover:not(:disabled) {
   background: #c53030;
 }
 

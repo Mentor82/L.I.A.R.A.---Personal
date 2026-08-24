@@ -79,6 +79,8 @@ function WorkspacePage() {
 
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [proposals, setProposals] = useState([]);
+  const [selectedProposalIds, setSelectedProposalIds] = useState(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -114,6 +116,11 @@ function WorkspacePage() {
     try {
       const { proposals: list } = await workspaceAPI.listProposals(id, 'pending');
       setProposals(list);
+      // Drop selections for proposals that no longer exist/are no longer
+      // pending (already resolved elsewhere, or a session switch) instead of
+      // silently keeping stale ids around for the next bulk action.
+      const stillPending = new Set(list.map((p) => p.id));
+      setSelectedProposalIds((prev) => new Set([...prev].filter((id) => stillPending.has(id))));
     } catch (err) {
       // Non-fatal - the proposals panel simply stays empty/stale.
     }
@@ -142,6 +149,46 @@ function WorkspacePage() {
       loadProposals(sessionId);
     } catch (err) {
       setError(err.message || 'Ablehnen fehlgeschlagen.');
+    }
+  };
+
+  const toggleProposalSelection = (proposalId) => {
+    setSelectedProposalIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(proposalId)) next.delete(proposalId);
+      else next.add(proposalId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllProposals = () => {
+    setSelectedProposalIds((prev) =>
+      prev.size === proposals.length ? new Set() : new Set(proposals.map((p) => p.id))
+    );
+  };
+
+  // Bulk annehmen/ablehnen - reuses the same single-proposal endpoints (no
+  // new backend bulk endpoint), fired concurrently via allSettled so one
+  // failure (e.g. a proposal already resolved elsewhere) doesn't hide the
+  // others that did succeed.
+  const handleBulkResolve = async (approve) => {
+    const ids = Array.from(selectedProposalIds);
+    if (ids.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    setError(null);
+    try {
+      const results = await Promise.allSettled(
+        ids.map((id) => (approve ? workspaceAPI.approveProposal(sessionId, id) : workspaceAPI.rejectProposal(sessionId, id)))
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      if (failed > 0) {
+        setError(`${failed} von ${ids.length} Vorschlägen konnten nicht ${approve ? 'angenommen' : 'abgelehnt'} werden.`);
+      }
+    } finally {
+      setSelectedProposalIds(new Set());
+      loadProposals(sessionId);
+      loadFiles(sessionId);
+      setBulkBusy(false);
     }
   };
 
@@ -278,13 +325,38 @@ function WorkspacePage() {
       {agentEnabled && proposals.length > 0 && (
         <div className="workspace-proposals">
           <div className="workspace-proposals-header">
-            <span>📝 Vorschläge von LIARA</span>
-            <span className="workspace-proposals-count">{proposals.length}</span>
+            <div className="workspace-proposals-title-row">
+              <span>📝 Vorschläge von LIARA</span>
+              <span className="workspace-proposals-count">{proposals.length}</span>
+            </div>
+            <div className="workspace-proposals-bulk-row">
+              <label className="workspace-checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={proposals.length > 0 && selectedProposalIds.size === proposals.length}
+                  onChange={toggleSelectAllProposals}
+                />
+                <span>Alle auswählen</span>
+              </label>
+              {selectedProposalIds.size > 0 && (
+                <div className="workspace-bulk-actions">
+                  <span className="workspace-bulk-count">{selectedProposalIds.size} ausgewählt</span>
+                  <button className="workspace-btn-secondary" disabled={bulkBusy} onClick={() => handleBulkResolve(false)}>Ablehnen</button>
+                  <button className="primary" disabled={bulkBusy} onClick={() => handleBulkResolve(true)}>Annehmen</button>
+                </div>
+              )}
+            </div>
           </div>
           <ul className="workspace-proposal-list">
             {proposals.map((p) => (
               <li key={p.id} className="workspace-proposal">
                 <div className="workspace-proposal-header">
+                  <input
+                    type="checkbox"
+                    className="workspace-proposal-checkbox"
+                    checked={selectedProposalIds.has(p.id)}
+                    onChange={() => toggleProposalSelection(p.id)}
+                  />
                   <span className="workspace-proposal-action">{PROPOSAL_ACTION_LABELS[p.action] || p.action}</span>
                   <span className="workspace-file-name">{p.filename}</span>
                 </div>
