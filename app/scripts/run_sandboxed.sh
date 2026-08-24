@@ -37,19 +37,41 @@ cd "$WORKSPACE_DIR"
 ulimit -t 15
 ulimit -u 32
 
+# Not `exec`'d (unlike before) - the interpreter's own exit code is captured
+# below so a trailing chmod can still run whether it succeeded or crashed.
+# `set -e` is suspended just for this one call: with it active, a nonzero
+# exit from the user's script would abort run_sandboxed.sh immediately at
+# this line, skipping both the exit-code capture and the chmod step below -
+# exactly the common case (a script erroring out) where any partial output
+# it wrote still needs to be left in a state the caller (a different OS user)
+# can manage.
+set +e
 case "$LANGUAGE" in
   python)
     ulimit -v 1048576   # 1 GiB
     # Dedicated venv (matplotlib etc.), not the bare system python3 or the
     # LIARA backend's own venv - keeps sandboxed deps isolated from both.
-    exec /opt/liara/runner-venv/bin/python3 "$SCRIPT_PATH"
+    /opt/liara/runner-venv/bin/python3 "$SCRIPT_PATH"
+    CODE=$?
     ;;
   julia)
     ulimit -v 4194304   # 4 GiB - empirically tune during rollout
-    exec julia "$SCRIPT_PATH"
+    julia "$SCRIPT_PATH"
+    CODE=$?
     ;;
   *)
     echo "Unknown language: $LANGUAGE" >&2
     exit 1
     ;;
 esac
+set -e
+
+# Workspace v1 (folders): a script's own os.makedirs()'d subfolder is owned
+# by this (liara-runner) user with whatever default mode mkdir gave it, not
+# world-writable like $WORKSPACE_DIR itself already was before this ran. The
+# LIARA backend runs as a different, less-privileged OS user that can only
+# ever chmod files it owns - so this has to happen here, as the owning user,
+# not later from the backend. Best-effort: never fail the run over this.
+chmod -R 777 "$WORKSPACE_DIR" 2>/dev/null || true
+
+exit "$CODE"

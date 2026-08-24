@@ -199,6 +199,29 @@ def _validate_filename(filename: str) -> Optional[str]:
     return filename
 
 
+def _ensure_writable_by_runner(path: Path, up_to: Path) -> None:
+    """
+    Chmods `path` and every directory between it and `up_to` (inclusive) to
+    0o777. The sandboxed code-runner (code_sandbox.py) executes as a
+    different, unprivileged OS user (`liara-runner`) that needs write access
+    to any folder it might write into - not just the workspace root, which
+    already gets this treatment before every run. A folder created here (by
+    the backend's own user, via the UI) needs the same treatment up front,
+    otherwise a script writing into a user-created subfolder would fail with
+    a permission error the backend can't fix after the fact (chmod requires
+    being the file's owner). Best-effort - never blocks the actual create.
+    """
+    current = path
+    while True:
+        try:
+            os.chmod(current, 0o777)
+        except OSError:
+            pass
+        if current == up_to or current.parent == current:
+            break
+        current = current.parent
+
+
 def _workspace_total_size(workspace: Path) -> int:
     total = 0
     if workspace.exists():
@@ -218,6 +241,7 @@ def create_workspace_file(user_id: int, session_id: int, filename: str, content:
     # "utils/helper.py") - create intermediate folders on demand, same as
     # any real filesystem-backed project explorer would.
     target.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_writable_by_runner(target.parent, workspace)
     if target.exists():
         return {"ok": False, "error": "Datei existiert bereits"}
     data = content.encode("utf-8")
@@ -295,6 +319,7 @@ def create_workspace_folder(user_id: int, session_id: int, path: str) -> dict:
     if target.exists():
         return {"ok": False, "error": "Ordner/Datei existiert bereits"}
     target.mkdir(parents=True)
+    _ensure_writable_by_runner(target, workspace)
     return {"ok": True}
 
 
