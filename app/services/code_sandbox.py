@@ -261,6 +261,19 @@ def run_code(
         except Exception as e:
             result.error = f"Sandbox-Fehler: {e}"
 
+    # A script can create its own subfolder (os.makedirs) - unlike
+    # workspace_dir itself, that subfolder is owned by liara-runner with
+    # whatever default mode os.makedirs gave it, not world-writable. Without
+    # this, the backend's own OS user (a different account) can later fail
+    # to rename/delete it via the Workspace UI with a plain permission error.
+    # Best-effort: a chmod failure here shouldn't fail an otherwise-successful run.
+    for entry in workspace_dir.rglob("*"):
+        if entry.is_dir() and not entry.is_symlink():
+            try:
+                os.chmod(entry, 0o777)
+            except OSError:
+                pass
+
     changed_files = _diff_snapshot(before, workspace_dir)
     if user_id is not None and session_id is not None:
         for f in changed_files:
