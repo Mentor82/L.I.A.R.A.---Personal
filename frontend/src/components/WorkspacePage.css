@@ -238,6 +238,11 @@
   margin-bottom: 0.75rem;
 }
 
+.workspace-sidebar-header-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
 .workspace-hint {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.5);
@@ -287,10 +292,24 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
-.workspace-file-list li {
+/* Explorer tree - nested <ul>s for subfolders share this same class, so
+   children get their own gap/indent context without a separate stylesheet
+   rule per depth. */
+.workspace-tree-children {
+  margin-top: 0.4rem;
+}
+
+/* Card look lives on the row itself (not the <li>) - a folder's <li> also
+   wraps its expanded children's <ul>, so putting the border/hover-elevate
+   on the <li> would visually enclose the whole open subtree in one card
+   and make any child hover also lift the parent. */
+.workspace-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: var(--bg-card);
@@ -298,19 +317,37 @@
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.workspace-file-list li:hover {
+.workspace-tree-row:hover {
   border-color: rgba(159, 122, 234, 0.35);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.workspace-file-list li.active {
+.workspace-file-list li.active > .workspace-tree-row {
   border-color: var(--color-purple);
   background: var(--bg-purple-muted);
 }
 
+.workspace-tree-chevron {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.5);
+  width: 0.8rem;
+  flex-shrink: 0;
+}
+
+.workspace-folder-icon {
+  flex-shrink: 0;
+}
+
+.workspace-folder-open {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
 .workspace-file-open {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -381,7 +418,7 @@
 .workspace-file-actions {
   display: flex;
   gap: 0.3rem;
-  margin-top: 0.4rem;
+  flex-shrink: 0;
 }
 
 .workspace-icon-btn {

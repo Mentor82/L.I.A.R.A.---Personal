@@ -30,6 +30,39 @@ function extensionOf(filename) {
   return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : '';
 }
 
+function basenameOf(path) {
+  return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
+}
+
+function parentOf(path) {
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+}
+
+/**
+ * Builds a tree (folders-first, then files, alphabetically within each
+ * group) from the flat, path-addressed entry list list_session_files()
+ * returns. Kept as a pure client-side projection of that one flat list -
+ * the backend never nests JSON - so a future search/filter view can reuse
+ * the exact same entries without a second data shape.
+ */
+function buildTree(entries) {
+  const byParent = new Map();
+  for (const entry of entries) {
+    const key = entry.parent || '';
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(entry);
+  }
+  const sortGroup = (arr) => [...arr].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  const build = (parentPath) => sortGroup(byParent.get(parentPath) || []).map((entry) => ({
+    ...entry,
+    children: entry.type === 'folder' ? build(entry.path) : null,
+  }));
+  return build('');
+}
+
 function formatBytes(size) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -58,6 +91,81 @@ const SOURCE_BADGE_CLASS = {
   unknown: 'workspace-badge-unknown',
 };
 
+/**
+ * One row of the Explorer tree - a folder (expandable, with "new file/folder
+ * here"/rename/delete) or a file (existing open/context/download/rename/
+ * delete actions). Recurses into `node.children` for folders. All actions
+ * are passed down as a single `handlers` object rather than drilled
+ * individually, since every recursive call needs the exact same set.
+ */
+function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, handlers }) {
+  const indent = { paddingLeft: `${depth * 1.1}rem` };
+
+  if (node.type === 'folder') {
+    const collapsed = collapsedFolders.has(node.path);
+    return (
+      <li className="workspace-tree-folder">
+        <div className="workspace-tree-row" style={indent}>
+          <button
+            className="workspace-file-open workspace-folder-open"
+            onClick={() => handlers.onToggleCollapse(node.path)}
+          >
+            <span className="workspace-tree-chevron">{collapsed ? '▸' : '▾'}</span>
+            <span className="workspace-folder-icon">📁</span>
+            <span className="workspace-file-name">{node.name}</span>
+          </button>
+          <div className="workspace-file-actions">
+            <button className="workspace-icon-btn" title="Neue Datei hier" onClick={() => handlers.onNewFileHere(node.path)}>➕</button>
+            <button className="workspace-icon-btn" title="Neuer Ordner hier" onClick={() => handlers.onNewFolderHere(node.path)}>📁</button>
+            <button className="workspace-icon-btn" title="Umbenennen" onClick={() => handlers.onRename(node.path, node.name)}>✏️</button>
+            <button className="workspace-icon-btn danger" title="Löschen" onClick={() => handlers.onDelete(node.path, 'folder')}>🗑️</button>
+          </div>
+        </div>
+        {!collapsed && node.children.length > 0 && (
+          <ul className="workspace-file-list workspace-tree-children">
+            {node.children.map((child) => (
+              <WorkspaceTreeNode
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                activeTab={activeTab}
+                collapsedFolders={collapsedFolders}
+                handlers={handlers}
+              />
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  }
+
+  return (
+    <li className={activeTab === node.path ? 'active' : ''}>
+      <div className="workspace-tree-row" style={indent}>
+        <button className="workspace-file-open" onClick={() => handlers.onOpenFile(node.path)}>
+          <span className="workspace-file-name">{node.name}</span>
+          <span className="workspace-file-badges">
+            <span className="workspace-file-size">{formatBytes(node.size)}</span>
+            <span className={`workspace-source-badge ${SOURCE_BADGE_CLASS[node.source] || 'workspace-badge-unknown'}`}>
+              {SOURCE_LABELS[node.source] || node.source}
+            </span>
+          </span>
+        </button>
+        <div className="workspace-file-actions">
+          <button
+            className={`workspace-icon-btn ${node.selected_for_context ? 'active' : ''}`}
+            title="Zu Chat-Kontext hinzufügen"
+            onClick={() => handlers.onToggleContext(node.path)}
+          >💬</button>
+          <button className="workspace-icon-btn" title="Umbenennen" onClick={() => handlers.onRename(node.path, node.name)}>✏️</button>
+          <button className="workspace-icon-btn" title="Herunterladen" onClick={() => handlers.onDownload(node.path)}>⬇️</button>
+          <button className="workspace-icon-btn danger" title="Löschen" onClick={() => handlers.onDelete(node.path, 'file')}>🗑️</button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function WorkspacePage() {
   const [sessions, setSessions] = useState([]);
   const [sessionId, setSessionId] = useState(null);
@@ -72,10 +180,19 @@ function WorkspacePage() {
 
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFileName, setNewFileName] = useState('');
-  const [renameTarget, setRenameTarget] = useState(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [newFolderPath, setNewFolderPath] = useState('');
+  const [renameTarget, setRenameTarget] = useState(null); // full path being renamed
+  const [renameTargetType, setRenameTargetType] = useState('file');
+  const [renameValue, setRenameValue] = useState(''); // new leaf name only, no "/"
+  const [deleteTarget, setDeleteTarget] = useState(null); // full path being deleted
+  const [deleteTargetType, setDeleteTargetType] = useState('file');
   const [modalError, setModalError] = useState(null);
+
+  // Collapsed-folder paths (Explorer tree) - tracked as "collapsed" rather
+  // than "expanded" so a freshly loaded/created folder needs no extra state
+  // update to default to open.
+  const [collapsedFolders, setCollapsedFolders] = useState(new Set());
 
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [proposals, setProposals] = useState([]);
@@ -219,6 +336,21 @@ function WorkspacePage() {
     }
   };
 
+  // Deleting a folder removes every file nested under it - any open tabs
+  // pointing at one of those now-gone paths would otherwise silently point
+  // at nothing, so close the exact path plus anything with a `path/` prefix
+  // in one state update (rather than looping closeTab(), which would only
+  // ever account for one removal at a time against a stale tabs snapshot).
+  const closeTabsUnder = (path) => {
+    const prefix = `${path}/`;
+    const isUnderPath = (name) => name === path || name.startsWith(prefix);
+    setTabs((prev) => prev.filter((t) => !isUnderPath(t.name)));
+    if (activeTab && isUnderPath(activeTab)) {
+      const remaining = tabs.filter((t) => !isUnderPath(t.name));
+      setActiveTab(remaining.length ? remaining[remaining.length - 1].name : null);
+    }
+  };
+
   const updateActiveContent = (value) => {
     setTabs((prev) => prev.map((t) => (t.name === activeTab ? { ...t, content: value, dirty: true } : t)));
   };
@@ -250,7 +382,7 @@ function WorkspacePage() {
   };
 
   const toggleContextSelection = async (filename) => {
-    const selectedNow = files.filter((f) => f.selected_for_context).map((f) => f.name);
+    const selectedNow = files.filter((f) => f.type === 'file' && f.selected_for_context).map((f) => f.path);
     const next = selectedNow.includes(filename)
       ? selectedNow.filter((n) => n !== filename)
       : [...selectedNow, filename];
@@ -260,6 +392,33 @@ function WorkspacePage() {
     } catch (err) {
       setError(err.message || 'Kontext-Auswahl konnte nicht gespeichert werden.');
     }
+  };
+
+  // Opens the "new file" modal, optionally prefilled with a folder prefix
+  // (Explorer's per-folder "Neue Datei hier" action) - typing after the
+  // prefix just extends the same `/`-joined path createFile already expects.
+  const openNewFileModal = (folderPath = '') => {
+    setModalError(null);
+    setNewFileName(folderPath ? `${folderPath}/` : '');
+    setNewFileOpen(true);
+  };
+
+  const openNewFolderModal = (folderPath = '') => {
+    setModalError(null);
+    setNewFolderPath(folderPath ? `${folderPath}/` : '');
+    setNewFolderOpen(true);
+  };
+
+  const openRenameModal = (path, type, currentName) => {
+    setModalError(null);
+    setRenameTarget(path);
+    setRenameTargetType(type);
+    setRenameValue(currentName);
+  };
+
+  const openDeleteModal = (path, type) => {
+    setDeleteTarget(path);
+    setDeleteTargetType(type);
   };
 
   const handleCreateFile = async () => {
@@ -276,13 +435,42 @@ function WorkspacePage() {
     }
   };
 
+  const handleCreateFolder = async () => {
+    setModalError(null);
+    if (!newFolderPath.trim()) return;
+    try {
+      await workspaceAPI.createFolder(sessionId, newFolderPath.trim());
+      setNewFolderOpen(false);
+      setNewFolderPath('');
+      loadFiles(sessionId);
+    } catch (err) {
+      setModalError(err.message || 'Ordner konnte nicht erstellt werden.');
+    }
+  };
+
   const handleRename = async () => {
     setModalError(null);
     if (!renameValue.trim() || !renameTarget) return;
+    const newName = renameValue.trim();
+    const newFullPath = parentOf(renameTarget) ? `${parentOf(renameTarget)}/${newName}` : newName;
     try {
-      await workspaceAPI.renameFile(sessionId, renameTarget, renameValue.trim());
-      if (activeTab === renameTarget) setActiveTab(renameValue.trim());
-      setTabs((prev) => prev.map((t) => (t.name === renameTarget ? { ...t, name: renameValue.trim() } : t)));
+      await workspaceAPI.renameFile(sessionId, renameTarget, newName);
+      // Renaming a folder moves its whole subtree on disk - any open tab
+      // under the old prefix needs its own name rewritten to match, not
+      // just an exact match on renameTarget itself.
+      const oldPrefix = `${renameTarget}/`;
+      setTabs((prev) => prev.map((t) => {
+        if (t.name === renameTarget) return { ...t, name: newFullPath };
+        if (renameTargetType === 'folder' && t.name.startsWith(oldPrefix)) {
+          return { ...t, name: newFullPath + t.name.slice(renameTarget.length) };
+        }
+        return t;
+      }));
+      if (activeTab === renameTarget) {
+        setActiveTab(newFullPath);
+      } else if (renameTargetType === 'folder' && activeTab && activeTab.startsWith(oldPrefix)) {
+        setActiveTab(newFullPath + activeTab.slice(renameTarget.length));
+      }
       setRenameTarget(null);
       setRenameValue('');
       loadFiles(sessionId);
@@ -295,12 +483,37 @@ function WorkspacePage() {
     if (!deleteTarget) return;
     try {
       await workspaceAPI.deleteFile(sessionId, deleteTarget);
-      closeTab(deleteTarget);
+      if (deleteTargetType === 'folder') {
+        closeTabsUnder(deleteTarget);
+      } else {
+        closeTab(deleteTarget);
+      }
       setDeleteTarget(null);
       loadFiles(sessionId);
     } catch (err) {
       setError(err.message || 'Löschen fehlgeschlagen.');
     }
+  };
+
+  const toggleFolderCollapse = (path) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const tree = useMemo(() => buildTree(files), [files]);
+  const treeHandlers = {
+    onToggleCollapse: toggleFolderCollapse,
+    onOpenFile: openFile,
+    onToggleContext: toggleContextSelection,
+    onDownload: (path) => codeExecAPI.downloadFile(sessionId, path),
+    onRename: (path, name) => openRenameModal(path, files.find((f) => f.path === path)?.type || 'file', name),
+    onDelete: (path, type) => openDeleteModal(path, type),
+    onNewFileHere: openNewFileModal,
+    onNewFolderHere: openNewFolderModal,
   };
 
   return (
@@ -375,40 +588,30 @@ function WorkspacePage() {
       <div className="workspace-body">
         <aside className="workspace-sidebar">
           <div className="workspace-sidebar-header">
-            <span>Dateien</span>
-            <button className="workspace-icon-btn" onClick={() => setNewFileOpen(true)} title="Neue Datei">➕</button>
+            <span>Explorer</span>
+            <div className="workspace-sidebar-header-actions">
+              <button className="workspace-icon-btn" onClick={() => openNewFileModal()} title="Neue Datei">➕</button>
+              <button className="workspace-icon-btn" onClick={() => openNewFolderModal()} title="Neuer Ordner">📁</button>
+            </div>
           </div>
           {loadingFiles && <p className="workspace-hint">Lade…</p>}
           {!loadingFiles && files.length === 0 && (
             <div className="workspace-empty">
               <div className="workspace-empty-icon">🗂️</div>
               <p className="workspace-empty-title">Noch keine Dateien</p>
-              <p className="workspace-empty-subtitle">Lege eine neue Datei an oder lass LIARA eine vorschlagen.</p>
+              <p className="workspace-empty-subtitle">Lege eine neue Datei/Ordner an oder lass LIARA eine Datei vorschlagen.</p>
             </div>
           )}
           <ul className="workspace-file-list">
-            {files.map((f) => (
-              <li key={f.name} className={activeTab === f.name ? 'active' : ''}>
-                <button className="workspace-file-open" onClick={() => openFile(f.name)}>
-                  <span className="workspace-file-name">{f.name}</span>
-                  <span className="workspace-file-badges">
-                    <span className="workspace-file-size">{formatBytes(f.size)}</span>
-                    <span className={`workspace-source-badge ${SOURCE_BADGE_CLASS[f.source] || 'workspace-badge-unknown'}`}>
-                      {SOURCE_LABELS[f.source] || f.source}
-                    </span>
-                  </span>
-                </button>
-                <div className="workspace-file-actions">
-                  <button
-                    className={`workspace-icon-btn ${f.selected_for_context ? 'active' : ''}`}
-                    title="Zu Chat-Kontext hinzufügen"
-                    onClick={() => toggleContextSelection(f.name)}
-                  >💬</button>
-                  <button className="workspace-icon-btn" title="Umbenennen" onClick={() => { setRenameTarget(f.name); setRenameValue(f.name); }}>✏️</button>
-                  <button className="workspace-icon-btn" title="Herunterladen" onClick={() => codeExecAPI.downloadFile(sessionId, f.name)}>⬇️</button>
-                  <button className="workspace-icon-btn danger" title="Löschen" onClick={() => setDeleteTarget(f.name)}>🗑️</button>
-                </div>
-              </li>
+            {tree.map((node) => (
+              <WorkspaceTreeNode
+                key={node.path}
+                node={node}
+                depth={0}
+                activeTab={activeTab}
+                collapsedFolders={collapsedFolders}
+                handlers={treeHandlers}
+              />
             ))}
           </ul>
         </aside>
@@ -468,7 +671,7 @@ function WorkspacePage() {
               type="text"
               value={newFileName}
               onChange={(e) => setNewFileName(e.target.value)}
-              placeholder="z. B. analyse.py"
+              placeholder="z. B. analyse.py oder utils/helper.py"
               autoFocus
             />
             {modalError && <p className="workspace-modal-error">{modalError}</p>}
@@ -480,10 +683,30 @@ function WorkspacePage() {
         </div>
       )}
 
+      {newFolderOpen && (
+        <div className="workspace-modal-overlay" onClick={() => setNewFolderOpen(false)}>
+          <div className="workspace-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Neuer Ordner</h3>
+            <input
+              type="text"
+              value={newFolderPath}
+              onChange={(e) => setNewFolderPath(e.target.value)}
+              placeholder="z. B. utils oder utils/tests"
+              autoFocus
+            />
+            {modalError && <p className="workspace-modal-error">{modalError}</p>}
+            <div className="workspace-modal-actions">
+              <button className="workspace-btn-secondary" onClick={() => { setNewFolderOpen(false); setModalError(null); }}>Abbrechen</button>
+              <button className="primary" onClick={handleCreateFolder}>Anlegen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {renameTarget && (
         <div className="workspace-modal-overlay" onClick={() => setRenameTarget(null)}>
           <div className="workspace-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Datei umbenennen</h3>
+            <h3>{renameTargetType === 'folder' ? 'Ordner umbenennen' : 'Datei umbenennen'}</h3>
             <input type="text" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus />
             {modalError && <p className="workspace-modal-error">{modalError}</p>}
             <div className="workspace-modal-actions">
@@ -497,8 +720,11 @@ function WorkspacePage() {
       {deleteTarget && (
         <div className="workspace-modal-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="workspace-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Datei löschen?</h3>
-            <p>„{deleteTarget}" wird unwiderruflich gelöscht.</p>
+            <h3>{deleteTargetType === 'folder' ? 'Ordner löschen?' : 'Datei löschen?'}</h3>
+            <p>
+              „{deleteTarget}" wird unwiderruflich gelöscht
+              {deleteTargetType === 'folder' ? ' - und alle enthaltenen Dateien' : ''}.
+            </p>
             <div className="workspace-modal-actions">
               <button className="workspace-btn-secondary" onClick={() => setDeleteTarget(null)}>Abbrechen</button>
               <button className="danger" onClick={handleDelete}>Löschen</button>

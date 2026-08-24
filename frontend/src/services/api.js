@@ -521,6 +521,17 @@ export const preferencesAPI = {
 };
 
 /**
+ * Encodes a `/`-separated workspace path for use in a URL that ends in a
+ * FastAPI `{...:path}` parameter - encodes each segment individually and
+ * rejoins with a literal `/`. Plain `encodeURIComponent(path)` would turn
+ * `/` into `%2F`, which a `:path` converter reads back as one opaque
+ * segment instead of a nested path (breaking subfolder routes).
+ */
+function encodeWorkspacePath(path) {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+/**
  * Code Execution API (chat "Run" button for Python/Julia code blocks)
  */
 export const codeExecAPI = {
@@ -546,7 +557,7 @@ export const codeExecAPI = {
    */
   async downloadFile(sessionId, filename) {
     const token = localStorage.getItem('liara_token');
-    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!response.ok) {
@@ -556,7 +567,9 @@ export const codeExecAPI = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    // Just the basename for the suggested save-as name - a nested path's
+    // slashes would otherwise end up literally in the downloaded filename.
+    a.download = filename.split('/').pop();
     a.click();
     URL.revokeObjectURL(url);
   },
@@ -581,7 +594,7 @@ export const workspaceAPI = {
    */
   async getFileContent(sessionId, filename) {
     const token = localStorage.getItem('liara_token');
-    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!response.ok) {
@@ -597,22 +610,34 @@ export const workspaceAPI = {
     });
   },
 
+  /**
+   * Legt einen (ggf. leeren) Unterordner an - Dateien selbst können auch
+   * über createFile mit einem `/`-Pfad in einem noch nicht existierenden
+   * Ordner angelegt werden (Zwischenordner entstehen dann automatisch).
+   */
+  async createFolder(sessionId, path) {
+    return apiFetch(`/workspace/sessions/${sessionId}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  },
+
   async saveFile(sessionId, filename, content) {
-    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
       method: 'PUT',
       body: JSON.stringify({ content }),
     });
   },
 
   async renameFile(sessionId, filename, newName) {
-    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeURIComponent(filename)}/rename`, {
+    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}/rename`, {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
     });
   },
 
   async deleteFile(sessionId, filename) {
-    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeURIComponent(filename)}`, {
+    return apiFetch(`/workspace/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
       method: 'DELETE',
     });
   },

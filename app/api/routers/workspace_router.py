@@ -22,6 +22,7 @@ from services.session_workspace import (
     write_workspace_file,
     rename_workspace_file,
     delete_workspace_file,
+    create_workspace_folder,
     set_context_selection,
     get_context_selected_files,
     list_proposals,
@@ -44,6 +45,10 @@ class WriteFileRequest(BaseModel):
 
 class RenameFileRequest(BaseModel):
     new_name: str
+
+
+class CreateFolderRequest(BaseModel):
+    path: str
 
 
 class ContextSelectionRequest(BaseModel):
@@ -78,7 +83,19 @@ async def create_file(
     return result
 
 
-@router.put("/sessions/{session_id}/files/{filename}")
+@router.post("/sessions/{session_id}/folders")
+async def create_folder(
+    session_id: int,
+    req: CreateFolderRequest,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    _verify_session_ownership(db, session_id, current_user.id)
+    result = _ok_or_400(create_workspace_folder(current_user.id, session_id, req.path))
+    return result
+
+
+@router.put("/sessions/{session_id}/files/{filename:path}")
 async def save_file(
     session_id: int,
     filename: str,
@@ -91,7 +108,7 @@ async def save_file(
     return result
 
 
-@router.post("/sessions/{session_id}/files/{filename}/rename")
+@router.post("/sessions/{session_id}/files/{filename:path}/rename")
 async def rename_file(
     session_id: int,
     filename: str,
@@ -104,7 +121,7 @@ async def rename_file(
     return result
 
 
-@router.delete("/sessions/{session_id}/files/{filename}")
+@router.delete("/sessions/{session_id}/files/{filename:path}")
 async def delete_file(
     session_id: int,
     filename: str,

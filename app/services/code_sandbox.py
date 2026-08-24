@@ -98,13 +98,18 @@ def _tail(file_obj, n: int) -> str:
 
 
 def _snapshot(workspace_dir: Path) -> Dict[str, Tuple[int, float]]:
+    """Keyed by the full relative (`/`-separated) path, not just the bare
+    name, so a script that creates its own subfolder is tracked correctly -
+    same path identity used everywhere else in the workspace (explorer,
+    editor tabs, tool-calling)."""
     snapshot = {}
     if not workspace_dir.exists():
         return snapshot
-    for entry in workspace_dir.iterdir():
+    for entry in workspace_dir.rglob("*"):
         if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
             stat = entry.stat()
-            snapshot[entry.name] = (stat.st_size, stat.st_mtime)
+            relpath = entry.relative_to(workspace_dir).as_posix()
+            snapshot[relpath] = (stat.st_size, stat.st_mtime)
     return snapshot
 
 
@@ -114,15 +119,16 @@ def _diff_snapshot(
     results = []
     if not workspace_dir.exists():
         return results
-    for entry in workspace_dir.iterdir():
+    for entry in workspace_dir.rglob("*"):
         # Symlinks are rejected outright, both for downloads and here - a
         # script could otherwise os.symlink() a sensitive path into its
         # workspace and have it show up as a normal "generated file".
         if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
             continue
+        relpath = entry.relative_to(workspace_dir).as_posix()
         stat = entry.stat()
         current = (stat.st_size, stat.st_mtime)
-        prior = before.get(entry.name)
+        prior = before.get(relpath)
         if prior is None:
             status = "created"
         elif prior != current:
@@ -131,7 +137,7 @@ def _diff_snapshot(
             continue  # unchanged, not part of this run's output
         mime_type, _ = mimetypes.guess_type(entry.name)
         results.append(SandboxFile(
-            name=entry.name,
+            name=relpath,
             mime_type=mime_type or "application/octet-stream",
             size=stat.st_size,
             status=status,

@@ -105,7 +105,7 @@ async def get_session_files(
     return {"files": list_session_files(current_user.id, session_id)}
 
 
-@router.get("/sessions/{session_id}/files/{filename}")
+@router.get("/sessions/{session_id}/files/{filename:path}")
 async def download_session_file(
     session_id: int,
     filename: str,

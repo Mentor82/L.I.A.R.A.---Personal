@@ -214,9 +214,9 @@ class ToolRegistry:
         self.register_tool(ToolDefinition(
             name="workspace_list_files",
             description=(
-                "Listet die Dateien im Workspace der aktuellen Chat-Session auf "
-                "(Name, Größe, Herkunft). Nur möglich, wenn der Nutzer LIARA "
-                "Workspace-Zugriff erlaubt hat."
+                "Listet Dateien und Ordner im Workspace der aktuellen Chat-Session auf "
+                "(Pfad, Größe, Herkunft) - inklusive Unterordner. Nur möglich, wenn der "
+                "Nutzer LIARA Workspace-Zugriff erlaubt hat."
             ),
             category=ToolCategory.WORKSPACE,
             parameters=[],
@@ -233,7 +233,7 @@ class ToolRegistry:
                 ToolParameter(
                     name="filename",
                     type="string",
-                    description="Name der zu lesenden Datei (nur Dateien direkt im Workspace, keine Pfade)",
+                    description="Relativer Pfad der zu lesenden Datei im Workspace, z.B. 'analyse.py' oder 'utils/helper.py'",
                     required=True
                 )
             ],
@@ -255,7 +255,7 @@ class ToolRegistry:
                 ToolParameter(
                     name="filename",
                     type="string",
-                    description="Name der betroffenen Datei",
+                    description="Relativer Pfad der betroffenen Datei im Workspace, z.B. 'analyse.py' oder 'utils/helper.py' (Zwischenordner werden bei Annahme automatisch angelegt)",
                     required=True
                 ),
                 ToolParameter(
