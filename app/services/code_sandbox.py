@@ -109,7 +109,7 @@ def _snapshot(workspace_dir: Path) -> Dict[str, Tuple[int, float]]:
     if not workspace_dir.exists():
         return snapshot
     for entry in workspace_dir.rglob("*"):
-        if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
+        if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
             stat = entry.stat()
             relpath = entry.relative_to(workspace_dir).as_posix()
             snapshot[relpath] = (stat.st_size, stat.st_mtime)
@@ -126,7 +126,7 @@ def _diff_snapshot(
         # Symlinks are rejected outright, both for downloads and here - a
         # script could otherwise os.symlink() a sensitive path into its
         # workspace and have it show up as a normal "generated file".
-        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
+        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
             continue
         relpath = entry.relative_to(workspace_dir).as_posix()
         stat = entry.stat()

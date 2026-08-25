@@ -58,6 +58,11 @@ MANIFEST_FILENAME = ".liara_manifest.json"
 # Also excluded from every directory listing/diff.
 PROPOSALS_FILENAME = ".liara_proposals.json"
 
+# Advisory-lock file for _workspace_lock (issue #8 hardening) - like the
+# other sidecars above, it's bookkeeping, not workspace content, so it's
+# excluded from every directory listing/diff/size-total the same way.
+LOCK_FILENAME = ".liara.lock"
+
 # Project-wide text search limits - a single chat session's workspace is
 # small (MAX_SESSION_TOTAL is 500 MiB across every file), but scanning
 # unbounded file sizes/counts on every keystroke-triggered search would
@@ -130,7 +135,7 @@ def _workspace_lock(user_id: int, session_id: int):
             return
         workspace = _workspace_dir(user_id, session_id)
         workspace.mkdir(parents=True, exist_ok=True)
-        lock_path = workspace / ".liara.lock"
+        lock_path = workspace / LOCK_FILENAME
         with open(lock_path, "w") as fh:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
             try:
@@ -313,7 +318,7 @@ def workspace_total_size(workspace: Path) -> int:
     total = 0
     if workspace.exists():
         for entry in workspace.rglob("*"):
-            if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
+            if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
                 total += entry.stat().st_size
     return total
 
@@ -454,7 +459,7 @@ def search_workspace(user_id: int, session_id: int, query: str, case_sensitive: 
     truncated = False
 
     for entry in sorted(workspace.rglob("*")):
-        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
+        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
             continue
 
         relpath = entry.relative_to(workspace).as_posix()
@@ -509,7 +514,7 @@ def list_session_files(user_id: int, session_id: int) -> List[dict]:
     manifest = _load_manifest(user_id, session_id)
     entries = []
     for entry in sorted(workspace.rglob("*")):
-        if entry.is_symlink() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME):
+        if entry.is_symlink() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
             continue
         relpath = entry.relative_to(workspace).as_posix()
         parent = relpath.rsplit("/", 1)[0] if "/" in relpath else ""
