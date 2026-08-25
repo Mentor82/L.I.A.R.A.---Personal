@@ -10,7 +10,7 @@ import logging
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from core.dependencies import require_active_user
 from core.database import get_db
