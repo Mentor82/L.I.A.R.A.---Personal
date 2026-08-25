@@ -29,6 +29,7 @@ from services.session_workspace import (
     get_context_selected_files,
     list_proposals,
     resolve_proposal,
+    MAX_SESSION_FILE,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,30 @@ async def create_folder(
     return result
 
 
+_UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MiB
+
+
+async def _read_upload_bounded(upload: UploadFile, limit: int) -> Tuple[bytes, bool]:
+    """
+    Reads an upload in bounded chunks instead of `await upload.read()`
+    (which materializes the entire file as one Python `bytes` object before
+    anyone checks its size) - stops as soon as the running total exceeds
+    `limit`, so an oversized file never sits fully buffered in process
+    memory just to then be rejected (issue #8). Returns (data, exceeded).
+    """
+    chunks = []
+    total = 0
+    while True:
+        chunk = await upload.read(_UPLOAD_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            return b"", True
+        chunks.append(chunk)
+    return b"".join(chunks), False
+
+
 @router.post("/sessions/{session_id}/upload")
 async def upload_files(
     session_id: int,
@@ -129,8 +154,15 @@ async def upload_files(
     _verify_session_ownership(db, session_id, current_user.id)
     results = []
     for upload in files:
-        data = await upload.read()
+        data, exceeded = await _read_upload_bounded(upload, MAX_SESSION_FILE)
         target_path = f"{folder}/{upload.filename}" if folder else upload.filename
+        if exceeded:
+            results.append({
+                "filename": upload.filename,
+                "ok": False,
+                "error": f"Datei zu groß (Limit {MAX_SESSION_FILE // (1024 * 1024)} MiB)",
+            })
+            continue
         result = upload_workspace_file(current_user.id, session_id, target_path, data)
         results.append({
             "filename": upload.filename,

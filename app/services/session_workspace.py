@@ -7,15 +7,29 @@ A directory on disk is not, by itself, "visible to the LLM" - this module is
 what actually makes generated files something the model can be told about and
 read the (text) content of, not just a user-facing download list.
 """
+import contextlib
 import difflib
+import hashlib
 import json
+import logging
 import mimetypes
 import os
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
+
+# POSIX-only (real cross-process locking on the Linux production server, via
+# flock()) - conditional import so local Windows dev doesn't crash on module
+# load. Falls back to a plain in-process Lock there (see _workspace_lock).
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+logger = logging.getLogger(__name__)
 
 SESSION_FILES_DIR = Path(os.getenv("SESSION_FILES_DIR", "/opt/liara/app/session_files"))
 
@@ -66,6 +80,67 @@ def _is_text_mime(mime_type: str) -> bool:
     return mime_type.startswith(TEXT_MIME_PREFIXES) or mime_type in TEXT_MIME_EXACT
 
 
+def _atomic_write_json(path: Path, data) -> None:
+    """
+    Writes to a temp file in the same directory, then os.replace() (atomic
+    rename on POSIX and Windows both) - a crash mid-write can never leave a
+    truncated/corrupt manifest or proposals file behind, since readers only
+    ever see the fully-old or fully-new content.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + f".tmp{os.getpid()}")
+    tmp_path.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+# Per-thread set of (user_id, session_id) keys whose workspace lock is
+# already held further up the current call stack - lets _workspace_lock be
+# safely re-entered (e.g. resolve_proposal -> create_workspace_file ->
+# record_file_event, all synchronous, same call stack) without deadlocking
+# on itself. A plain flock() would otherwise block forever: it's tied to the
+# open file description, and each context-manager entry opens a fresh one.
+_lock_holder = threading.local()
+_dev_fallback_lock = threading.Lock()  # only used when fcntl is unavailable
+
+
+@contextlib.contextmanager
+def _workspace_lock(user_id: int, session_id: int):
+    """
+    Guards the manifest/proposals read-modify-write cycle for one session's
+    workspace. Real cross-process protection via flock() on Linux (both
+    liara-backend and liara-sse import this module and can race on the same
+    sidecar files); falls back to an in-process Lock on non-POSIX platforms
+    (Windows dev only - production is Linux).
+    """
+    key = (user_id, session_id)
+    held = getattr(_lock_holder, "held", None)
+    if held is None:
+        held = set()
+        _lock_holder.held = held
+
+    if key in held:
+        yield  # already holding this session's lock - re-entrant, no-op
+        return
+
+    held.add(key)
+    try:
+        if fcntl is None:
+            with _dev_fallback_lock:
+                yield
+            return
+        workspace = _workspace_dir(user_id, session_id)
+        workspace.mkdir(parents=True, exist_ok=True)
+        lock_path = workspace / ".liara.lock"
+        with open(lock_path, "w") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        held.discard(key)
+
+
 def resolve_workspace_file(user_id: int, session_id: int, filename: str) -> Optional[Path]:
     """
     Resolves `filename` (a `/`-separated relative path, possibly nested in
@@ -102,14 +177,13 @@ def _load_manifest(user_id: int, session_id: int) -> dict:
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        logger.warning(f"session_workspace: manifest at {path} unreadable/corrupt ({e}) - treating as empty")
         return {}
 
 
 def _save_manifest(user_id: int, session_id: int, manifest: dict) -> None:
-    path = _manifest_path(user_id, session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest), encoding="utf-8")
+    _atomic_write_json(_manifest_path(user_id, session_id), manifest)
 
 
 def record_file_event(user_id: int, session_id: int, filename: str, source: str, execution_id: Optional[str] = None) -> None:
@@ -119,15 +193,16 @@ def record_file_event(user_id: int, session_id: int, filename: str, source: str,
     knows who/what produced it. `source` is one of: user, upload,
     code_runner, liara, agent, web_research, generated.
     """
-    manifest = _load_manifest(user_id, session_id)
-    entry = manifest.get(filename, {})
-    entry["id"] = entry.get("id") or uuid.uuid4().hex
-    entry["source"] = source
-    entry["created_at"] = entry.get("created_at") or datetime.now(timezone.utc).isoformat()
-    if execution_id is not None:
-        entry["execution_id"] = execution_id
-    manifest[filename] = entry
-    _save_manifest(user_id, session_id, manifest)
+    with _workspace_lock(user_id, session_id):
+        manifest = _load_manifest(user_id, session_id)
+        entry = manifest.get(filename, {})
+        entry["id"] = entry.get("id") or uuid.uuid4().hex
+        entry["source"] = source
+        entry["created_at"] = entry.get("created_at") or datetime.now(timezone.utc).isoformat()
+        if execution_id is not None:
+            entry["execution_id"] = execution_id
+        manifest[filename] = entry
+        _save_manifest(user_id, session_id, manifest)
 
 
 def _remove_file_from_manifest(user_id: int, session_id: int, filename: str) -> None:
@@ -137,15 +212,16 @@ def _remove_file_from_manifest(user_id: int, session_id: int, filename: str) -> 
     would leave stale manifest entries behind for files that no longer
     exist at that path.
     """
-    manifest = _load_manifest(user_id, session_id)
-    prefix = f"{filename}/"
-    changed = False
-    for key in list(manifest.keys()):
-        if key == filename or key.startswith(prefix):
-            del manifest[key]
-            changed = True
-    if changed:
-        _save_manifest(user_id, session_id, manifest)
+    with _workspace_lock(user_id, session_id):
+        manifest = _load_manifest(user_id, session_id)
+        prefix = f"{filename}/"
+        changed = False
+        for key in list(manifest.keys()):
+            if key == filename or key.startswith(prefix):
+                del manifest[key]
+                changed = True
+        if changed:
+            _save_manifest(user_id, session_id, manifest)
 
 
 def _rename_file_in_manifest(user_id: int, session_id: int, old_name: str, new_name: str) -> None:
@@ -155,35 +231,37 @@ def _rename_file_in_manifest(user_id: int, session_id: int, old_name: str, new_n
     in one `Path.rename`, so the manifest keys need the same prefix rewrite
     to keep pointing at files that still exist, just under a new path.
     """
-    manifest = _load_manifest(user_id, session_id)
-    prefix = f"{old_name}/"
-    changed = False
-    for key in list(manifest.keys()):
-        if key == old_name:
-            manifest[new_name] = manifest.pop(key)
-            changed = True
-        elif key.startswith(prefix):
-            manifest[new_name + key[len(old_name):]] = manifest.pop(key)
-            changed = True
-    if changed:
-        _save_manifest(user_id, session_id, manifest)
+    with _workspace_lock(user_id, session_id):
+        manifest = _load_manifest(user_id, session_id)
+        prefix = f"{old_name}/"
+        changed = False
+        for key in list(manifest.keys()):
+            if key == old_name:
+                manifest[new_name] = manifest.pop(key)
+                changed = True
+            elif key.startswith(prefix):
+                manifest[new_name + key[len(old_name):]] = manifest.pop(key)
+                changed = True
+        if changed:
+            _save_manifest(user_id, session_id, manifest)
 
 
 def set_context_selection(user_id: int, session_id: int, filenames: List[str]) -> None:
     """Replaces the full "included in chat context" set for this workspace."""
-    manifest = _load_manifest(user_id, session_id)
-    selected = set(filenames)
-    for name in list(manifest.keys()):
-        manifest[name]["selected_for_context"] = name in selected
-    for name in selected:
-        if name not in manifest:
-            manifest[name] = {
-                "id": uuid.uuid4().hex,
-                "source": "unknown",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "selected_for_context": True,
-            }
-    _save_manifest(user_id, session_id, manifest)
+    with _workspace_lock(user_id, session_id):
+        manifest = _load_manifest(user_id, session_id)
+        selected = set(filenames)
+        for name in list(manifest.keys()):
+            manifest[name]["selected_for_context"] = name in selected
+        for name in selected:
+            if name not in manifest:
+                manifest[name] = {
+                    "id": uuid.uuid4().hex,
+                    "source": "unknown",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "selected_for_context": True,
+                }
+        _save_manifest(user_id, session_id, manifest)
 
 
 def get_context_selected_files(user_id: int, session_id: int) -> List[str]:
@@ -231,7 +309,7 @@ def _ensure_writable_by_runner(path: Path, up_to: Path) -> None:
         current = current.parent
 
 
-def _workspace_total_size(workspace: Path) -> int:
+def workspace_total_size(workspace: Path) -> int:
     total = 0
     if workspace.exists():
         for entry in workspace.rglob("*"):
@@ -261,7 +339,7 @@ def _create_file_bytes(user_id: int, session_id: int, filename: str, data: bytes
         return {"ok": False, "error": "Datei existiert bereits"}
     if len(data) > MAX_SESSION_FILE:
         return {"ok": False, "error": f"Datei zu groß (Limit {MAX_SESSION_FILE // (1024 * 1024)} MiB)"}
-    if _workspace_total_size(workspace) + len(data) > MAX_SESSION_TOTAL:
+    if workspace_total_size(workspace) + len(data) > MAX_SESSION_TOTAL:
         return {"ok": False, "error": "Workspace-Speicherlimit erreicht"}
     target.write_bytes(data)
     return {"ok": True, "safe_name": safe_name}
@@ -295,7 +373,7 @@ def write_workspace_file(user_id: int, session_id: int, filename: str, content: 
         return {"ok": False, "error": f"Datei zu groß (Limit {MAX_SESSION_FILE // (1024 * 1024)} MiB)"}
     workspace = _workspace_dir(user_id, session_id)
     current_size = resolved.stat().st_size
-    if _workspace_total_size(workspace) - current_size + len(data) > MAX_SESSION_TOTAL:
+    if workspace_total_size(workspace) - current_size + len(data) > MAX_SESSION_TOTAL:
         return {"ok": False, "error": "Workspace-Speicherlimit erreicht"}
     resolved.write_bytes(data)
     record_file_event(user_id, session_id, filename, source="user")
@@ -520,14 +598,17 @@ def _load_proposals(user_id: int, session_id: int) -> List[dict]:
         return []
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        logger.warning(f"session_workspace: proposals at {path} unreadable/corrupt ({e}) - treating as empty")
         return []
 
 
 def _save_proposals(user_id: int, session_id: int, proposals: List[dict]) -> None:
-    path = _proposals_path(user_id, session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(proposals), encoding="utf-8")
+    _atomic_write_json(_proposals_path(user_id, session_id), proposals)
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def create_proposal(
@@ -543,7 +624,9 @@ def create_proposal(
     the real file, only appends a pending entry to the proposals sidecar. The
     diff is computed now (against whatever is on disk at proposal time) so
     the user reviews exactly what was proposed even if the file changes again
-    before they get to it.
+    before they get to it - `base_sha256` records that same on-disk state so
+    resolve_proposal() can later detect and refuse a now-stale approval
+    instead of silently overwriting an intervening edit (see there).
     """
     if action not in ("create", "update", "delete"):
         return {"ok": False, "error": f"Ungültige Aktion: {action}"}
@@ -581,13 +664,15 @@ def create_proposal(
         "new_content": new_content if action != "delete" else None,
         "diff": diff,
         "description": description,
+        "base_sha256": _content_hash(old_text) if exists_on_disk else None,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "pending",
         "resolved_at": None,
     }
-    proposals = _load_proposals(user_id, session_id)
-    proposals.append(proposal)
-    _save_proposals(user_id, session_id, proposals)
+    with _workspace_lock(user_id, session_id):
+        proposals = _load_proposals(user_id, session_id)
+        proposals.append(proposal)
+        _save_proposals(user_id, session_id, proposals)
     return {"ok": True, "proposal_id": proposal["id"], "diff": diff}
 
 
@@ -604,37 +689,71 @@ def resolve_proposal(user_id: int, session_id: int, proposal_id: str, approve: b
     Approval dispatches to the same create/write/delete_workspace_file
     functions every other workspace write already goes through - no separate
     mutation path, so proposals get the exact same size/traversal checks.
+
+    The whole function runs under the session's workspace lock: besides
+    guarding the proposals list itself, this also makes "approve the same
+    proposal twice concurrently" impossible - the second caller blocks until
+    the first is done, then sees status != "pending" and cleanly refuses,
+    rather than a lost-update race deciding it arbitrarily.
     """
-    proposals = _load_proposals(user_id, session_id)
-    proposal = next((p for p in proposals if p.get("id") == proposal_id), None)
-    if proposal is None:
-        return {"ok": False, "error": "Vorschlag nicht gefunden"}
-    if proposal.get("status") != "pending":
-        return {"ok": False, "error": f"Vorschlag ist bereits {proposal.get('status')}"}
+    with _workspace_lock(user_id, session_id):
+        proposals = _load_proposals(user_id, session_id)
+        proposal = next((p for p in proposals if p.get("id") == proposal_id), None)
+        if proposal is None:
+            return {"ok": False, "error": "Vorschlag nicht gefunden"}
+        if proposal.get("status") != "pending":
+            return {"ok": False, "error": f"Vorschlag ist bereits {proposal.get('status')}"}
 
-    if approve:
-        action = proposal["action"]
-        filename = proposal["filename"]
-        if action == "create":
-            result = create_workspace_file(user_id, session_id, filename, proposal["new_content"])
-        elif action == "update":
-            result = write_workspace_file(user_id, session_id, filename, proposal["new_content"])
-        else:  # delete
-            result = delete_workspace_file(user_id, session_id, filename)
+        if approve:
+            action = proposal["action"]
+            filename = proposal["filename"]
 
-        if not result.get("ok"):
-            return result
+            # TOCTOU guard: the diff shown to the user was computed against
+            # the file's content at proposal-creation time. If the file has
+            # since changed (manual edit, another run, another approved
+            # proposal), applying the stored new_content now would silently
+            # overwrite that intervening change with no trace. Re-check
+            # before mutating anything - create's "already exists" check
+            # below covers that action equivalently, so this only applies to
+            # update/delete, which had a real base_sha256 to compare against.
+            if action in ("update", "delete"):
+                current = read_session_file(user_id, session_id, filename)
+                if not current.get("found"):
+                    proposal["status"] = "conflict"
+                    proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+                    _save_proposals(user_id, session_id, proposals)
+                    return {"ok": False, "error": "Datei nicht mehr vorhanden - Vorschlag ist veraltet.", "conflict": True}
+                current_hash = _content_hash(current.get("content") or "")
+                if current_hash != proposal.get("base_sha256"):
+                    proposal["status"] = "conflict"
+                    proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+                    _save_proposals(user_id, session_id, proposals)
+                    return {
+                        "ok": False,
+                        "error": "Datei wurde seit dem Vorschlag geändert - Vorschlag ist veraltet und wurde verworfen.",
+                        "conflict": True,
+                    }
 
-        if action in ("create", "update"):
-            record_file_event(user_id, session_id, filename, source="liara")
+            if action == "create":
+                result = create_workspace_file(user_id, session_id, filename, proposal["new_content"])
+            elif action == "update":
+                result = write_workspace_file(user_id, session_id, filename, proposal["new_content"])
+            else:  # delete
+                result = delete_workspace_file(user_id, session_id, filename)
 
-        proposal["status"] = "approved"
-    else:
-        proposal["status"] = "rejected"
+            if not result.get("ok"):
+                return result
 
-    proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
-    _save_proposals(user_id, session_id, proposals)
-    return {"ok": True}
+            if action in ("create", "update"):
+                record_file_event(user_id, session_id, filename, source="liara")
+
+            proposal["status"] = "approved"
+        else:
+            proposal["status"] = "rejected"
+
+        proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+        _save_proposals(user_id, session_id, proposals)
+        return {"ok": True}
 
 
 def delete_session_workspace(user_id: int, session_id: int) -> bool:

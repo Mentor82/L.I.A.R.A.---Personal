@@ -31,7 +31,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from services.session_workspace import SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, record_file_event
+from services.session_workspace import (
+    SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, record_file_event,
+    MAX_SESSION_FILE, MAX_SESSION_TOTAL, workspace_total_size,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +156,12 @@ def _preexec(language: str):
             resource.setrlimit(resource.RLIMIT_NPROC, (NPROC_LIMIT, NPROC_LIMIT))
             mem_limit = MEMORY_LIMITS[language]
             resource.setrlimit(resource.RLIMIT_AS, (mem_limit, mem_limit))
+            # Defense-in-depth for the Workspace per-file quota (issue #8) -
+            # a single write attempting to grow a file past this raises
+            # SIGXFSZ, so a runaway script physically cannot produce a file
+            # larger than the Workspace would ever accept anyway. Mirrored
+            # in run_sandboxed.sh's own `ulimit -f` in case sudo strips this.
+            resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_SESSION_FILE, MAX_SESSION_FILE))
         except (ValueError, OSError) as e:
             # Best-effort outer layer - run_sandboxed.sh's own ulimits are the
             # authoritative limit if this fails for some reason.
@@ -268,6 +277,32 @@ def run_code(
     # liara-runner and does its own trailing `chmod -R 777` there) rather
     # than here after the fact.
     changed_files = _diff_snapshot(before, workspace_dir)
+
+    # Workspace quota enforcement (issue #8) - RLIMIT_FSIZE above is a
+    # defense-in-depth cap on any SINGLE file during the run itself, but it
+    # can't know about the session's *aggregate* size across pre-existing
+    # files. A manual create/write already enforces both MAX_SESSION_FILE and
+    # MAX_SESSION_TOTAL; sandbox output previously bypassed both entirely
+    # (only snapshotted/diffed, never size-checked). Reject the whole run's
+    # output rather than partially keeping it - simpler to reason about than
+    # picking which files to keep, and this is already the rare/abuse case.
+    oversized = [f for f in changed_files if f.size > MAX_SESSION_FILE]
+    over_total = workspace_total_size(workspace_dir) > MAX_SESSION_TOTAL
+    if changed_files and (oversized or over_total):
+        for f in changed_files:
+            try:
+                (workspace_dir / f.name).unlink()
+            except OSError:
+                pass
+        reasons = []
+        if oversized:
+            reasons.append(f"{len(oversized)} Datei(en) über dem Limit von {MAX_SESSION_FILE // (1024 * 1024)} MiB")
+        if over_total:
+            reasons.append(f"Workspace-Gesamtlimit von {MAX_SESSION_TOTAL // (1024 * 1024)} MiB überschritten")
+        quota_error = "Ausführung erzeugte zu große Ausgabe (" + ", ".join(reasons) + ") - alle neu erzeugten/geänderten Dateien wurden verworfen."
+        result.error = f"{result.error} {quota_error}" if result.error else quota_error
+        changed_files = []
+
     if user_id is not None and session_id is not None:
         for f in changed_files:
             record_file_event(user_id, session_id, f.name, source="code_runner", execution_id=run_id)
@@ -283,4 +318,16 @@ def run_code(
             except OSError:
                 pass
     result.files = changed_files
+
+    # Retention (issue #8) - the submitted script isn't needed after
+    # execution: stdout/stderr are already captured above and any output
+    # file is already recorded, so clean it up immediately rather than
+    # letting .runs/ accumulate hidden, unbounded storage outside the
+    # Workspace's own quota. Best-effort, matches delete_session_workspace's
+    # own "never block on cleanup" convention.
+    try:
+        shutil.rmtree(run_dir)
+    except OSError:
+        pass
+
     return result

@@ -8,6 +8,7 @@ stays an explicit user action (the Run button calling this endpoint with the
 exact code already shown in the bubble), never something inferred from free
 chat text.
 """
+import asyncio
 import logging
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from core.dependencies import require_active_user
 from core.database import get_db
@@ -64,6 +65,24 @@ def _verify_session_ownership(db: Session, session_id: int, user_id: int) -> Non
         raise HTTPException(status_code=404, detail="Session not found")
 
 
+# One asyncio.Lock per (user_id, session_id), created lazily - serializes
+# concurrent runs *within the same session* (two overlapping runs would
+# otherwise snapshot/diff the same workspace/ directory and can misattribute
+# each other's output, see issue #8) while leaving different sessions fully
+# parallel. Grows for the process's lifetime (one tiny entry per session
+# ever run) - acceptable since the backend restarts on every deploy anyway.
+_session_run_locks: Dict[Tuple[int, int], asyncio.Lock] = {}
+
+
+def _get_session_run_lock(user_id: int, session_id: int) -> asyncio.Lock:
+    key = (user_id, session_id)
+    lock = _session_run_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_run_locks[key] = lock
+    return lock
+
+
 @router.post("/run", response_model=RunResponse)
 async def run_code(
     req: RunRequest,
@@ -73,10 +92,18 @@ async def run_code(
     _verify_session_ownership(db, req.session_id, current_user.id)
 
     session_dir = SESSION_FILES_DIR / str(current_user.id) / str(req.session_id)
-    result = code_sandbox.run_code(
-        req.language, req.code, session_dir,
-        user_id=current_user.id, session_id=req.session_id,
-    )
+    # code_sandbox.run_code() is fully synchronous (blocking subprocess.wait,
+    # up to TIMEOUT_SECONDS) - asyncio.to_thread() keeps that off the ASGI
+    # event loop so a long-running sandbox execution doesn't stall unrelated
+    # requests/SSE traffic on this worker. The per-session lock (acquired
+    # around the threaded call, not inside it) serializes same-session runs
+    # without blocking other sessions' runs from proceeding concurrently.
+    lock = _get_session_run_lock(current_user.id, req.session_id)
+    async with lock:
+        result = await asyncio.to_thread(
+            code_sandbox.run_code, req.language, req.code, session_dir,
+            user_id=current_user.id, session_id=req.session_id,
+        )
 
     return RunResponse(
         run_id=result.run_id,

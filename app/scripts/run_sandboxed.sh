@@ -36,6 +36,10 @@ cd "$WORKSPACE_DIR"
 # gets a much higher ulimit -v than Python.
 ulimit -t 15
 ulimit -u 32
+# Per-file size cap, mirrors code_sandbox.py's RLIMIT_FSIZE preexec_fn layer
+# and MAX_SESSION_FILE (100 MiB) - unit here is 512-byte blocks, not bytes:
+# 104857600 bytes / 512 = 204800.
+ulimit -f 204800
 
 # Not `exec`'d (unlike before) - the interpreter's own exit code is captured
 # below so a trailing chmod can still run whether it succeeded or crashed.
