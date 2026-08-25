@@ -32,8 +32,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from services.session_workspace import (
-    SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, record_file_event,
-    MAX_SESSION_FILE, MAX_SESSION_TOTAL, workspace_total_size,
+    SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME,
+    record_file_event, MAX_SESSION_FILE, MAX_SESSION_TOTAL, workspace_total_size,
 )
 
 logger = logging.getLogger(__name__)
