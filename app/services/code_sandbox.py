@@ -64,8 +64,11 @@ LANGUAGE_ALIASES = {
     "py": "python", "python": "python", "python3": "python",
     "jl": "julia", "julia": "julia",
 }
-# Must match the actual interpreter invocations in run_sandboxed.sh -
-# python uses a dedicated venv (matplotlib etc.), not bare "python3".
+# The shared runner-venv is now only the *bootstrap* interpreter used to
+# create each session's own venv (see run_sandboxed.sh, issue #5) and the
+# pre-flight "is Python installed at all" sanity check below - it is no
+# longer necessarily the interpreter that actually executes a script, which
+# instead runs from that session's own SESSION_DIR/.venv once it exists.
 INTERPRETER_BINARY = {"python": "/opt/liara/runner-venv/bin/python3", "julia": "julia"}
 SCRIPT_FILENAME = {"python": "script.py", "julia": "script.jl"}
 

@@ -13,8 +13,13 @@ persisted.
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+
+# The only 3 sizes WorkspacePage.jsx's toolbar offers (small/medium/large) -
+# rejecting anything else here means the frontend can never persist a value
+# its own UI has no way to select back.
+WORKSPACE_FONT_SIZES = (13, 15, 17)
 
 from core.database import get_db
 from core.dependencies import get_current_user
@@ -38,6 +43,7 @@ class PreferencesResponse(BaseModel):
     tool_memory_enabled: bool
     workspace_enabled: bool
     workspace_agent_enabled: bool
+    workspace_font_size: int
 
 
 class PreferencesUpdateRequest(BaseModel):
@@ -52,6 +58,14 @@ class PreferencesUpdateRequest(BaseModel):
     tool_memory_enabled: Optional[bool] = None
     workspace_enabled: Optional[bool] = None
     workspace_agent_enabled: Optional[bool] = None
+    workspace_font_size: Optional[int] = None
+
+    @field_validator("workspace_font_size")
+    @classmethod
+    def _validate_font_size(cls, value):
+        if value is not None and value not in WORKSPACE_FONT_SIZES:
+            raise ValueError(f"workspace_font_size muss einer von {WORKSPACE_FONT_SIZES} sein")
+        return value
 
 
 @router.get("/preferences", response_model=PreferencesResponse)
@@ -147,11 +161,11 @@ def update_preferences(
             INSERT INTO user_preferences
                 (user_id, ai_model, language, theme, notifications, sound_effects,
                  custom_instructions, personality, memory_enabled, tool_memory_enabled,
-                 workspace_enabled, workspace_agent_enabled)
+                 workspace_enabled, workspace_agent_enabled, workspace_font_size)
             VALUES
                 (:user_id, :ai_model, :language, :theme, :notifications, :sound_effects,
                  :custom_instructions, :personality, :memory_enabled, :tool_memory_enabled,
-                 :workspace_enabled, :workspace_agent_enabled)
+                 :workspace_enabled, :workspace_agent_enabled, :workspace_font_size)
         """), {"user_id": current_user.id, **merged})
         db.commit()
 

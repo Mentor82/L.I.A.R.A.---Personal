@@ -5,6 +5,7 @@ execution (code_sandbox.py, code_exec_router.py) - additive only, the
 existing /code-exec endpoints Chat.jsx's inline Run button depends on are
 untouched.
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -31,6 +32,12 @@ from services.session_workspace import (
     resolve_proposal,
     MAX_SESSION_FILE,
 )
+from services.session_environment import (
+    install_package,
+    remove_package,
+    list_packages,
+    get_environment_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +63,10 @@ class CreateFolderRequest(BaseModel):
 
 class ContextSelectionRequest(BaseModel):
     filenames: List[str]
+
+
+class InstallPackageRequest(BaseModel):
+    spec: str
 
 
 def _ok_or_400(result: dict) -> dict:
@@ -247,10 +258,13 @@ async def approve_proposal(
     """
     Only this endpoint - triggered by an explicit user click - ever turns a
     proposal into a real filesystem change (create/write/delete_workspace_file,
-    the same functions every other workspace write already goes through).
+    the same functions every other workspace write already goes through) or,
+    for a package-kind proposal (issue #5), a real pip install/uninstall.
+    Routed through asyncio.to_thread since approving a package proposal can
+    block on network I/O for real wall-clock time, unlike a file proposal.
     """
     _verify_session_ownership(db, session_id, current_user.id)
-    result = _ok_or_400(resolve_proposal(current_user.id, session_id, proposal_id, approve=True))
+    result = _ok_or_400(await asyncio.to_thread(resolve_proposal, current_user.id, session_id, proposal_id, True))
     return result
 
 
@@ -262,5 +276,68 @@ async def reject_proposal(
     db: Session = Depends(get_db),
 ):
     _verify_session_ownership(db, session_id, current_user.id)
-    result = _ok_or_400(resolve_proposal(current_user.id, session_id, proposal_id, approve=False))
+    result = _ok_or_400(await asyncio.to_thread(resolve_proposal, current_user.id, session_id, proposal_id, False))
     return result
+
+
+# --- Issue #5: per-session package management (user-direct path) -----------
+# The Nutzer-direkt path from the plan: immediate, no approval needed, since
+# it's the user's own action against their own session's venv. LIARA's side
+# (Pfad B) never calls these directly - it only ever creates a "package"-kind
+# proposal via a dedicated tool, resolved through the SAME approve/reject
+# machinery as file proposals (see resolve_proposal in session_workspace.py).
+#
+# install/remove/list all shell out to sudo + a fixed, whitelisted script
+# (manage_venv.sh) and can block for real wall-clock time (pip is network-
+# bound) - run via asyncio.to_thread so a slow install never stalls this
+# worker's event loop for other requests, mirroring code_exec_router.py's
+# /run endpoint.
+
+@router.get("/sessions/{session_id}/packages")
+async def get_packages(
+    session_id: int,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    _verify_session_ownership(db, session_id, current_user.id)
+    return await asyncio.to_thread(list_packages, current_user.id, session_id)
+
+
+@router.post("/sessions/{session_id}/packages")
+async def add_package(
+    session_id: int,
+    req: InstallPackageRequest,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    _verify_session_ownership(db, session_id, current_user.id)
+    result = _ok_or_400(await asyncio.to_thread(install_package, current_user.id, session_id, req.spec))
+    return result
+
+
+@router.delete("/sessions/{session_id}/packages/{name}")
+async def remove_package_endpoint(
+    session_id: int,
+    name: str,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    _verify_session_ownership(db, session_id, current_user.id)
+    result = _ok_or_400(await asyncio.to_thread(remove_package, current_user.id, session_id, name))
+    return result
+
+
+@router.get("/sessions/{session_id}/environment")
+async def get_environment(
+    session_id: int,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Minimal, on-demand environment status (issue #5) - never polled, only
+    fetched on session load and after an install/remove/proposal-approve.
+    A session that hasn't run anything yet reports exists=False, a normal
+    calm state rather than an error.
+    """
+    _verify_session_ownership(db, session_id, current_user.id)
+    return await asyncio.to_thread(get_environment_status, current_user.id, session_id)

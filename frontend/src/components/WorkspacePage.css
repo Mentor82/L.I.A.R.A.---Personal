@@ -28,6 +28,133 @@
   gap: 1rem;
 }
 
+.workspace-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Environment status chip + package popover (issue #5) - one compact UI slot
+   serving both "status at a glance" and "manage packages", rather than a
+   separate always-visible panel. */
+.workspace-env-status {
+  position: relative;
+}
+
+.workspace-env-chip {
+  background: var(--bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.workspace-env-chip:hover {
+  background: var(--bg-active);
+  border-color: rgba(159, 122, 234, 0.4);
+  color: var(--color-text);
+}
+
+.workspace-packages-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: var(--z-dropdown, 100);
+  width: 280px;
+  background: var(--color-bg-alt);
+  border: 1px solid rgba(159, 122, 234, 0.3);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  padding: 0.85rem;
+}
+
+.workspace-packages-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 0.6rem;
+}
+
+.workspace-packages-list {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.workspace-packages-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.workspace-packages-add {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.workspace-packages-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg-card);
+  color: var(--color-text);
+  font-size: 0.78rem;
+}
+
+.workspace-packages-add input:focus {
+  outline: none;
+  border-color: var(--color-purple);
+  background: var(--bg-active);
+}
+
+/* Font-size preset toggle - 3 fixed steps ("A" at increasing sizes), not a
+   slider, kept as compact as the search box's "Aa" case toggle. */
+.workspace-font-size-group {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.workspace-font-size-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.workspace-font-size-btn:hover {
+  background: var(--bg-active);
+  border-color: rgba(159, 122, 234, 0.4);
+}
+
+.workspace-font-size-btn.active {
+  border-color: var(--color-purple);
+  background: var(--bg-purple-muted);
+  color: var(--color-text);
+}
+
 .workspace-header h1 {
   margin: 0;
   font-size: 1.5rem;
@@ -111,7 +238,7 @@
   gap: 0.4rem;
   cursor: pointer;
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-muted);
 }
 
 .workspace-checkbox-label input[type="checkbox"] {
@@ -129,7 +256,7 @@
 
 .workspace-bulk-count {
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
 }
 
 .workspace-bulk-actions button {
@@ -203,9 +330,17 @@
   padding: 0.15rem 0.5rem;
 }
 
+/* Package-kind proposal (issue #5) - same pill shape as a file proposal's
+   action badge, teal instead of purple so the two proposal kinds read as
+   visually distinct at a glance in a mixed list. */
+.workspace-proposal-action-package {
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
 .workspace-proposal-description {
   font-size: 0.875rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   margin: 0.2rem 0 0.6rem;
 }
 
@@ -248,7 +383,7 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-faint);
   font-weight: 600;
   margin-bottom: 0.75rem;
 }
@@ -260,7 +395,7 @@
 
 .workspace-hint {
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-faint);
 }
 
 /* Project-wide search box - always visible above the Explorer tree/results */
@@ -308,7 +443,7 @@
   width: 100%;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--color-text);
   font-weight: 600;
   font-size: 0.85rem;
   text-align: left;
@@ -351,7 +486,7 @@
 .workspace-search-line-number {
   flex-shrink: 0;
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-faint);
   min-width: 1.5rem;
   text-align: right;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -359,7 +494,7 @@
 
 .workspace-search-line-text {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -381,7 +516,7 @@
   justify-content: center;
   padding: 2.5rem 1rem;
   text-align: center;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-faint);
 }
 
 .workspace-main > .workspace-empty {
@@ -401,13 +536,13 @@
 .workspace-empty-title {
   font-size: 1rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-muted);
   margin: 0 0 0.35rem 0;
 }
 
 .workspace-empty-subtitle {
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--color-text-faint);
   margin: 0;
 }
 
@@ -455,7 +590,7 @@
 
 .workspace-tree-chevron {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-faint);
   width: 0.8rem;
   flex-shrink: 0;
 }
@@ -488,7 +623,7 @@
 .workspace-file-name {
   font-size: 0.875rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--color-text);
   word-break: break-all;
 }
 
@@ -501,7 +636,7 @@
 
 .workspace-file-size {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--color-text-faint);
 }
 
 /* Source badge - color-coded pill, mirrors Tasks' category/priority badges */
@@ -536,7 +671,7 @@
 
 .workspace-badge-unknown {
   background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-faint);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
@@ -588,6 +723,14 @@
   gap: 0.75rem;
   min-width: 0;
   flex: 1;
+  border-top: 2px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+/* Only meaningful once split (two panes exist) - not rendered at all in the
+   single-pane case, so it adds no visual weight normally. */
+.workspace-main.active-pane {
+  border-top-color: var(--color-purple);
 }
 
 .workspace-split-header {
@@ -597,7 +740,7 @@
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-text-faint);
   font-weight: 600;
   padding-bottom: 0.4rem;
   border-bottom: 1px solid var(--color-border);
@@ -618,7 +761,7 @@
   border: 1px solid var(--color-border);
   border-bottom: none;
   background: var(--bg-muted);
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   cursor: pointer;
   font-size: 0.8rem;
   transition: all 0.2s ease;
@@ -717,7 +860,7 @@
   gap: 0.4rem;
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -749,7 +892,7 @@
   gap: 0.4rem;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--color-text-muted);
   margin-bottom: 0.4rem;
 }
 
@@ -760,7 +903,7 @@
 
 .workspace-terminal-timestamp {
   margin-left: auto;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--color-text-faint);
   font-size: 0.7rem;
 }
 
@@ -882,8 +1025,13 @@
     padding: var(--mobile-padding);
   }
 
+  .workspace-header-right {
+    flex-wrap: wrap;
+  }
+
   .workspace-session-select {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
   }
 
   .workspace-body {

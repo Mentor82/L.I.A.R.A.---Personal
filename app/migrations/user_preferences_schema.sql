@@ -42,11 +42,21 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     -- gates an actual capability, not just UI.
     workspace_agent_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 
+    -- Issue #5 (Workspace consolidation): CodeMirror font size, in px, one of
+    -- 13/15/17 (small/medium/large presets - see WorkspacePage.jsx). Applies
+    -- to both editor panes at once, not per-pane.
+    workspace_font_size INTEGER NOT NULL DEFAULT 14,
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     UNIQUE(user_id)
 );
+
+-- Retrofits the column onto an already-existing production table - the
+-- CREATE TABLE above is a no-op there (IF NOT EXISTS), so every field added
+-- after the table's first deploy needs its own idempotent ADD COLUMN here.
+ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS workspace_font_size INTEGER NOT NULL DEFAULT 14;
 
 CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id);
 

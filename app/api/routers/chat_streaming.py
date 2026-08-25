@@ -216,6 +216,8 @@ def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
         return f'Workspace-Datei lesen: "{arguments.get("filename", "")}"'
     if tool_name == "workspace_propose_change":
         return f'Änderung vorschlagen: "{arguments.get("filename", "")}"'
+    if tool_name == "workspace_propose_dependency_change":
+        return f'Paket-Änderung vorschlagen: "{arguments.get("package", "")}"'
     return tool_name
 
 
@@ -598,6 +600,13 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     # in Workspace" card from, independent of chat prose.
                     if tool_name == "workspace_propose_change" and tool_result.get("success") and inner_result.get("proposed"):
                         yield f"data: {json.dumps({'type': 'workspace_proposal', 'proposal_id': inner_result.get('proposal_id'), 'filename': inner_result.get('filename'), 'action': inner_result.get('action'), 'session_id': session_id})}\n\n"
+
+                    # Same structured card as above, package spec standing in
+                    # for `filename` - the frontend's WorkspaceProposalsBlock
+                    # only ever reads {filename, action}, so no separate event
+                    # shape/consumer is needed for this second proposal kind.
+                    if tool_name == "workspace_propose_dependency_change" and tool_result.get("success") and inner_result.get("proposed"):
+                        yield f"data: {json.dumps({'type': 'workspace_proposal', 'proposal_id': inner_result.get('proposal_id'), 'filename': inner_result.get('package'), 'action': inner_result.get('action'), 'session_id': session_id})}\n\n"
 
                     tool_message = {"role": "tool", "content": json.dumps(tool_result)}
                     if tc.get("id"):

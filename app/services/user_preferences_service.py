@@ -29,6 +29,7 @@ class UserPreferences(TypedDict):
     tool_memory_enabled: bool
     workspace_enabled: bool
     workspace_agent_enabled: bool
+    workspace_font_size: int
 
 
 DEFAULT_PREFERENCES: UserPreferences = {
@@ -46,6 +47,8 @@ DEFAULT_PREFERENCES: UserPreferences = {
     # to the user's own workspace files via tool-calling, a bigger step than
     # just showing the tab, so it defaults off.
     "workspace_agent_enabled": False,
+    # 13/15/17px presets (small/medium/large) - see WorkspacePage.jsx.
+    "workspace_font_size": 14,
 }
 
 
@@ -53,7 +56,7 @@ def get_user_preferences(db: Session, user_id: int) -> UserPreferences:
     row = db.execute(text("""
         SELECT ai_model, language, theme, notifications, sound_effects,
                custom_instructions, personality, memory_enabled, tool_memory_enabled,
-               workspace_enabled, workspace_agent_enabled
+               workspace_enabled, workspace_agent_enabled, workspace_font_size
         FROM user_preferences
         WHERE user_id = :user_id
     """), {"user_id": user_id}).first()
@@ -73,4 +76,5 @@ def get_user_preferences(db: Session, user_id: int) -> UserPreferences:
         "tool_memory_enabled": row.tool_memory_enabled,
         "workspace_enabled": row.workspace_enabled,
         "workspace_agent_enabled": row.workspace_agent_enabled,
+        "workspace_font_size": row.workspace_font_size,
     }

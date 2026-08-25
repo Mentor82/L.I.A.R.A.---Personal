@@ -24,6 +24,7 @@
   /* Text Colors */
   --color-text: #E2E8F0;
   --color-text-muted: #94A3B8;
+  --color-text-faint: #64748B;
   
   /* Status Colors */
   --color-success: #10B981;
@@ -149,6 +150,7 @@
   --color-border: rgba(0, 0, 0, 0.15);
   --color-text: #1A202C;
   --color-text-muted: #4A5568;
+  --color-text-faint: #94A3B8;
   
   /* Accent Colors (darker for better contrast on light bg) */
   --color-primary: #0284c7;

@@ -74,6 +74,13 @@ MAX_SEARCH_FILES = 100
 
 
 def _session_dir(user_id: int, session_id: int) -> Path:
+    # Siblings living directly under this dir (not under workspace/): .runs/
+    # (code_sandbox.py, per-execution script staging) and, since issue #5,
+    # .venv/ (run_sandboxed.sh, this session's own Python environment) - both
+    # outside workspace/ on purpose, so they're invisible to the
+    # Explorer/diff/search surface without any exclusion-by-name logic, and
+    # both get cleaned up for free by delete_session_workspace's recursive
+    # removal of this whole directory.
     return SESSION_FILES_DIR / str(user_id) / str(session_id)
 
 
@@ -667,6 +674,12 @@ def create_proposal(
 
     proposal = {
         "id": uuid.uuid4().hex,
+        # Distinguishes this from a "package" proposal (issue #5, see
+        # create_package_proposal below) - old proposals in an existing
+        # .liara_proposals.json predate this field entirely, which is why
+        # every read site treats a missing "kind" as "file" (.get("kind",
+        # "file")) rather than requiring a migration of stored data.
+        "kind": "file",
         "filename": safe_name,
         "action": action,
         "new_content": new_content if action != "delete" else None,
@@ -682,6 +695,52 @@ def create_proposal(
         proposals.append(proposal)
         _save_proposals(user_id, session_id, proposals)
     return {"ok": True, "proposal_id": proposal["id"], "diff": diff}
+
+
+def create_package_proposal(
+    user_id: int,
+    session_id: int,
+    action: str,
+    package_spec: str,
+    description: str,
+) -> dict:
+    """
+    LIARA proposes installing or removing a package in this session's own
+    venv (issue #5, "Agent-Interaktion nachvollziehbar halten") - shares the
+    exact same pending/approve/reject lifecycle and sidecar storage as a file
+    proposal (create_proposal above), just with `kind: "package"` and no
+    diff/base_sha256 (there's no file content to diff). `filename` still
+    carries the package spec string rather than forking the schema - keeps
+    every existing list_proposals()/UI consumer working with one shape.
+    Never touches pip itself - only resolve_proposal(), triggered by an
+    explicit user Annehmen click, does that.
+    """
+    from services.session_environment import is_valid_package_spec
+
+    if action not in ("install", "remove"):
+        return {"ok": False, "error": f"Ungültige Aktion: {action}"}
+    spec = (package_spec or "").strip()
+    if not is_valid_package_spec(spec):
+        return {"ok": False, "error": "Ungültige Paket-Angabe (nur \"name\", \"name==version\" oder \"name>=version\")."}
+
+    proposal = {
+        "id": uuid.uuid4().hex,
+        "kind": "package",
+        "filename": spec,  # the package spec, not a workspace path
+        "action": action,
+        "new_content": None,
+        "diff": "",
+        "description": description,
+        "base_sha256": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+        "resolved_at": None,
+    }
+    with workspace_lock(user_id, session_id):
+        proposals = _load_proposals(user_id, session_id)
+        proposals.append(proposal)
+        _save_proposals(user_id, session_id, proposals)
+    return {"ok": True, "proposal_id": proposal["id"]}
 
 
 def list_proposals(user_id: int, session_id: int, status: Optional[str] = None) -> List[dict]:
@@ -711,6 +770,24 @@ def resolve_proposal(user_id: int, session_id: int, proposal_id: str, approve: b
             return {"ok": False, "error": "Vorschlag nicht gefunden"}
         if proposal.get("status") != "pending":
             return {"ok": False, "error": f"Vorschlag ist bereits {proposal.get('status')}"}
+
+        if approve and proposal.get("kind") == "package":
+            # No TOCTOU/base_sha256 concern here - there's no file content to
+            # have drifted, just "is this package installed or not" at
+            # approval time, which install_package/remove_package already
+            # handle idempotently via pip itself.
+            from services.session_environment import install_package, remove_package
+
+            if proposal["action"] == "install":
+                result = install_package(user_id, session_id, proposal["filename"])
+            else:
+                result = remove_package(user_id, session_id, proposal["filename"])
+            if not result.get("ok"):
+                return result
+            proposal["status"] = "approved"
+            proposal["resolved_at"] = datetime.now(timezone.utc).isoformat()
+            _save_proposals(user_id, session_id, proposals)
+            return {"ok": True}
 
         if approve:
             action = proposal["action"]

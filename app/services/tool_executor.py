@@ -18,7 +18,10 @@ from services.search_broker import get_search_broker
 from services.web_safety.proxy_sandbox import get_proxy_sandbox
 from services import session_workspace
 
-WORKSPACE_AGENT_TOOLS = ("workspace_list_files", "workspace_read_file", "workspace_propose_change")
+WORKSPACE_AGENT_TOOLS = (
+    "workspace_list_files", "workspace_read_file", "workspace_propose_change",
+    "workspace_propose_dependency_change",
+)
 
 # How many top SearXNG results get a real fetch-and-extract enrichment pass
 # via the (SSRF-hardened) ProxySandbox - kept small since each one is a real
@@ -186,6 +189,12 @@ class ToolExecutor:
         elif tool_def.name == "workspace_propose_change":
             return self._execute_workspace_propose(user_id, session_id, parameters)
 
+        # Workspace: propose a dependency change (issue #5) - never calls pip
+        # itself, only session_workspace.create_package_proposal; same
+        # approve/reject-by-the-user gate as a file proposal.
+        elif tool_def.name == "workspace_propose_dependency_change":
+            return self._execute_workspace_propose_dependency(user_id, session_id, parameters)
+
         # Fallback to stub function
         else:
             return await tool_def.function(**parameters)
@@ -216,7 +225,25 @@ class ToolExecutor:
             "action": params.get("action", ""),
             "message": "Vorschlag wurde erstellt. Der Nutzer muss ihn im Workspace-Tab annehmen, bevor er wirksam wird.",
         }
-    
+
+    def _execute_workspace_propose_dependency(self, user_id: int, session_id: int, params: Dict[str, Any]) -> Dict:
+        result = session_workspace.create_package_proposal(
+            user_id,
+            session_id,
+            action=params.get("action", ""),
+            package_spec=params.get("package", ""),
+            description=params.get("description", ""),
+        )
+        if not result.get("ok"):
+            return {"error": result.get("error", "Vorschlag fehlgeschlagen")}
+        return {
+            "proposed": True,
+            "proposal_id": result["proposal_id"],
+            "package": params.get("package", ""),
+            "action": params.get("action", ""),
+            "message": "Vorschlag wurde erstellt. Der Nutzer muss ihn im Workspace-Tab annehmen, bevor das Paket tatsächlich installiert/entfernt wird.",
+        }
+
     async def _execute_web_search(self, params: Dict[str, Any]) -> Dict:
         """Führt Web-Suche aus"""
         query = params.get("query")

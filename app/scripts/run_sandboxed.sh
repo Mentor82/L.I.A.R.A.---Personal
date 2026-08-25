@@ -29,6 +29,23 @@ fi
 
 cd "$WORKSPACE_DIR"
 
+# Issue #5 (Workspace consolidation): each session gets its own Python venv
+# instead of every session sharing /opt/liara/runner-venv directly - lets a
+# session install its own extra packages without affecting any other user's
+# session. Lives as SESSION_DIR/.venv, a sibling of workspace/ (same place as
+# .runs/), so it's outside the Explorer/diff/search boundary without needing
+# a new exclusion rule. Created lazily on first use, guarded by code_sandbox.py's
+# workspace_lock so two runs of the same session can't race this step.
+# --system-site-packages means packages already in runner-venv (matplotlib
+# etc.) are inherited for free - only this session's own pip installs land in
+# its own site-packages, shadowing the shared ones on a name collision. Not
+# `set -e`-fatal: a one-time creation hiccup falls back to the shared venv
+# below rather than failing every future run in this session forever.
+SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
+if [ ! -x "$SESSION_VENV/bin/python3" ]; then
+  /opt/liara/runner-venv/bin/python3 -m venv --system-site-packages "$SESSION_VENV" || true
+fi
+
 # Resource limits - last line of defense if the caller's preexec_fn rlimits
 # somehow don't apply (e.g. sudo policy strips them). CPU seconds, max
 # processes (blocks fork-bombs), and per-language virtual memory: Julia
@@ -53,9 +70,14 @@ set +e
 case "$LANGUAGE" in
   python)
     ulimit -v 1048576   # 1 GiB
-    # Dedicated venv (matplotlib etc.), not the bare system python3 or the
-    # LIARA backend's own venv - keeps sandboxed deps isolated from both.
-    /opt/liara/runner-venv/bin/python3 "$SCRIPT_PATH"
+    # This session's own venv (see above) if it exists, else the shared
+    # runner-venv as a fallback - never the bare system python3 or the LIARA
+    # backend's own venv, keeps sandboxed deps isolated from both.
+    if [ -x "$SESSION_VENV/bin/python3" ]; then
+      "$SESSION_VENV/bin/python3" "$SCRIPT_PATH"
+    else
+      /opt/liara/runner-venv/bin/python3 "$SCRIPT_PATH"
+    fi
     CODE=$?
     ;;
   julia)

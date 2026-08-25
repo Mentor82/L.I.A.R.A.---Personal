@@ -518,6 +518,12 @@ export const preferencesAPI = {
   async get() {
     return apiFetch('/user/preferences');
   },
+  async update(partial) {
+    return apiFetch('/user/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(partial),
+    });
+  },
 };
 
 /**
@@ -697,6 +703,31 @@ export const workspaceAPI = {
   async rejectProposal(sessionId, proposalId) {
     return apiFetch(`/workspace/sessions/${sessionId}/proposals/${proposalId}/reject`, {
       method: 'POST',
+    });
+  },
+
+  /**
+   * Issue #5: this session's own Python venv - packages the user (not
+   * inherited from the shared base env) added, plus a minimal status check.
+   */
+  async getEnvironment(sessionId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/environment`);
+  },
+
+  async getPackages(sessionId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/packages`);
+  },
+
+  async installPackage(sessionId, spec) {
+    return apiFetch(`/workspace/sessions/${sessionId}/packages`, {
+      method: 'POST',
+      body: JSON.stringify({ spec }),
+    });
+  },
+
+  async removePackage(sessionId, name) {
+    return apiFetch(`/workspace/sessions/${sessionId}/packages/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
     });
   },
 };

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
+import { EditorView } from '@codemirror/view';
 import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
 import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
@@ -12,6 +13,8 @@ const PROPOSAL_ACTION_LABELS = {
   create: 'Neu anlegen',
   update: 'Überschreiben',
   delete: 'Löschen',
+  install: '📦 Paket installieren',
+  remove: '📦 Paket entfernen',
 };
 
 const juliaLanguage = StreamLanguage.define(juliaLegacyMode);
@@ -24,6 +27,38 @@ const LANGUAGE_BY_EXTENSION = {
   py: { cm: python(), runLanguage: 'python' },
   jl: { cm: juliaLanguage, runLanguage: 'julia' },
 };
+
+// Three fixed presets (not a slider/numeric input) - "Klein/Mittel/Groß" is
+// enough range for reading comfort without turning this into a settings
+// screen, matching issue #5's "ruhig, kein Feature-Regler" steer. Kept in
+// sync with app/api/routers/user_preferences_router.py's WORKSPACE_FONT_SIZES.
+const FONT_SIZE_PRESETS = [
+  { size: 13, label: 'Klein' },
+  { size: 15, label: 'Mittel' },
+  { size: 17, label: 'Groß' },
+];
+const DEFAULT_FONT_SIZE = 14; // matches the backend column's DEFAULT before a user ever picks a preset
+
+// Reads the app-wide dark/light choice straight off the DOM attribute
+// PageLayout/UserPreferences already resolve it to (see utils/theme.js's
+// applyTheme) rather than re-deriving system-preference logic here, and
+// stays in sync via a MutationObserver so a theme change made elsewhere
+// (e.g. the Preferences page, still mounted in another tab) is picked up
+// without needing Workspace-specific plumbing for it.
+function useAppTheme() {
+  const [theme, setTheme] = useState(
+    () => document.documentElement.getAttribute('data-theme') || 'dark'
+  );
+  useEffect(() => {
+    const target = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setTheme(target.getAttribute('data-theme') || 'dark');
+    });
+    observer.observe(target, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return theme;
+}
 
 function extensionOf(filename) {
   const dot = filename.lastIndexOf('.');
@@ -259,9 +294,10 @@ function EditorPane({
   onSelectTab, onCloseTab, onChangeContent, onCreateEditor,
   running, runHistory, onClearHistory, onSave, onRun,
   sessionId, isSecondary, onSplit, onCloseSplitPane,
+  cmTheme, fontSizeExtension, isActivePane,
 }) {
   return (
-    <section className="workspace-main">
+    <section className={`workspace-main ${isActivePane ? 'active-pane' : ''}`}>
       {isSecondary && (
         <div className="workspace-split-header">
           <span>Geteilte Ansicht</span>
@@ -296,8 +332,8 @@ function EditorPane({
             <CodeMirror
               value={tabData.content}
               height="360px"
-              theme="dark"
-              extensions={activeLang ? [activeLang.cm] : []}
+              theme={cmTheme}
+              extensions={activeLang ? [activeLang.cm, fontSizeExtension] : [fontSizeExtension]}
               onChange={onChangeContent}
               onCreateEditor={onCreateEditor}
             />
@@ -345,10 +381,33 @@ function WorkspacePage() {
   // update to default to open.
   const [collapsedFolders, setCollapsedFolders] = useState(new Set());
 
+  const cmTheme = useAppTheme() === 'light' ? 'light' : 'dark';
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  // Single EditorView.theme() extension shared by both panes - font size is
+  // Workspace-wide, not per-pane, so one preference change updates both at
+  // once. Line-height is fixed at a comfortable 1.6 alongside it (issue #5's
+  // "sinnvolle Zeilenhöhe") rather than exposed as its own control.
+  const fontSizeExtension = useMemo(() => EditorView.theme({
+    '&': { fontSize: `${fontSize}px` },
+    '.cm-content': { lineHeight: '1.6' },
+    '.cm-gutters': { fontSize: `${fontSize}px` },
+  }), [fontSize]);
+
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [proposals, setProposals] = useState([]);
   const [selectedProposalIds, setSelectedProposalIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Issue #5: minimal on-demand environment status + package popover - never
+  // polled, only (re)loaded on session change and after an install/remove/
+  // proposal-approve actually changes something.
+  const [envStatus, setEnvStatus] = useState(null); // {exists, python_version, package_count} | null
+  const [packagesOpen, setPackagesOpen] = useState(false);
+  const [sessionPackages, setSessionPackages] = useState([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packageInput, setPackageInput] = useState('');
+  const [packageBusy, setPackageBusy] = useState(false);
+  const [packageError, setPackageError] = useState(null);
 
   // Upload from the local computer - either the hidden <input type="file">
   // (triggered per-folder or at root) or drag & drop onto the Explorer.
@@ -384,6 +443,11 @@ function WorkspacePage() {
   const [splitRunHistory, setSplitRunHistory] = useState([]);
   const splitEditorViewRef = useRef(null);
 
+  // Which pane last had editor focus - only rendered as a visual indicator
+  // once split (see EditorPane's isActivePane), so it adds no noise in the
+  // common single-pane case (issue #5: "aktiver Bereich klar erkennbar").
+  const [activePane, setActivePane] = useState('primary');
+
   useEffect(() => {
     (async () => {
       try {
@@ -397,9 +461,19 @@ function WorkspacePage() {
       }
     })();
     preferencesAPI.get()
-      .then((prefs) => setAgentEnabled(!!prefs?.workspace_agent_enabled))
+      .then((prefs) => {
+        setAgentEnabled(!!prefs?.workspace_agent_enabled);
+        if (prefs?.workspace_font_size) setFontSize(prefs.workspace_font_size);
+      })
       .catch(() => {});
   }, []);
+
+  // Persisted immediately on click (not debounced - this is a deliberate,
+  // infrequent choice from 3 fixed presets, not a slider being dragged).
+  const changeFontSize = (size) => {
+    setFontSize(size);
+    preferencesAPI.update({ workspace_font_size: size }).catch(() => {});
+  };
 
   const loadFiles = async (id) => {
     setLoadingFiles(true);
@@ -428,11 +502,34 @@ function WorkspacePage() {
     }
   };
 
+  const loadEnvironment = async (id) => {
+    try {
+      const status = await workspaceAPI.getEnvironment(id);
+      setEnvStatus(status);
+    } catch {
+      setEnvStatus(null);
+    }
+  };
+
+  const loadPackages = async (id) => {
+    setPackagesLoading(true);
+    try {
+      const { packages } = await workspaceAPI.getPackages(id);
+      setSessionPackages(packages || []);
+    } catch {
+      setSessionPackages([]);
+    } finally {
+      setPackagesLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (sessionId) {
       loadFiles(sessionId);
+      loadEnvironment(sessionId);
       if (agentEnabled) loadProposals(sessionId);
     }
+    setPackagesOpen(false);
   }, [sessionId, agentEnabled]);
 
   // Debounced project-wide search - fires 300ms after the user stops typing
@@ -465,6 +562,10 @@ function WorkspacePage() {
       await workspaceAPI.approveProposal(sessionId, proposalId);
       loadProposals(sessionId);
       loadFiles(sessionId);
+      // Cheap either way (a package proposal changes the count, a file
+      // proposal doesn't) - simpler than branching on p.kind here.
+      loadEnvironment(sessionId);
+      if (packagesOpen) loadPackages(sessionId);
     } catch (err) {
       setError(err.message || 'Annehmen fehlgeschlagen.');
     }
@@ -515,6 +616,8 @@ function WorkspacePage() {
       setSelectedProposalIds(new Set());
       loadProposals(sessionId);
       loadFiles(sessionId);
+      loadEnvironment(sessionId);
+      if (packagesOpen) loadPackages(sessionId);
       setBulkBusy(false);
     }
   };
@@ -824,6 +927,50 @@ function WorkspacePage() {
     });
   };
 
+  // Nutzer-direkt path (issue #5) - immediate, no approval needed, since
+  // it's the user's own action on their own session. LIARA's side always
+  // goes through a proposal instead (see the proposals panel above).
+  const togglePackagesPopover = () => {
+    setPackageError(null);
+    setPackagesOpen((open) => {
+      const next = !open;
+      if (next) loadPackages(sessionId);
+      return next;
+    });
+  };
+
+  const handleInstallPackage = async () => {
+    const spec = packageInput.trim();
+    if (!spec || packageBusy) return;
+    setPackageBusy(true);
+    setPackageError(null);
+    try {
+      await workspaceAPI.installPackage(sessionId, spec);
+      setPackageInput('');
+      await loadPackages(sessionId);
+      loadEnvironment(sessionId);
+    } catch (err) {
+      setPackageError(err.message || 'Installation fehlgeschlagen.');
+    } finally {
+      setPackageBusy(false);
+    }
+  };
+
+  const handleRemovePackage = async (name) => {
+    if (packageBusy) return;
+    setPackageBusy(true);
+    setPackageError(null);
+    try {
+      await workspaceAPI.removePackage(sessionId, name);
+      await loadPackages(sessionId);
+      loadEnvironment(sessionId);
+    } catch (err) {
+      setPackageError(err.message || 'Entfernen fehlgeschlagen.');
+    } finally {
+      setPackageBusy(false);
+    }
+  };
+
   const tree = useMemo(() => buildTree(files), [files]);
   const treeHandlers = {
     onToggleCollapse: toggleFolderCollapse,
@@ -846,15 +993,84 @@ function WorkspacePage() {
         <div className="workspace-header-left">
           <h1>🗂️ Workspace</h1>
         </div>
-        <select
-          className="workspace-session-select"
-          value={sessionId || ''}
-          onChange={(e) => setSessionId(parseInt(e.target.value, 10))}
-        >
-          {sessions.map((s) => (
-            <option key={s.id} value={s.id}>{s.title}</option>
-          ))}
-        </select>
+        <div className="workspace-header-right">
+          <div className="workspace-env-status">
+            <button
+              className="workspace-env-chip"
+              onClick={togglePackagesPopover}
+              title="Laufzeitumgebung / Pakete"
+            >
+              {envStatus?.exists
+                ? `🐍 ${envStatus.python_version} · ${envStatus.package_count} Paket${envStatus.package_count === 1 ? '' : 'e'}`
+                : '🐍 venv wird beim ersten Ausführen angelegt'}
+            </button>
+            {packagesOpen && (
+              <div className="workspace-packages-popover">
+                <div className="workspace-packages-header">
+                  <span>📦 Pakete dieser Session</span>
+                  <button className="workspace-icon-btn" onClick={() => setPackagesOpen(false)}>✕</button>
+                </div>
+                {packagesLoading ? (
+                  <p className="workspace-hint">Lade…</p>
+                ) : sessionPackages.length === 0 ? (
+                  <p className="workspace-hint">Noch keine eigenen Pakete installiert.</p>
+                ) : (
+                  <ul className="workspace-packages-list">
+                    {sessionPackages.map((pkg) => {
+                      const name = pkg.split('==')[0];
+                      return (
+                        <li key={pkg}>
+                          <span>{pkg}</span>
+                          <button
+                            className="workspace-icon-btn danger"
+                            title="Entfernen"
+                            disabled={packageBusy}
+                            onClick={() => handleRemovePackage(name)}
+                          >🗑️</button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <div className="workspace-packages-add">
+                  <input
+                    type="text"
+                    placeholder="z. B. requests==2.31.0"
+                    value={packageInput}
+                    onChange={(e) => setPackageInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleInstallPackage(); }}
+                  />
+                  <button className="workspace-btn-secondary" disabled={packageBusy || !packageInput.trim()} onClick={handleInstallPackage}>
+                    {packageBusy ? '…' : 'Installieren'}
+                  </button>
+                </div>
+                {packageError && <p className="workspace-modal-error">{packageError}</p>}
+              </div>
+            )}
+          </div>
+          <div className="workspace-font-size-group" role="group" aria-label="Schriftgröße">
+            {FONT_SIZE_PRESETS.map((preset) => (
+              <button
+                key={preset.size}
+                className={`workspace-font-size-btn ${fontSize === preset.size ? 'active' : ''}`}
+                style={{ fontSize: `${preset.size}px` }}
+                title={preset.label}
+                onClick={() => changeFontSize(preset.size)}
+              >
+                A
+              </button>
+            ))}
+          </div>
+          <select
+            className="workspace-session-select"
+            value={sessionId || ''}
+            onChange={(e) => setSessionId(parseInt(e.target.value, 10))}
+          >
+            {sessions.map((s) => (
+              <option key={s.id} value={s.id}>{s.title}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {error && <div className="workspace-error">{error} <button onClick={() => setError(null)}>✕</button></div>}
@@ -894,11 +1110,13 @@ function WorkspacePage() {
                     checked={selectedProposalIds.has(p.id)}
                     onChange={() => toggleProposalSelection(p.id)}
                   />
-                  <span className="workspace-proposal-action">{PROPOSAL_ACTION_LABELS[p.action] || p.action}</span>
+                  <span className={`workspace-proposal-action ${p.kind === 'package' ? 'workspace-proposal-action-package' : ''}`}>
+                    {PROPOSAL_ACTION_LABELS[p.action] || p.action}
+                  </span>
                   <span className="workspace-file-name">{p.filename}</span>
                 </div>
                 {p.description && <p className="workspace-proposal-description">{p.description}</p>}
-                <DiffView diff={p.diff} />
+                {p.kind !== 'package' && <DiffView diff={p.diff} />}
                 <div className="workspace-modal-actions">
                   <button className="workspace-btn-secondary" onClick={() => handleRejectProposal(p.id)}>Ablehnen</button>
                   <button className="primary" onClick={() => handleApproveProposal(p.id)}>Annehmen</button>
@@ -1024,7 +1242,10 @@ function WorkspacePage() {
             onSelectTab={setActiveTab}
             onCloseTab={closeTab}
             onChangeContent={(value) => updateTabContent(activeTab, value)}
-            onCreateEditor={(view) => { editorViewRef.current = view; }}
+            onCreateEditor={(view) => {
+              editorViewRef.current = view;
+              view.dom.addEventListener('focusin', () => setActivePane('primary'));
+            }}
             running={running}
             runHistory={runHistory}
             onClearHistory={() => setRunHistory([])}
@@ -1033,6 +1254,9 @@ function WorkspacePage() {
             sessionId={sessionId}
             isSecondary={false}
             onSplit={() => activeTab && openInSplit(activeTab)}
+            cmTheme={cmTheme}
+            fontSizeExtension={fontSizeExtension}
+            isActivePane={!!splitTab && activePane === 'primary'}
           />
           {splitTab && (
             <EditorPane
@@ -1043,7 +1267,10 @@ function WorkspacePage() {
               onSelectTab={setSplitTab}
               onCloseTab={closeTab}
               onChangeContent={(value) => updateTabContent(splitTab, value)}
-              onCreateEditor={(view) => { splitEditorViewRef.current = view; }}
+              onCreateEditor={(view) => {
+                splitEditorViewRef.current = view;
+                view.dom.addEventListener('focusin', () => setActivePane('split'));
+              }}
               running={splitRunning}
               runHistory={splitRunHistory}
               onClearHistory={() => setSplitRunHistory([])}
@@ -1052,6 +1279,9 @@ function WorkspacePage() {
               sessionId={sessionId}
               isSecondary={true}
               onCloseSplitPane={closeSplit}
+              cmTheme={cmTheme}
+              fontSizeExtension={fontSizeExtension}
+              isActivePane={activePane === 'split'}
             />
           )}
         </div>

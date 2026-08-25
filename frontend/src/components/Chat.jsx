@@ -171,7 +171,10 @@ function WebSourcesBlock({ sources }) {
   );
 }
 
-const PROPOSAL_ACTION_LABELS = { create: 'anlegen', update: 'überschreiben', delete: 'löschen' };
+const PROPOSAL_ACTION_LABELS = {
+  create: 'anlegen', update: 'überschreiben', delete: 'löschen',
+  install: 'installieren', remove: 'entfernen', // package-kind proposals (issue #5)
+};
 
 // LIARA proposed a workspace change (Agent-Vorbereitung v1) - nothing on
 // disk changed yet, this just points at where to review/approve it. Same

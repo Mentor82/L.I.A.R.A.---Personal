@@ -283,6 +283,43 @@ class ToolRegistry:
             privacy_level="low"
         ))
 
+        self.register_tool(ToolDefinition(
+            name="workspace_propose_dependency_change",
+            description=(
+                "Schlägt vor, ein Python-Paket im venv dieser Session zu "
+                "installieren oder zu entfernen. Ändert NICHTS direkt - der "
+                "Nutzer sieht den Vorschlag im Workspace-Tab und muss ihn "
+                "explizit annehmen, bevor das Paket tatsächlich installiert/"
+                "entfernt wird. Nur für Pakete aus PyPI per Name/Version, "
+                "keine URLs oder lokalen Pfade."
+            ),
+            category=ToolCategory.WORKSPACE,
+            parameters=[
+                ToolParameter(
+                    name="package",
+                    type="string",
+                    description="Paket-Angabe: nur 'name', 'name==version' oder 'name>=version' - keine URLs, keine Flags",
+                    required=True
+                ),
+                ToolParameter(
+                    name="action",
+                    type="string",
+                    description="Installieren oder Entfernen",
+                    required=True,
+                    enum=["install", "remove"]
+                ),
+                ToolParameter(
+                    name="description",
+                    type="string",
+                    description="Kurze Begründung, warum dieses Paket gebraucht/entfernt wird",
+                    required=True
+                )
+            ],
+            function=self._workspace_propose_dependency_stub,
+            requires_consent=True,
+            privacy_level="low"
+        ))
+
     def register_tool(self, tool: ToolDefinition):
         """Registriere neues Tool"""
         self._tools[tool.name] = tool
@@ -419,6 +456,10 @@ class ToolRegistry:
     async def _workspace_propose_stub(self, **kwargs):
         """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
         return {"error": "Not implemented", "tool": "workspace_propose_change"}
+
+    async def _workspace_propose_dependency_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "workspace_propose_dependency_change"}
 
     async def _time_stub(self, **kwargs):
         """Placeholder für Time"""
