@@ -35,7 +35,7 @@ from typing import Dict, List, Optional, Tuple
 from services.session_workspace import (
     SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME,
     record_file_event, MAX_SESSION_FILE, MAX_SESSION_TOTAL, workspace_total_size,
-    workspace_lock,
+    workspace_lock, ensure_session_venv_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -240,6 +240,9 @@ def run_code(
     # needs write access here too. World-writable is acceptable since this
     # directory only ever contains this session's own generated content.
     os.chmod(workspace_dir, 0o777)
+    # Same reasoning for .venv (issue #5) - see ensure_session_venv_dir's
+    # docstring for why this can't just be liara-runner creating it itself.
+    ensure_session_venv_dir(session_dir)
 
     result = SandboxResult(run_id=run_id)
 

@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from services.session_workspace import SESSION_FILES_DIR
+from services.session_workspace import SESSION_FILES_DIR, ensure_session_venv_dir
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,16 @@ def is_valid_package_spec(spec: str) -> bool:
     return bool(spec) and bool(PACKAGE_SPEC_PATTERN.match(spec.strip()))
 
 
+def _session_dir(user_id: int, session_id: int) -> Path:
+    return SESSION_FILES_DIR / str(user_id) / str(session_id)
+
+
 def _workspace_dir(user_id: int, session_id: int) -> Path:
-    return SESSION_FILES_DIR / str(user_id) / str(session_id) / "workspace"
+    return _session_dir(user_id, session_id) / "workspace"
 
 
 def _venv_python(user_id: int, session_id: int) -> Path:
-    return SESSION_FILES_DIR / str(user_id) / str(session_id) / ".venv" / "bin" / "python3"
+    return _session_dir(user_id, session_id) / ".venv" / "bin" / "python3"
 
 
 def venv_exists(user_id: int, session_id: int) -> bool:
@@ -54,6 +58,12 @@ def venv_exists(user_id: int, session_id: int) -> bool:
 def _run_manage_venv(user_id: int, session_id: int, action: str, package_spec: str = "") -> subprocess.CompletedProcess:
     workspace_dir = _workspace_dir(user_id, session_id)
     workspace_dir.mkdir(parents=True, exist_ok=True)
+    # liara-runner needs to CREATE the .venv dir itself here (unlike
+    # workspace_dir, which the router pre-creates too) since this may be the
+    # very first thing that ever touches this session - see
+    # ensure_session_venv_dir's docstring for why the plain mkdir above isn't
+    # enough on its own for a sibling-of-workspace/ directory.
+    ensure_session_venv_dir(_session_dir(user_id, session_id))
     # package_spec omitted entirely (not passed as "") for list/version - the
     # script's own `${3:-}` default handles a missing 3rd arg identically.
     command = ["sudo", "-n", "-u", RUNNER_USER, "--", MANAGE_VENV_SCRIPT, str(workspace_dir), action]
