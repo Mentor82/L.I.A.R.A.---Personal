@@ -23,7 +23,7 @@ from typing import List, Optional
 
 # POSIX-only (real cross-process locking on the Linux production server, via
 # flock()) - conditional import so local Windows dev doesn't crash on module
-# load. Falls back to a plain in-process Lock there (see _workspace_lock).
+# load. Falls back to a plain in-process Lock there (see workspace_lock).
 try:
     import fcntl
 except ImportError:
@@ -58,7 +58,7 @@ MANIFEST_FILENAME = ".liara_manifest.json"
 # Also excluded from every directory listing/diff.
 PROPOSALS_FILENAME = ".liara_proposals.json"
 
-# Advisory-lock file for _workspace_lock (issue #8 hardening) - like the
+# Advisory-lock file for workspace_lock (issue #8 hardening) - like the
 # other sidecars above, it's bookkeeping, not workspace content, so it's
 # excluded from every directory listing/diff/size-total the same way.
 LOCK_FILENAME = ".liara.lock"
@@ -99,7 +99,7 @@ def _atomic_write_json(path: Path, data) -> None:
 
 
 # Per-thread set of (user_id, session_id) keys whose workspace lock is
-# already held further up the current call stack - lets _workspace_lock be
+# already held further up the current call stack - lets workspace_lock be
 # safely re-entered (e.g. resolve_proposal -> create_workspace_file ->
 # record_file_event, all synchronous, same call stack) without deadlocking
 # on itself. A plain flock() would otherwise block forever: it's tied to the
@@ -109,13 +109,16 @@ _dev_fallback_lock = threading.Lock()  # only used when fcntl is unavailable
 
 
 @contextlib.contextmanager
-def _workspace_lock(user_id: int, session_id: int):
+def workspace_lock(user_id: int, session_id: int):
     """
-    Guards the manifest/proposals read-modify-write cycle for one session's
-    workspace. Real cross-process protection via flock() on Linux (both
-    liara-backend and liara-sse import this module and can race on the same
-    sidecar files); falls back to an in-process Lock on non-POSIX platforms
-    (Windows dev only - production is Linux).
+    Guards a session's workspace against concurrent mutation - both the
+    manifest/proposals read-modify-write cycle here and, per issue #8's
+    session-serialization fix, a code_sandbox.py run's full snapshot/execute/
+    diff cycle. Real cross-process protection via flock() on Linux (an
+    asyncio.Lock alone can't serialize across gunicorn's several worker
+    processes, which is exactly what let two same-session runs race each
+    other's file snapshots); falls back to an in-process Lock on non-POSIX
+    platforms (Windows dev only - production is Linux).
     """
     key = (user_id, session_id)
     held = getattr(_lock_holder, "held", None)
@@ -198,7 +201,7 @@ def record_file_event(user_id: int, session_id: int, filename: str, source: str,
     knows who/what produced it. `source` is one of: user, upload,
     code_runner, liara, agent, web_research, generated.
     """
-    with _workspace_lock(user_id, session_id):
+    with workspace_lock(user_id, session_id):
         manifest = _load_manifest(user_id, session_id)
         entry = manifest.get(filename, {})
         entry["id"] = entry.get("id") or uuid.uuid4().hex
@@ -217,7 +220,7 @@ def _remove_file_from_manifest(user_id: int, session_id: int, filename: str) -> 
     would leave stale manifest entries behind for files that no longer
     exist at that path.
     """
-    with _workspace_lock(user_id, session_id):
+    with workspace_lock(user_id, session_id):
         manifest = _load_manifest(user_id, session_id)
         prefix = f"{filename}/"
         changed = False
@@ -236,7 +239,7 @@ def _rename_file_in_manifest(user_id: int, session_id: int, old_name: str, new_n
     in one `Path.rename`, so the manifest keys need the same prefix rewrite
     to keep pointing at files that still exist, just under a new path.
     """
-    with _workspace_lock(user_id, session_id):
+    with workspace_lock(user_id, session_id):
         manifest = _load_manifest(user_id, session_id)
         prefix = f"{old_name}/"
         changed = False
@@ -253,7 +256,7 @@ def _rename_file_in_manifest(user_id: int, session_id: int, old_name: str, new_n
 
 def set_context_selection(user_id: int, session_id: int, filenames: List[str]) -> None:
     """Replaces the full "included in chat context" set for this workspace."""
-    with _workspace_lock(user_id, session_id):
+    with workspace_lock(user_id, session_id):
         manifest = _load_manifest(user_id, session_id)
         selected = set(filenames)
         for name in list(manifest.keys()):
@@ -674,7 +677,7 @@ def create_proposal(
         "status": "pending",
         "resolved_at": None,
     }
-    with _workspace_lock(user_id, session_id):
+    with workspace_lock(user_id, session_id):
         proposals = _load_proposals(user_id, session_id)
         proposals.append(proposal)
         _save_proposals(user_id, session_id, proposals)
@@ -701,7 +704,7 @@ def resolve_proposal(user_id: int, session_id: int, proposal_id: str, approve: b
     the first is done, then sees status != "pending" and cleanly refuses,
     rather than a lost-update race deciding it arbitrarily.
     """
-    with _workspace_lock(user_id, session_id):
+    with workspace_lock(user_id, session_id):
         proposals = _load_proposals(user_id, session_id)
         proposal = next((p for p in proposals if p.get("id") == proposal_id), None)
         if proposal is None:

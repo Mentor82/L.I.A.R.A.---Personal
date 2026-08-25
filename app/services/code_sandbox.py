@@ -17,6 +17,7 @@ Security model (see plan for the full reasoning, summarized here):
 - Output captured via tempfile and tail-capped, never subprocess.PIPE, so a
   runaway script can't exhaust this process's memory.
 """
+import contextlib
 import logging
 import mimetypes
 import os
@@ -34,6 +35,7 @@ from typing import Dict, List, Optional, Tuple
 from services.session_workspace import (
     SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME,
     record_file_event, MAX_SESSION_FILE, MAX_SESSION_TOTAL, workspace_total_size,
+    workspace_lock,
 )
 
 logger = logging.getLogger(__name__)
@@ -236,88 +238,99 @@ def run_code(
     # directory only ever contains this session's own generated content.
     os.chmod(workspace_dir, 0o777)
 
-    before = _snapshot(workspace_dir)
-    command = _build_command(normalized, workspace_dir, script_path)
-
     result = SandboxResult(run_id=run_id)
-    with tempfile.TemporaryFile() as stdout_f, tempfile.TemporaryFile() as stderr_f:
-        try:
-            process = subprocess.Popen(
-                command, cwd=str(workspace_dir),
-                stdout=stdout_f, stderr=stderr_f,
-                preexec_fn=_preexec(normalized),
-            )
-            try:
-                process.wait(timeout=timeout)
-                result.exit_code = process.returncode
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
-                result.timed_out = True
 
-            result.stdout = _tail(stdout_f, OUTPUT_CAP)
-            result.stderr = _tail(stderr_f, OUTPUT_CAP)
-            if result.timed_out:
-                result.stderr = (result.stderr + f"\n[Abgebrochen nach {timeout}s Timeout]")[-OUTPUT_CAP:]
-            if result.exit_code == 1 and "sudo: " in result.stderr.lower():
-                result.error = (
-                    "Sandbox-Ausführung fehlgeschlagen - der liara-runner-User ist vermutlich "
-                    "noch nicht eingerichtet (siehe Setup-Anleitung)."
+    # The whole snapshot -> execute -> diff cycle has to be one atomic section
+    # per session (issue #8) - two runs racing here can snapshot/diff the same
+    # workspace/ concurrently and misattribute each other's output files. An
+    # asyncio.Lock in the router serializes same-worker requests but can't
+    # reach across gunicorn's several worker processes; workspace_lock's
+    # flock() can, since it's a real OS-level lock on a shared file. Skipped
+    # entirely for the (unused-in-practice) legacy no-ids caller - nothing to
+    # race with when nothing gets recorded against a session anyway.
+    lock_cm = workspace_lock(user_id, session_id) if (user_id is not None and session_id is not None) else contextlib.nullcontext()
+    with lock_cm:
+        before = _snapshot(workspace_dir)
+        command = _build_command(normalized, workspace_dir, script_path)
+
+        with tempfile.TemporaryFile() as stdout_f, tempfile.TemporaryFile() as stderr_f:
+            try:
+                process = subprocess.Popen(
+                    command, cwd=str(workspace_dir),
+                    stdout=stdout_f, stderr=stderr_f,
+                    preexec_fn=_preexec(normalized),
                 )
-        except Exception as e:
-            result.error = f"Sandbox-Fehler: {e}"
+                try:
+                    process.wait(timeout=timeout)
+                    result.exit_code = process.returncode
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                    result.timed_out = True
 
-    # A script's own os.makedirs()'d subfolder is owned by liara-runner, not
-    # world-writable like workspace_dir itself - the backend (a different,
-    # less-privileged OS user) has no way to chmod a path it doesn't own, so
-    # this can only be fixed from inside run_sandboxed.sh (which runs AS
-    # liara-runner and does its own trailing `chmod -R 777` there) rather
-    # than here after the fact.
-    changed_files = _diff_snapshot(before, workspace_dir)
+                result.stdout = _tail(stdout_f, OUTPUT_CAP)
+                result.stderr = _tail(stderr_f, OUTPUT_CAP)
+                if result.timed_out:
+                    result.stderr = (result.stderr + f"\n[Abgebrochen nach {timeout}s Timeout]")[-OUTPUT_CAP:]
+                if result.exit_code == 1 and "sudo: " in result.stderr.lower():
+                    result.error = (
+                        "Sandbox-Ausführung fehlgeschlagen - der liara-runner-User ist vermutlich "
+                        "noch nicht eingerichtet (siehe Setup-Anleitung)."
+                    )
+            except Exception as e:
+                result.error = f"Sandbox-Fehler: {e}"
 
-    # Workspace quota enforcement (issue #8) - RLIMIT_FSIZE above is a
-    # defense-in-depth cap on any SINGLE file during the run itself, but it
-    # can't know about the session's *aggregate* size across pre-existing
-    # files. A manual create/write already enforces both MAX_SESSION_FILE and
-    # MAX_SESSION_TOTAL; sandbox output previously bypassed both entirely
-    # (only snapshotted/diffed, never size-checked). Reject the whole run's
-    # output rather than partially keeping it - simpler to reason about than
-    # picking which files to keep, and this is already the rare/abuse case.
-    oversized = [f for f in changed_files if f.size > MAX_SESSION_FILE]
-    over_total = workspace_total_size(workspace_dir) > MAX_SESSION_TOTAL
-    if changed_files and (oversized or over_total):
+        # A script's own os.makedirs()'d subfolder is owned by liara-runner, not
+        # world-writable like workspace_dir itself - the backend (a different,
+        # less-privileged OS user) has no way to chmod a path it doesn't own, so
+        # this can only be fixed from inside run_sandboxed.sh (which runs AS
+        # liara-runner and does its own trailing `chmod -R 777` there) rather
+        # than here after the fact.
+        changed_files = _diff_snapshot(before, workspace_dir)
+
+        # Workspace quota enforcement (issue #8) - RLIMIT_FSIZE above is a
+        # defense-in-depth cap on any SINGLE file during the run itself, but it
+        # can't know about the session's *aggregate* size across pre-existing
+        # files. A manual create/write already enforces both MAX_SESSION_FILE and
+        # MAX_SESSION_TOTAL; sandbox output previously bypassed both entirely
+        # (only snapshotted/diffed, never size-checked). Reject the whole run's
+        # output rather than partially keeping it - simpler to reason about than
+        # picking which files to keep, and this is already the rare/abuse case.
+        oversized = [f for f in changed_files if f.size > MAX_SESSION_FILE]
+        over_total = workspace_total_size(workspace_dir) > MAX_SESSION_TOTAL
+        if changed_files and (oversized or over_total):
+            for f in changed_files:
+                try:
+                    (workspace_dir / f.name).unlink()
+                except OSError:
+                    pass
+            reasons = []
+            if oversized:
+                reasons.append(f"{len(oversized)} Datei(en) über dem Limit von {MAX_SESSION_FILE // (1024 * 1024)} MiB")
+            if over_total:
+                reasons.append(f"Workspace-Gesamtlimit von {MAX_SESSION_TOTAL // (1024 * 1024)} MiB überschritten")
+            quota_error = "Ausführung erzeugte zu große Ausgabe (" + ", ".join(reasons) + ") - alle neu erzeugten/geänderten Dateien wurden verworfen."
+            result.error = f"{result.error} {quota_error}" if result.error else quota_error
+            changed_files = []
+
+        if user_id is not None and session_id is not None:
+            for f in changed_files:
+                record_file_event(user_id, session_id, f.name, source="code_runner", execution_id=run_id)
+        inline_count = 0
         for f in changed_files:
-            try:
-                (workspace_dir / f.name).unlink()
-            except OSError:
-                pass
-        reasons = []
-        if oversized:
-            reasons.append(f"{len(oversized)} Datei(en) über dem Limit von {MAX_SESSION_FILE // (1024 * 1024)} MiB")
-        if over_total:
-            reasons.append(f"Workspace-Gesamtlimit von {MAX_SESSION_TOTAL // (1024 * 1024)} MiB überschritten")
-        quota_error = "Ausführung erzeugte zu große Ausgabe (" + ", ".join(reasons) + ") - alle neu erzeugten/geänderten Dateien wurden verworfen."
-        result.error = f"{result.error} {quota_error}" if result.error else quota_error
-        changed_files = []
-
-    if user_id is not None and session_id is not None:
-        for f in changed_files:
-            record_file_event(user_id, session_id, f.name, source="code_runner", execution_id=run_id)
-    inline_count = 0
-    for f in changed_files:
-        if f.mime_type.startswith("image/") and f.size <= MAX_INLINE_IMAGE and inline_count < 4:
-            try:
-                import base64
-                data = (workspace_dir / f.name).read_bytes()
-                f.inline = True
-                f.inline_base64 = f"data:{f.mime_type};base64,{base64.b64encode(data).decode()}"
-                inline_count += 1
-            except OSError:
-                pass
-    result.files = changed_files
+            if f.mime_type.startswith("image/") and f.size <= MAX_INLINE_IMAGE and inline_count < 4:
+                try:
+                    import base64
+                    data = (workspace_dir / f.name).read_bytes()
+                    f.inline = True
+                    f.inline_base64 = f"data:{f.mime_type};base64,{base64.b64encode(data).decode()}"
+                    inline_count += 1
+                except OSError:
+                    pass
+        result.files = changed_files
 
     # Retention (issue #8) - the submitted script isn't needed after
     # execution: stdout/stderr are already captured above and any output
