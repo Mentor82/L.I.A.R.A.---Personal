@@ -34,12 +34,19 @@ ensure_session_venv "$SESSION_VENV"
 ulimit -t 60
 ulimit -u 32
 
+# Not `set -e`-fatal for install/remove specifically: the trailing chmod
+# below must still run (liara-runner just created new, non-world-writable
+# files pip installed) even when pip itself fails, same reasoning as
+# run_sandboxed.sh's own suspend-errexit-for-the-run block.
+set +e
 case "$ACTION" in
   install)
     "$SESSION_VENV/bin/python3" -m pip install --disable-pip-version-check --no-input -- "$PACKAGE_SPEC"
+    CODE=$?
     ;;
   remove)
     "$SESSION_VENV/bin/python3" -m pip uninstall --disable-pip-version-check --no-input -y -- "$PACKAGE_SPEC"
+    CODE=$?
     ;;
   list)
     # --local restricts to packages actually installed under this venv's own
@@ -47,12 +54,24 @@ case "$ACTION" in
     # sys.path addition (ensure_session_venv) - so this only ever reports what
     # THIS session itself added, exactly what the "📦 Pakete" UI should show.
     "$SESSION_VENV/bin/python3" -m pip list --local --format=json --disable-pip-version-check
+    CODE=$?
     ;;
   version)
     "$SESSION_VENV/bin/python3" --version
+    CODE=$?
     ;;
   *)
     echo "Unknown action: $ACTION" >&2
     exit 1
     ;;
 esac
+set -e
+
+# Same reasoning as ensure_session_venv's own trailing chmod: an install/
+# remove just added or removed liara-runner-owned files with their own
+# default permissions - keep the whole tree world-writable so a later
+# session deletion (rmtree, running as the backend) can still clean it up.
+# Only meaningful for install/remove; harmless no-op cost for list/version.
+chmod -R 777 "$SESSION_VENV" 2>/dev/null || true
+
+exit "$CODE"

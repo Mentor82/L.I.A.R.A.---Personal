@@ -32,4 +32,14 @@ ensure_session_venv() {
   local session_site
   session_site="$("$session_venv/bin/python3" -c 'import site; print(site.getsitepackages()[0])')" || return 1
   echo "$runner_site" > "$session_site/_runner_venv.pth"
+  # The venv's own top-level dir is already 0o777 (code_sandbox.py/
+  # session_environment.py pre-create it as the backend's own user for
+  # exactly this reason), but everything venv/pip just created INSIDE it
+  # belongs to liara-runner with its own default (often 0o755) permissions -
+  # same reasoning as run_sandboxed.sh's trailing workspace_dir chmod: the
+  # backend, a different OS user, can only ever chmod paths it owns, so this
+  # has to happen here, as liara-runner, right after creation, or a later
+  # session deletion's recursive rmtree (running as the backend) would fail
+  # partway through this same tree. Best-effort, never fails the run over it.
+  chmod -R 777 "$session_venv" 2>/dev/null || true
 }
