@@ -35,16 +35,13 @@ cd "$WORKSPACE_DIR"
 # session. Lives as SESSION_DIR/.venv, a sibling of workspace/ (same place as
 # .runs/), so it's outside the Explorer/diff/search boundary without needing
 # a new exclusion rule. Created lazily on first use, guarded by code_sandbox.py's
-# workspace_lock so two runs of the same session can't race this step.
-# --system-site-packages means packages already in runner-venv (matplotlib
-# etc.) are inherited for free - only this session's own pip installs land in
-# its own site-packages, shadowing the shared ones on a name collision. Not
+# workspace_lock so two runs of the same session can't race this step. Not
 # `set -e`-fatal: a one-time creation hiccup falls back to the shared venv
 # below rather than failing every future run in this session forever.
+# shellcheck source=_ensure_session_venv.sh
+source "$(dirname "$0")/_ensure_session_venv.sh"
 SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
-if [ ! -x "$SESSION_VENV/bin/python3" ]; then
-  /opt/liara/runner-venv/bin/python3 -m venv --system-site-packages "$SESSION_VENV" || true
-fi
+ensure_session_venv "$SESSION_VENV" || true
 
 # Resource limits - last line of defense if the caller's preexec_fn rlimits
 # somehow don't apply (e.g. sudo policy strips them). CPU seconds, max

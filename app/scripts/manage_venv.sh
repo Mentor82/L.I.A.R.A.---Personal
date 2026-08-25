@@ -24,11 +24,10 @@ PACKAGE_SPEC="${3:-}"
 # Same sibling-of-workspace/ location run_sandboxed.sh uses and creates -
 # reused here (created on first package install/remove for a session that
 # has never run any code yet), not a second, separate venv concept.
+# shellcheck source=_ensure_session_venv.sh
+source "$(dirname "$0")/_ensure_session_venv.sh"
 SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
-
-if [ ! -x "$SESSION_VENV/bin/python3" ]; then
-  /opt/liara/runner-venv/bin/python3 -m venv --system-site-packages "$SESSION_VENV"
-fi
+ensure_session_venv "$SESSION_VENV"
 
 # Modest resource limits - this only ever runs pip, not arbitrary user code,
 # but still shouldn't be able to fork-bomb or hang forever on a bad network.
@@ -43,9 +42,10 @@ case "$ACTION" in
     "$SESSION_VENV/bin/python3" -m pip uninstall --disable-pip-version-check --no-input -y -- "$PACKAGE_SPEC"
     ;;
   list)
-    # --local excludes packages inherited from --system-site-packages (i.e.
-    # the shared runner-venv), so this only ever reports what THIS session
-    # itself added - exactly what the "📦 Pakete" UI should show.
+    # --local restricts to packages actually installed under this venv's own
+    # site-packages, excluding anything reachable only via the _runner_venv.pth
+    # sys.path addition (ensure_session_venv) - so this only ever reports what
+    # THIS session itself added, exactly what the "📦 Pakete" UI should show.
     "$SESSION_VENV/bin/python3" -m pip list --local --format=json --disable-pip-version-check
     ;;
   version)

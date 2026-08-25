@@ -108,7 +108,8 @@ def remove_package(user_id: int, session_id: int, name: str) -> dict:
 
 def list_packages(user_id: int, session_id: int) -> dict:
     """Session-added packages only (pip's --local already excludes anything
-    inherited from the shared runner-venv via --system-site-packages)."""
+    only reachable via the _runner_venv.pth sys.path addition - see
+    app/scripts/_ensure_session_venv.sh)."""
     if not venv_exists(user_id, session_id):
         return {"ok": True, "packages": []}
     try:
