@@ -134,7 +134,12 @@ def get_environment_status(user_id: int, session_id: int) -> dict:
         return {"exists": False}
     try:
         version_result = _run_manage_venv(user_id, session_id, "version")
-        version = (version_result.stdout or version_result.stderr or "").strip() or "Python"
+        # Only trust stdout on success - manage_venv.sh's sudo call failing
+        # (e.g. the NOPASSWD rule not set up yet) prints to stderr, and that
+        # raw "sudo: ..." text is not something to show a user as if it were
+        # a Python version.
+        version = version_result.stdout.strip() if version_result.returncode == 0 else ""
+        version = version or "Python"
     except Exception:
         version = "Python"
     packages = list_packages(user_id, session_id)
