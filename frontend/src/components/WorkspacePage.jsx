@@ -753,6 +753,12 @@ function WorkspacePage() {
         { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, filename, timestamp: new Date(), result },
       ].slice(-20));
       loadFiles(sessionId);
+      // A run is the one thing that can turn envStatus from "not yet
+      // created" into a real venv (run_sandboxed.sh creates it lazily on
+      // first use) - only worth re-checking while we don't already know it
+      // exists, so a chatty session running code repeatedly doesn't turn
+      // this into a poll.
+      if (!envStatus?.exists) loadEnvironment(sessionId);
     } catch (err) {
       setHistoryState((prev) => [
         ...prev,
