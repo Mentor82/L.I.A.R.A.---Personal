@@ -398,7 +398,7 @@ async def complete_password_reset(
     # already-issued token might be in someone else's hands.
     from core.security import invalidate_sessions
     user.hashed_password = hash_password(new_password)
-    invalidate_sessions(user)
+    invalidate_sessions(db, user)
     db.commit()
 
     # Invalidate token

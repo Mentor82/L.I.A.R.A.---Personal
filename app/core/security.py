@@ -2,12 +2,15 @@
 Security utilities for JWT and password handling
 """
 
+import hashlib
 import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from api.models.base_models import UserRole
+from sqlalchemy.orm import Session
+from api.models.base_models import UserRole, User
+from api.models.auth_session import AuthSession
 
 # JWT Configuration - Load from environment. Fail closed (issue #6): no
 # default fallback. A deployment that omits LIARA_SECRET_KEY, or still has
@@ -152,6 +155,11 @@ def verify_refresh_token(token: str) -> Optional[dict]:
     return None
 
 
+def hash_refresh_token(token: str) -> str:
+    """SHA-256 digest of a refresh token, for at-rest storage (issue #11 item 5)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def token_version_matches(payload: dict, current_version: int) -> bool:
     """
     Compares a decoded JWT's token_version claim against the user's current
@@ -164,19 +172,27 @@ def token_version_matches(payload: dict, current_version: int) -> bool:
     return payload.get("token_version", 0) == current_version
 
 
-def invalidate_sessions(user) -> None:
+def invalidate_sessions(db: Session, user: User) -> None:
     """
     Bumps user.token_version (issue #11 items 2/3) so every access/refresh
     JWT issued before this call - each carries the token_version active at
     issuance - stops authenticating from now on, without needing a token
-    blocklist. Also clears the stored refresh token so an outstanding
-    refresh attempt fails immediately via the existing equality check
-    rather than only via its own token_version claim.
+    blocklist. Also revokes every one of the user's AuthSession rows
+    (issue #11 items 4/5) so an outstanding refresh attempt on any device
+    fails immediately via its own revoked_at check rather than only via its
+    token_version claim.
+
+    This is a "log out everywhere" operation, not per-device - matches the
+    logout endpoint's documented semantics and is the correct blast radius
+    for a password change (a stolen token surviving its own password reset
+    would defeat the point of changing it).
 
     Call sites: logout, password change (self-service, admin reset-via-
     token, and the reset_password.py CLI tool). Caller still owns
     db.commit().
     """
     user.token_version = (user.token_version or 0) + 1
-    user.refresh_token = None
-    user.refresh_token_expires = None
+    db.query(AuthSession).filter(
+        AuthSession.user_id == user.id,
+        AuthSession.revoked_at.is_(None)
+    ).update({"revoked_at": datetime.utcnow()})

@@ -8,8 +8,9 @@ from alembic import context
 # Import Base und Models
 from core.database import Base
 from api.models.base_models import (
-    Task, CalendarEvent, Note, Memory, PackingList, Routine
+    Task, CalendarEvent, Note, Memory, PackingList, Routine, User
 )
+from api.models.auth_session import AuthSession
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

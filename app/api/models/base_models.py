@@ -42,9 +42,9 @@ class User(Base):
     totp_secret = Column(String(255), nullable=True)  # 2FA Secret
     totp_enabled = Column(Boolean, default=False)  # 2FA aktiviert?
     
-    # JWT Tokens
-    refresh_token = Column(String(500), nullable=True)  # Store current refresh token
-    refresh_token_expires = Column(DateTime, nullable=True)
+    # JWT Tokens - individual refresh sessions live in AuthSession (issue #11
+    # items 4/5), not a single column here, so multiple devices can each
+    # hold their own concurrently-valid refresh token.
     # Security epoch (issue #11 items 2/3): embedded in every access/refresh
     # JWT at issuance and compared against this column on every request -
     # bumping it (logout, password change) instantly invalidates every

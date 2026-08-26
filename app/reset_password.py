@@ -32,7 +32,7 @@ def reset_password(username: str, new_password: str):
         # Update password - also ends every existing session (issue #11
         # item 3), same reasoning as the API's password-change paths.
         user.hashed_password = hashed_pw
-        invalidate_sessions(user)
+        invalidate_sessions(db, user)
         db.commit()
         
         print(f"✅ Password updated for user '{user.username}'")

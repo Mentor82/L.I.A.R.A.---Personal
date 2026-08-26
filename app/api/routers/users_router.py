@@ -108,7 +108,7 @@ def update_user(
     if 'password' in update_data and update_data['password']:
         from core.security import hash_password, invalidate_sessions
         user.hashed_password = hash_password(update_data.pop('password'))
-        invalidate_sessions(user)
+        invalidate_sessions(db, user)
     
     # Update other fields
     for field, value in update_data.items():
