@@ -3,11 +3,10 @@
 Real interactive terminal with full TTY support (su, vim, etc.)
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from api.models.base_models import User
 from core.dependencies import get_current_user_ws
-from core.database import get_db
-from sqlalchemy.orm import Session
+from core.database import SessionLocal
 import pty
 import os
 import select
@@ -26,15 +25,14 @@ logger = logging.getLogger(__name__)
 @router.websocket("/ws")
 async def websocket_pty(
     websocket: WebSocket,
-    db: Session = Depends(get_db)
 ):
     """
     WebSocket PTY Terminal
-    
+
     Supports two connection modes:
     1. Local: Direct shell on Liara server (?type=local)
     2. SSH: Connect to remote server via SSH (?type=ssh&ssh_host=...&ssh_user=...&ssh_port=...)
-    
+
     Requires admin authentication via the Sec-WebSocket-Protocol header
     (see core.dependencies.get_current_user_ws).
     """
@@ -47,12 +45,24 @@ async def websocket_pty(
     # error over - the frontend already shows a generic disconnect message
     # on any WS close (TerminalTabs.jsx), which avoids leaking str(e) to an
     # unauthenticated client as a side effect.
+    #
+    # A short-lived SessionLocal() is opened just for this one-time lookup,
+    # not FastAPI's Depends(get_db) (same reasoning as issue #13 item 6's
+    # ToolExecutor fix): that generator only closes when the whole handler
+    # returns, so a request-scoped session would sit open - and idle in
+    # transaction - for the PTY connection's entire life, which for an admin
+    # terminal tab can be hours. That idle-in-transaction connection was
+    # observed live blocking an `ALTER TABLE ... ADD COLUMN` migration (needs
+    # an ACCESS EXCLUSIVE lock) until the terminal tab was closed.
+    auth_db = SessionLocal()
     try:
-        user = await get_current_user_ws(websocket, db)
+        user = await get_current_user_ws(websocket, auth_db)
     except Exception as e:
         logger.error(f"WebSocket auth failed: {e}")
         await websocket.close(code=1008)  # Policy Violation
         return
+    finally:
+        auth_db.close()
 
     # Echo the offered subprotocol back (issue #10 follow-up, found live):
     # per the WebSocket spec, if the client's handshake offered a
