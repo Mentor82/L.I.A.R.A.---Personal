@@ -22,7 +22,6 @@
 - [Advanced Features](#advanced-features)
   - [GPU Detection](#gpu-detection)
   - [Ollama Management](#ollama-management)
-  - [Memory System](#memory-system)
 
 ---
 
@@ -609,31 +608,6 @@ Delete a model
 {
   "status": "success",
   "message": "Model llama3.2:1b deleted successfully"
-}
-```
-
----
-
-## Memory System
-
-### `GET /chat/memory/status`
-Get memory system status
-
-**Response:**
-```json
-{
-  "short_context": {
-    "message_count": 12,
-    "token_count": 2400,
-    "max_messages": 20,
-    "max_tokens": 4000
-  },
-  "mood_history": {
-    "entry_count": 42,
-    "max_entries": 50,
-    "oldest_entry": "2025-12-01T08:00:00",
-    "newest_entry": "2025-12-03T10:30:00"
-  }
 }
 ```
 

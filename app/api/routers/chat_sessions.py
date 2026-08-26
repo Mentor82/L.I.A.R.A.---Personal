@@ -77,35 +77,27 @@ async def get_chat_sessions(
     Alle Chat-Sessions des Users abrufen mit Preview und letzter Message
     """
     result = db.execute(text("""
-        SELECT 
+        SELECT
             cs.id,
             cs.user_id,
             cs.title,
             cs.created_at,
             cs.updated_at,
             COUNT(cm.id) as message_count,
-            (
-                SELECT content 
-                FROM chat_messages 
-                WHERE session_id = cs.id 
-                ORDER BY timestamp DESC 
-                LIMIT 1
-            ) as last_message,
-            (
-                SELECT timestamp 
-                FROM chat_messages 
-                WHERE session_id = cs.id 
-                ORDER BY timestamp DESC 
-                LIMIT 1
-            ) as last_message_time
+            lm.content as last_message,
+            lm.timestamp as last_message_time
         FROM chat_sessions cs
         LEFT JOIN chat_messages cm ON cs.id = cm.session_id
+        LEFT JOIN LATERAL (
+            SELECT content, timestamp
+            FROM chat_messages
+            WHERE session_id = cs.id
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+        ) lm ON true
         WHERE cs.user_id = :user_id
-        GROUP BY cs.id, cs.user_id, cs.title, cs.created_at, cs.updated_at
-        ORDER BY COALESCE(
-            (SELECT timestamp FROM chat_messages WHERE session_id = cs.id ORDER BY timestamp DESC LIMIT 1),
-            cs.updated_at
-        ) DESC
+        GROUP BY cs.id, cs.user_id, cs.title, cs.created_at, cs.updated_at, lm.content, lm.timestamp
+        ORDER BY COALESCE(lm.timestamp, cs.updated_at) DESC, cs.id DESC
     """), {'user_id': current_user.id})
     
     sessions = []
@@ -184,7 +176,7 @@ async def get_session_messages(
         SELECT id, role, content, model, mood, timestamp
         FROM chat_messages
         WHERE session_id = :session_id
-        ORDER BY timestamp ASC
+        ORDER BY timestamp ASC, id ASC
     """), {'session_id': session_id})
     
     messages = []

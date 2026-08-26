@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 from core.mirko_logger import get_mirko_logger, should_log_for_user
 from liara_engine.memory.mood_system import MoodSystem
-from liara_engine.memory.short_context import get_memory
 from liara_engine.actions.intent_detector import get_intent_detector
 from liara_engine.actions.action_executor import ActionExecutor
 from core.dependencies import require_active_user
@@ -1042,7 +1041,7 @@ async def stream_chat(
         history_rows = db.execute(text("""
             SELECT role, content FROM chat_messages
             WHERE session_id = :session_id
-            ORDER BY timestamp DESC
+            ORDER BY timestamp DESC, id DESC
             LIMIT :limit
         """), {'session_id': session_id, 'limit': HISTORY_TURNS_LIMIT}).all()
         conversation_history = [
@@ -1219,10 +1218,6 @@ async def chat_health():
     finally:
         db.close()
 
-    # Check Memory System
-    memory = get_memory()
-    memory_status = memory.get_summary()
-    
     return {
         "status": "healthy" if ollama_available else "degraded",
         "timestamp": datetime.now().isoformat(),
@@ -1235,69 +1230,13 @@ async def chat_health():
                 "available": True,
                 "scope": "per_user",
                 "history_entries_total": mood_history_total
-            },
-            "memory_system": {
-                "available": True,
-                "messages_stored": memory_status["message_count"],
-                "capacity_used": memory_status["capacity_used_percent"]
             }
         },
         "capabilities": {
             "streaming": True,
             "error_recovery": True,
-            "mood_detection": True,
-            "context_memory": True
+            "mood_detection": True
         }
-    }
-
-
-@router.get("/memory/status")
-async def get_memory_status():
-    """
-    📝 Hole Memory-Status.
-    
-    Returns:
-        Memory-Statistiken
-    """
-    memory = get_memory()
-    return memory.get_summary()
-
-
-@router.get("/memory/messages")
-async def get_recent_messages(limit: int = 10):
-    """
-    📜 Hole letzte Nachrichten aus Memory.
-    
-    Args:
-        limit: Max Anzahl (default: 10)
-        
-    Returns:
-        Liste der letzten Messages
-    """
-    memory = get_memory()
-    limit = min(limit, 20)  # Max 20
-    
-    return {
-        "messages": memory.get_recent_messages(limit=limit),
-        "total_in_memory": len(memory.messages)
-    }
-
-
-@router.post("/memory/clear")
-async def clear_memory(current_user: User = Depends(require_active_user)):
-    """
-    🗑️ Lösche Memory (Reset Konversation).
-    
-    Returns:
-        Bestätigung
-    """
-    memory = get_memory()
-    memory.clear()
-    
-    return {
-        "status": "cleared",
-        "message": "Conversation memory cleared",
-        "timestamp": datetime.now().isoformat()
     }
 
 
