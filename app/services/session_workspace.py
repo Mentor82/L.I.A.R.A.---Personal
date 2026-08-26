@@ -264,6 +264,26 @@ def _migrate_legacy_metadata_file(user_id: int, session_id: int, filename: str, 
         logger.warning(f"session_workspace: legacy metadata migration failed for {legacy_path}: {e}")
 
 
+def _cleanup_legacy_lock_file(user_id: int, session_id: int) -> None:
+    """
+    Companion to _migrate_legacy_metadata_file for LOCK_FILENAME specifically
+    (issue #6) - unlike the manifest/proposals JSON sidecars, a stray old
+    lock file inside workspace_dir has no content worth preserving (it's
+    only ever used as an flock() target), so this just removes it rather
+    than moving it. workspace_lock() always acquires the NEW metadata/
+    location on its next call regardless, so there's nothing to migrate TO.
+    Safe even if another process still holds the old file open: unlinking
+    doesn't invalidate an already-open file descriptor's lock on POSIX, it
+    just stops the path from resolving to it for any NEW open() call.
+    """
+    legacy_lock = _workspace_dir(user_id, session_id) / LOCK_FILENAME
+    if legacy_lock.exists():
+        try:
+            legacy_lock.unlink()
+        except OSError as e:
+            logger.warning(f"session_workspace: legacy lock cleanup failed for {legacy_lock}: {e}")
+
+
 def _manifest_path(user_id: int, session_id: int) -> Path:
     return _metadata_dir(user_id, session_id) / MANIFEST_FILENAME
 
@@ -606,12 +626,14 @@ def list_session_files(user_id: int, session_id: int) -> List[dict]:
     if not workspace.exists():
         return []
     manifest = _load_manifest(user_id, session_id)
-    # Also triggers the proposals sidecar's own migration (issue #6) - the
-    # Explorer is the first surface nearly every session touches, so this
-    # guarantees a pre-migration session's stale .liara_proposals.json in
-    # workspace_dir never has a chance to appear as a plain file below,
-    # even for a session whose proposals were never separately touched.
+    # Also triggers the proposals sidecar's own migration, plus a stray old
+    # lock file's cleanup (issue #6) - the Explorer is the first surface
+    # nearly every session touches, so this guarantees a pre-migration
+    # session's stale .liara_proposals.json/.liara.lock in workspace_dir
+    # never has a chance to appear as a plain file below, even for a
+    # session whose proposals/lock were never separately touched since.
     _load_proposals(user_id, session_id)
+    _cleanup_legacy_lock_file(user_id, session_id)
     entries = []
     for entry in sorted(workspace.rglob("*")):
         if entry.is_symlink():
