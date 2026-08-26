@@ -15,6 +15,8 @@ from enum import Enum
 from typing import Dict, List, Optional
 from datetime import datetime
 
+from sqlalchemy import text
+
 from core.database import SessionLocal
 from api.models.mood_state import UserMoodState, MoodHistoryEntry
 from liara_engine.nlp.sentiment_analyzer import get_sentiment_analyzer, SentimentCategory
@@ -89,14 +91,39 @@ class MoodSystem:
     def __init__(self, user_id: int):
         self.user_id = user_id
 
-    def _get_or_create_state(self, db) -> UserMoodState:
-        state = db.query(UserMoodState).filter(UserMoodState.user_id == self.user_id).first()
-        if state is None:
-            state = UserMoodState(user_id=self.user_id)
-            db.add(state)
-            db.commit()
-            db.refresh(state)
-        return state
+    def _get_or_create_state(self, db, for_update: bool = False) -> UserMoodState:
+        """
+        Race-safe get-or-create (issue #7 item 1). The old read-then-insert
+        (SELECT, then INSERT if None) let two concurrent first-requests for
+        the same user both see no row and both INSERT, one of them hitting
+        UserMoodState.user_id's UNIQUE constraint. INSERT ... ON CONFLICT DO
+        NOTHING is one atomic statement instead - whichever request's
+        INSERT actually lands becomes the row, the other's is a no-op and
+        it just reads what the winner created via the SELECT below.
+
+        for_update=True adds SELECT ... FOR UPDATE (issue #7 item 8) so the
+        caller can hold a row lock across a read-modify-write - see
+        update_mood().
+        """
+        db.execute(
+            text("""
+                INSERT INTO user_mood_state (user_id, current_mood, mood_intensity, confidence)
+                VALUES (:user_id, :mood, :intensity, :confidence)
+                ON CONFLICT (user_id) DO NOTHING
+            """),
+            {
+                'user_id': self.user_id,
+                'mood': DEFAULT_MOOD.value,
+                'intensity': DEFAULT_INTENSITY,
+                'confidence': DEFAULT_CONFIDENCE,
+            }
+        )
+        db.commit()
+
+        query = db.query(UserMoodState).filter(UserMoodState.user_id == self.user_id)
+        if for_update:
+            query = query.with_for_update()
+        return query.first()
 
     def _calculate_transition_confidence(
         self,
@@ -125,10 +152,21 @@ class MoodSystem:
         return min(1.0, base_confidence)
 
     def update_mood(self, interaction_type: InteractionType, intensity: float = 0.5) -> MoodState:
-        """Update Mood basierend auf Interaktion mit sanfter Transition."""
+        """
+        Update Mood basierend auf Interaktion mit sanfter Transition.
+
+        for_update=True (issue #7 item 8): two concurrent turns for the same
+        user could otherwise both read the same starting state and race to
+        compute/commit their own version, silently losing whichever wrote
+        first. The row lock held from this SELECT until db.commit() below
+        serializes concurrent calls for this user_id - a second call blocks
+        here until the first commits, then reads its already-updated state.
+        Other users' rows are untouched, so this doesn't serialize across
+        users.
+        """
         db = SessionLocal()
         try:
-            state = self._get_or_create_state(db)
+            state = self._get_or_create_state(db, for_update=True)
             current_mood = MoodState(state.current_mood)
             target_mood = INTERACTION_MOOD_MAP.get(interaction_type, MoodState.NEUTRAL)
 
