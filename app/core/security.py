@@ -4,6 +4,7 @@ Security utilities for JWT and password handling
 
 import hashlib
 import os
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -133,8 +134,15 @@ def create_refresh_token(data: dict) -> str:
     """
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
-    
+    # jti (issue #11 item 4): exp only has 1-second resolution, and every
+    # other claim is identical across a rotation of the same session (same
+    # user_id/username/token_version/sid) - two refresh tokens issued for
+    # the same session within the same wall-clock second would otherwise be
+    # byte-identical JWTs, silently defeating reuse detection in exactly
+    # the fast-succession case (rapid legitimate retry, or an attacker
+    # replaying right after the real client rotates) that matters most.
+    to_encode.update({"exp": expire, "type": "refresh", "jti": str(uuid.uuid4())})
+
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
