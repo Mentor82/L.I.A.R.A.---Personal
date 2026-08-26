@@ -546,18 +546,22 @@ def store_message_with_concepts(
             SET u.last_active = datetime()
         """, user_id=user_id)
 
-        # Message Node
+        # Message Node - MERGE on the constrained key (user_id, message_id),
+        # not CREATE (issue #7 item 5): a retried call for the same message
+        # used to hit the message_unique constraint and throw, aborting
+        # before the concept loop below even ran. ON CREATE SET means a
+        # retry finds the existing node, sets nothing again, and the MERGE
+        # relationship below is a no-op - the whole call now converges to
+        # the same state instead of failing.
         session.run("""
             MATCH (u:User {user_id: $user_id})
-            CREATE (m:Message {
-                user_id: $user_id,
-                message_id: $message_id,
-                content: $content,
-                role: $role,
-                session_id: $session_id,
-                timestamp: datetime($timestamp),
-                created_at: datetime()
-            })
+            MERGE (m:Message {user_id: $user_id, message_id: $message_id})
+            ON CREATE SET
+                m.content = $content,
+                m.role = $role,
+                m.session_id = $session_id,
+                m.timestamp = datetime($timestamp),
+                m.created_at = datetime()
             MERGE (u)-[:SENT]->(m)
         """,
             user_id=user_id,
