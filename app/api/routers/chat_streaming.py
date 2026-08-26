@@ -28,6 +28,7 @@ from liara_engine.actions.action_executor import ActionExecutor
 from core.dependencies import require_active_user
 from core.database import get_db
 from api.models.base_models import User
+from services.chat_persistence import persist_assistant_message
 from services.memory_integration import store_in_4d_memory, store_message_with_concepts, get_relevant_context
 from services.neo4j_service import get_neo4j_service
 from services.embedding_service import get_embedding_service
@@ -381,7 +382,18 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             
             # If action was successful, send success message and done
             if action_result.get('success'):
-                yield f"data: {json.dumps({'type': 'content', 'text': action_result.get('message', 'Aktion erfolgreich ausgeführt')})}\n\n"
+                confirmation_text = action_result.get('message', 'Aktion erfolgreich ausgeführt')
+
+                # issue #13 item 3: this shortcut used to return before ever
+                # reaching persist_assistant_turn() below, so the user's
+                # message (already inserted by the route handler) got saved
+                # but this confirmation never did - a reload showed the
+                # question with no reply. Assistant-only, not
+                # persist_chat_turn() - the user row already exists here.
+                if user_id and session_id and db:
+                    persist_assistant_message(db, session_id, user_id, confirmation_text)
+
+                yield f"data: {json.dumps({'type': 'content', 'text': confirmation_text})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'action_executed': True})}\n\n"
                 return  # Don't call LLM if action was successful
         

@@ -22,6 +22,20 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 
+def _check_session_owned(db: Session, session_id: int, user_id: int) -> bool:
+    owned = db.execute(
+        text("SELECT id FROM chat_sessions WHERE id = :session_id AND user_id = :user_id"),
+        {"session_id": session_id, "user_id": user_id},
+    ).first()
+    if not owned:
+        logger.warning(
+            f"chat_persistence: refusing to persist for session {session_id} "
+            f"- not owned by user {user_id}"
+        )
+        return False
+    return True
+
+
 def persist_chat_turn(
     db: Session,
     session_id: int,
@@ -41,15 +55,7 @@ def persist_chat_turn(
     never blocks the actual reply" behavior all three callers already had
     when they saved messages client-side.
     """
-    owned = db.execute(
-        text("SELECT id FROM chat_sessions WHERE id = :session_id AND user_id = :user_id"),
-        {"session_id": session_id, "user_id": user_id},
-    ).first()
-    if not owned:
-        logger.warning(
-            f"chat_persistence: refusing to persist turn for session {session_id} "
-            f"- not owned by user {user_id}"
-        )
+    if not _check_session_owned(db, session_id, user_id):
         return False
 
     db.execute(
@@ -59,6 +65,40 @@ def persist_chat_turn(
         """),
         {"session_id": session_id, "content": user_content},
     )
+    db.execute(
+        text("""
+            INSERT INTO chat_messages (session_id, role, content, model, mood, timestamp)
+            VALUES (:session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+        """),
+        {"session_id": session_id, "content": assistant_content, "model": model, "mood": mood},
+    )
+    db.execute(
+        text("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id"),
+        {"session_id": session_id},
+    )
+    db.commit()
+    return True
+
+
+def persist_assistant_message(
+    db: Session,
+    session_id: int,
+    user_id: int,
+    assistant_content: str,
+    model: Optional[str] = None,
+    mood: Optional[str] = None,
+) -> bool:
+    """
+    Persists a single assistant message for a session whose user turn was
+    already inserted elsewhere (issue #13 item 3) - chat_streaming.py's
+    /chat/stream route handler inserts the user message itself before the
+    SSE generator runs, so a successful pre-LLM action shortcut only needs
+    to add the assistant confirmation, not a full persist_chat_turn() pair
+    (which would duplicate the user row).
+    """
+    if not _check_session_owned(db, session_id, user_id):
+        return False
+
     db.execute(
         text("""
             INSERT INTO chat_messages (session_id, role, content, model, mood, timestamp)
