@@ -134,15 +134,21 @@ class WebSearchService:
             logger.error(f"Wikipedia search error: {e}")
             return {'error': str(e), 'query': query}
 
-    async def get_weather_info(self, location: str) -> Dict:
+    async def get_weather_info(self, location: str, forecast_days: int = 3) -> Dict:
         """
         Get weather information using open-meteo.com (no API key needed)
-        
+
         Args:
             location: City name or coordinates
-            
+            forecast_days: Days of daily forecast to include alongside the
+                current conditions (1-7, same Open-Meteo call, no extra
+                request needed - 0 skips the "forecast" key entirely for
+                callers that only want current conditions)
+
         Returns:
-            Weather information
+            Weather information, plus a "forecast" list of
+            {date, condition, temp_max, temp_min, precipitation} when
+            forecast_days > 0
         """
         try:
             # First, geocode the location using open-meteo geocoding API
@@ -153,18 +159,18 @@ class WebSearchService:
                 'language': 'de',
                 'format': 'json'
             }
-            
+
             geo_response = await self._client.get(geocode_url, params=geocode_params)
             geo_response.raise_for_status()
             geo_data = geo_response.json()
-            
+
             if not geo_data.get('results'):
                 return {'error': f'Location not found: {location}'}
-            
+
             place = geo_data['results'][0]
             latitude = place['latitude']
             longitude = place['longitude']
-            
+
             # Get weather data
             weather_url = "https://api.open-meteo.com/v1/forecast"
             weather_params = {
@@ -173,14 +179,18 @@ class WebSearchService:
                 'current': 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m',
                 'timezone': 'Europe/Berlin'
             }
-            
+            forecast_days = max(0, min(forecast_days, 7))
+            if forecast_days:
+                weather_params['daily'] = 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum'
+                weather_params['forecast_days'] = forecast_days
+
             weather_response = await self._client.get(weather_url, params=weather_params)
             weather_response.raise_for_status()
             weather_data = weather_response.json()
-            
+
             current = weather_data.get('current', {})
-            
-            return {
+
+            result = {
                 'location': place['name'],
                 'country': place.get('country', ''),
                 'latitude': latitude,
@@ -192,7 +202,22 @@ class WebSearchService:
                 'timestamp': current.get('time'),
                 'timezone': weather_data.get('timezone')
             }
-            
+
+            daily = weather_data.get('daily')
+            if forecast_days and daily:
+                result['forecast'] = [
+                    {
+                        'date': daily['time'][i],
+                        'condition': _WMO_WEATHER_CODES.get(daily['weather_code'][i], 'Unbekannt'),
+                        'temp_max': daily['temperature_2m_max'][i],
+                        'temp_min': daily['temperature_2m_min'][i],
+                        'precipitation': daily['precipitation_sum'][i],
+                    }
+                    for i in range(len(daily.get('time', [])))
+                ]
+
+            return result
+
         except httpx.HTTPError as e:
             logger.error(f"Weather API error: {e}")
             return {'error': str(e), 'location': location}
@@ -221,13 +246,23 @@ URL: {search_result.get('url', 'N/A')}
         
         elif result_type == 'weather':
             condition = _WMO_WEATHER_CODES.get(search_result.get('weather_code'), 'Unbekannt')
-            return f"""Wetter-Information für {search_result.get('location', 'N/A')}:
+            text = f"""Wetter-Information für {search_result.get('location', 'N/A')}:
 Wetterlage: {condition}
 Temperatur: {search_result.get('temperature', 'N/A')}°C
 Luftfeuchtigkeit: {search_result.get('humidity', 'N/A')}%
 Windgeschwindigkeit: {search_result.get('wind_speed', 'N/A')} km/h
 Stand: {search_result.get('timestamp', 'N/A')}
 """
+            forecast = search_result.get('forecast')
+            if forecast:
+                text += "\nVorhersage:\n"
+                for day in forecast:
+                    text += (
+                        f"{day['date']}: {day['condition']}, "
+                        f"{day['temp_min']}°C bis {day['temp_max']}°C, "
+                        f"Niederschlag {day['precipitation']} mm\n"
+                    )
+            return text
         
         else:  # DuckDuckGo instant answer
             parts = []

@@ -401,8 +401,13 @@ class ToolExecutor:
         """
         city = params.get("city")
         country = params.get("country")
+        days = params.get("days", 3)
+        try:
+            days = max(1, min(int(days), 7))
+        except (TypeError, ValueError):
+            days = 3
 
-        result = await self.web_search.get_weather_info(city)
+        result = await self.web_search.get_weather_info(city, forecast_days=days)
 
         if "error" in result:
             return {
@@ -417,7 +422,8 @@ class ToolExecutor:
             "temperature": result.get("temperature"),
             "condition": _WMO_WEATHER_CODES.get(result.get("weather_code"), "Unbekannt"),
             "humidity": result.get("humidity"),
-            "wind_speed": result.get("wind_speed")
+            "wind_speed": result.get("wind_speed"),
+            "forecast": result.get("forecast", [])
         }
     
     def _get_user_location(self, user_id: int) -> Optional[Dict]:

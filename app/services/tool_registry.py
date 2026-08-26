@@ -106,7 +106,7 @@ class ToolRegistry:
         # 🌤️ Weather Tool
         self.register_tool(ToolDefinition(
             name="get_weather",
-            description="Ruft aktuelle Wetterdaten für einen Ort ab",
+            description="Ruft aktuelle Wetterdaten UND eine mehrtägige Vorhersage für einen Ort ab (Quelle: Open-Meteo)",
             category=ToolCategory.LOCATION,
             parameters=[
                 ToolParameter(
@@ -120,6 +120,13 @@ class ToolRegistry:
                     type="string",
                     description="Land (optional)",
                     required=False
+                ),
+                ToolParameter(
+                    name="days",
+                    type="number",
+                    description="Anzahl Vorhersage-Tage (1-7), Standard 3",
+                    required=False,
+                    default=3
                 ),
                 ToolParameter(
                     name="language",
