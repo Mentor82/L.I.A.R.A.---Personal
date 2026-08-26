@@ -64,7 +64,14 @@ if not audit_logger.handlers:
 
 class ExecRequest(BaseModel):
     command: str
-    cwd: Optional[str] = None  # relative to repo root; must not escape it
+    cwd: Optional[str] = None  # relative to repo root; must not escape it - local jobs only
+    # When set, the command runs on this remote host via `ssh` instead of a
+    # local shell (see _run_job) - the AI-friendly equivalent of the
+    # interactive SSH PTY tab (terminal_pty.py), same trust level, same SSH
+    # keys/host-key trust the OS user already has. cwd is ignored for these.
+    ssh_host: Optional[str] = None
+    ssh_port: str = "22"
+    ssh_user: str = "root"
 
 
 class ExecJob(BaseModel):
@@ -78,6 +85,9 @@ class ExecJob(BaseModel):
     finished_at: Optional[str] = None
     user_id: Optional[int] = None
     username: Optional[str] = None
+    ssh_host: Optional[str] = None
+    ssh_port: Optional[str] = None
+    ssh_user: Optional[str] = None
 
 
 def _repo_root() -> Path:
@@ -172,6 +182,7 @@ def _write_audit_log(job: ExecJob, cwd: str):
             "username": job.username,
             "command": _redact_secrets(job.command),
             "cwd": cwd,
+            "ssh_target": f"{job.ssh_user}@{job.ssh_host}:{job.ssh_port}" if job.ssh_host else None,
             "started_at": job.started_at,
             "finished_at": job.finished_at,
             "status": job.status,
@@ -183,7 +194,7 @@ def _write_audit_log(job: ExecJob, cwd: str):
         logger.warning(f"AI-exec audit log write failed for job {job.job_id}: {e}")
 
 
-def _run_job(job_id: str, command: str, cwd: str):
+def _run_job(job_id: str, command: str, cwd: str, ssh_host: Optional[str], ssh_port: str, ssh_user: str):
     try:
         job = _load_job(job_id)
     except redis.RedisError:
@@ -203,15 +214,39 @@ def _run_job(job_id: str, command: str, cwd: str):
     # reads the last OUTPUT_CAP bytes back into memory.
     with tempfile.TemporaryFile() as stdout_f, tempfile.TemporaryFile() as stderr_f:
         try:
-            # start_new_session makes the shell the leader of its own process
-            # group, so a timeout can kill the whole tree (including anything
-            # it backgrounded) via os.killpg - plain process.kill() only
-            # kills the shell itself and would leave orphaned children running.
-            process = subprocess.Popen(
-                command, shell=True, cwd=cwd,
-                stdout=stdout_f, stderr=stderr_f,
-                start_new_session=True
-            )
+            # start_new_session makes the shell/ssh client the leader of its
+            # own process group, so a timeout can kill the whole tree via
+            # os.killpg - plain process.kill() only kills that one process
+            # and would leave orphaned children (or, for SSH, a still-running
+            # remote command) behind.
+            if ssh_host:
+                # Same StrictHostKeyChecking=accept-new trust model as the
+                # interactive SSH PTY tab (terminal_pty.py) - reuses whatever
+                # SSH keys/known_hosts this OS user already has. The command
+                # is passed as a single argv element (no shell=True here),
+                # so it travels byte-for-byte - including embedded newlines
+                # from multi-line scripts - to the remote shell that `ssh`
+                # invokes on the other end, unlike typing into the PTY tab's
+                # simulated-keystroke terminal.
+                argv = [
+                    'ssh',
+                    '-o', 'StrictHostKeyChecking=accept-new',
+                    '-o', 'BatchMode=yes',  # never block waiting on an interactive password prompt
+                    '-p', ssh_port,
+                    f'{ssh_user}@{ssh_host}',
+                    command,
+                ]
+                process = subprocess.Popen(
+                    argv,
+                    stdout=stdout_f, stderr=stderr_f,
+                    start_new_session=True
+                )
+            else:
+                process = subprocess.Popen(
+                    command, shell=True, cwd=cwd,
+                    stdout=stdout_f, stderr=stderr_f,
+                    start_new_session=True
+                )
             try:
                 process.wait(timeout=EXEC_TIMEOUT)
                 job.status = "done"
@@ -247,11 +282,16 @@ async def submit_exec(
     current_user: User = Depends(require_admin)
 ):
     """Submit a shell command for background execution. Returns immediately with a job_id to poll."""
-    try:
-        repo_root = _repo_root()
-        cwd = _resolve_cwd(repo_root, req.cwd)
-    except (RuntimeError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if req.ssh_host:
+        # cwd is a local-repo concept (see _resolve_cwd) - meaningless for a
+        # remote target, so it's never resolved/validated for SSH jobs.
+        cwd = None
+    else:
+        try:
+            repo_root = _repo_root()
+            cwd = _resolve_cwd(repo_root, req.cwd)
+        except (RuntimeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     job_id = str(uuid.uuid4())
     job = ExecJob(
@@ -260,13 +300,19 @@ async def submit_exec(
         status="running",
         started_at=datetime.utcnow().isoformat(),
         user_id=current_user.id,
-        username=current_user.username
+        username=current_user.username,
+        ssh_host=req.ssh_host,
+        ssh_port=req.ssh_port if req.ssh_host else None,
+        ssh_user=req.ssh_user if req.ssh_host else None,
     )
     try:
         _save_job(job)
     except redis.RedisError as e:
         raise HTTPException(status_code=503, detail=f"Exec backend unavailable (Redis): {e}")
-    background_tasks.add_task(_run_job, job_id, req.command, str(cwd))
+    background_tasks.add_task(
+        _run_job, job_id, req.command, str(cwd) if cwd else None,
+        req.ssh_host, req.ssh_port, req.ssh_user
+    )
     return job
 
 

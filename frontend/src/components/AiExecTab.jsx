@@ -3,7 +3,14 @@ import { useState, useRef, useEffect } from 'react';
 // AI-friendly terminal tab: plain JSON request/response instead of an
 // interactive xterm PTY, so a command's result can be read/verified
 // programmatically without simulating keystrokes into a canvas terminal.
-function AiExecTab() {
+//
+// sshTarget (optional {host, username, port}): when set, the command runs
+// on that remote host via SSH server-side (terminal_exec_router.py's
+// ssh_host branch) instead of locally - same reliability benefit as plain
+// "AI Exec", now also for the interactive SSH tab's targets, which used to
+// be the only way to reach them and suffered from the PTY tab's
+// simulated-keystroke multi-line/paste unreliability.
+function AiExecTab({ sshTarget = null }) {
   const [history, setHistory] = useState([]);
   const [command, setCommand] = useState('');
   const [sending, setSending] = useState(false);
@@ -96,7 +103,10 @@ function AiExecTab() {
     try {
       const res = await authFetch('/api/admin/terminal/exec', {
         method: 'POST',
-        body: JSON.stringify({ command: cmd })
+        body: JSON.stringify(sshTarget
+          ? { command: cmd, ssh_host: sshTarget.host, ssh_port: sshTarget.port, ssh_user: sshTarget.username }
+          : { command: cmd }
+        )
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -152,8 +162,14 @@ function AiExecTab() {
       >
         {history.length === 0 && (
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-            🤖 AI-Exec-Tab — Befehl unten eingeben und senden. Läuft asynchron im Hintergrund,
-            Ergebnis erscheint hier als JSON-Antwort statt interaktivem Terminal.
+            {sshTarget ? (
+              <>🤖 AI-SSH-Exec-Tab → {sshTarget.username}@{sshTarget.host}:{sshTarget.port} — Befehl unten eingeben und senden.
+              Läuft asynchron im Hintergrund (via SSH auf dem Zielhost), Ergebnis erscheint hier als JSON-Antwort statt
+              interaktivem Terminal - mehrzeilige Befehle/Heredocs kommen unverändert an.</>
+            ) : (
+              <>🤖 AI-Exec-Tab — Befehl unten eingeben und senden. Läuft asynchron im Hintergrund,
+              Ergebnis erscheint hier als JSON-Antwort statt interaktivem Terminal.</>
+            )}
           </div>
         )}
         {history.map(job => (
@@ -170,7 +186,10 @@ function AiExecTab() {
               alignItems: 'center',
               gap: 'var(--space-sm)'
             }}>
-              <code style={{ fontSize: '0.85rem' }}>$ {job.command}</code>
+              <code style={{ fontSize: '0.85rem' }}>
+                {job.ssh_host && <span style={{ color: 'var(--text-secondary)' }}>[{job.ssh_user}@{job.ssh_host}] </span>}
+                $ {job.command}
+              </code>
               <div style={{ fontSize: '0.75rem', display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
                 {statusBadge(job.status)}
                 {job.exit_code !== undefined && job.exit_code !== null && (

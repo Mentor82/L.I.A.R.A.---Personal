@@ -69,7 +69,7 @@ function TerminalTabs() {
 
     const tabId = `tab-${Date.now()}`;
     const tabName = newTabConfig.type === 'ai'
-      ? '🤖 AI Exec'
+      ? (newTabConfig.host.trim() ? `🤖 ${newTabConfig.username}@${newTabConfig.host}` : '🤖 AI Exec')
       : newTabConfig.type === 'local' ? 'Local Shell' : `${newTabConfig.username}@${newTabConfig.host}`;
     const newTab = {
       id: tabId,
@@ -434,10 +434,44 @@ function TerminalTabs() {
           </div>
 
           {newTabConfig.type === 'ai' && (
-            <div className="halo-mono" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: 'var(--space-md)', backgroundColor: 'rgba(83, 189, 250, 0.1)', borderRadius: '4px', marginBottom: 'var(--space-md)' }}>
-              🤖 <strong>AI Exec:</strong><br/>
-              Befehle laufen asynchron im Hintergrund, Ergebnis kommt als JSON (stdout/stderr/exit_code) statt interaktivem Terminal.
-            </div>
+            <>
+              <div className="halo-mono" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: 'var(--space-md)', backgroundColor: 'rgba(83, 189, 250, 0.1)', borderRadius: '4px', marginBottom: 'var(--space-md)' }}>
+                🤖 <strong>AI Exec:</strong><br/>
+                Befehle laufen asynchron im Hintergrund, Ergebnis kommt als JSON (stdout/stderr/exit_code) statt interaktivem Terminal.
+                Host optional angeben, um stattdessen per SSH auf einem Zielhost auszuführen (AI SSH Exec) - zuverlässiger als der
+                interaktive SSH-Tab für Skripte/mehrzeilige Befehle.
+              </div>
+              <div style={{ display: 'grid', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+                <input
+                  type="text"
+                  value={newTabConfig.host}
+                  onChange={(e) => setNewTabConfig({...newTabConfig, host: e.target.value})}
+                  placeholder="Host (leer = lokal, sonst z.B. 192.168.1.100 für SSH)"
+                  className="halo-input"
+                  style={{ padding: 'var(--space-sm)', fontSize: '0.9rem' }}
+                />
+                {newTabConfig.host.trim() && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 'var(--space-sm)' }}>
+                    <input
+                      type="text"
+                      value={newTabConfig.username}
+                      onChange={(e) => setNewTabConfig({...newTabConfig, username: e.target.value})}
+                      placeholder="Username (z.B. root)"
+                      className="halo-input"
+                      style={{ padding: 'var(--space-sm)', fontSize: '0.9rem' }}
+                    />
+                    <input
+                      type="text"
+                      value={newTabConfig.port}
+                      onChange={(e) => setNewTabConfig({...newTabConfig, port: e.target.value})}
+                      placeholder="Port"
+                      className="halo-input"
+                      style={{ padding: 'var(--space-sm)', fontSize: '0.9rem' }}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
           {newTabConfig.type === 'ssh' && (
@@ -624,7 +658,9 @@ function TerminalTabs() {
                   overflow: tab.type === 'ai' ? 'hidden' : 'auto'
                 }}
               >
-                {tab.type === 'ai' && <AiExecTab />}
+                {tab.type === 'ai' && (
+                  <AiExecTab sshTarget={tab.config.host?.trim() ? tab.config : null} />
+                )}
               </div>
             ))}
           </div>
