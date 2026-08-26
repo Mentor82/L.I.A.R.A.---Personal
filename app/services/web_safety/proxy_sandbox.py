@@ -46,9 +46,16 @@ class ProxySandbox:
     
     # Timeout für Requests
     TIMEOUT = 10  # Sekunden
-    
+
     # Max Content Size (10 MB)
     MAX_CONTENT_SIZE = 10 * 1024 * 1024
+
+    # Max redirect hops followed manually (issue #9) - requests' own
+    # allow_redirects following happens before ANY of our checks run on the
+    # intermediate hops, which is exactly the SSRF gap this fixes. A small,
+    # explicit cap (well below requests' own default of 30) is enough for
+    # any legitimate same-domain redirect chain.
+    MAX_REDIRECTS = 5
     
     def __init__(self):
         self.session = requests.Session()
@@ -149,34 +156,58 @@ class ProxySandbox:
             # etc.) - previously unchecked entirely. Must happen before the
             # request is ever made, not just on the response.
             self._check_target_is_public(url)
+            original_domain = urlparse(url).netloc
 
-            # Safe GET request
-            response = self.session.get(
-                url,
-                timeout=self.TIMEOUT,
-                allow_redirects=allow_redirects,
-                stream=True  # Für Size-Check
-            )
+            # Manual redirect loop (issue #9): requests' own
+            # allow_redirects=True follows the ENTIRE chain before control
+            # returns here, so a public origin redirecting to
+            # http://127.0.0.1/... would already have been requested by the
+            # time the old code got around to checking response.url. Every
+            # hop below is validated (scheme, same-domain policy, SSRF)
+            # BEFORE that hop's request is dispatched, not after.
+            current_url = url
+            response = None
+            for _hop in range(self.MAX_REDIRECTS + 1):
+                response = self.session.get(
+                    current_url,
+                    timeout=self.TIMEOUT,
+                    allow_redirects=False,
+                    stream=True  # Für Size-Check
+                )
+
+                if not (allow_redirects and response.is_redirect):
+                    break
+
+                location = response.headers.get('Location')
+                if not location:
+                    break
+
+                next_url = urljoin(current_url, location)
+                next_parsed = urlparse(next_url)
+
+                if next_parsed.scheme not in ('http', 'https'):
+                    result['error'] = f'Redirect to unsupported scheme blocked: {next_parsed.scheme or "(none)"}'
+                    return result
+
+                next_domain = next_parsed.netloc
+                if next_domain != original_domain:
+                    result['error'] = f'Cross-domain redirect blocked: {original_domain} → {next_domain}'
+                    return result
+
+                # Validated before the NEXT request is made - this ordering
+                # (not the check itself) is the actual fix.
+                self._check_target_is_public(next_url)
+
+                response.close()
+                current_url = next_url
+            else:
+                result['error'] = 'Too many redirects'
+                return result
 
             result['status_code'] = response.status_code
             result['final_url'] = response.url
             result['content_type'] = response.headers.get('Content-Type', '')
 
-            # Check redirect safety (same domain only)
-            if allow_redirects and response.url != url:
-                original_domain = urlparse(url).netloc
-                final_domain = urlparse(response.url).netloc
-
-                if original_domain != final_domain:
-                    result['error'] = f'Cross-domain redirect blocked: {original_domain} → {final_domain}'
-                    return result
-
-                # Same-domain redirects still need the same SSRF check -
-                # DNS for that domain could differ per-request (rebinding)
-                # or simply not have been resolved yet if this is the
-                # first time we've seen it redirect anywhere.
-                self._check_target_is_public(response.url)
-            
             # Check Content-Type (nur HTML)
             if 'text/html' not in result['content_type']:
                 result['error'] = f'Invalid content type: {result["content_type"]}'

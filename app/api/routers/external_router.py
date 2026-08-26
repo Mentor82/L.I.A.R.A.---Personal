@@ -82,11 +82,11 @@ async def web_search(
     
     # Execute search based on type
     if request.search_type == 'wikipedia':
-        result = web_search.search_wikipedia(request.query, request.language)
+        result = await web_search.search_wikipedia(request.query, request.language)
         formatted = web_search.format_for_llm(result, 'wikipedia')
-    
+
     elif request.search_type == 'weather':
-        result = web_search.get_weather_info(request.query)
+        result = await web_search.get_weather_info(request.query)
         formatted = web_search.format_for_llm(result, 'weather')
     
     else:  # instant

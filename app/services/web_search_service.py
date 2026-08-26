@@ -4,7 +4,6 @@ Privacy-focused web search integration using DuckDuckGo Instant Answer API
 """
 
 import httpx
-import requests  # For synchronous Wikipedia API calls
 from typing import List, Dict, Optional
 import logging
 from datetime import datetime
@@ -57,15 +56,10 @@ class WebSearchService:
                 'skip_disambig': 1
             }
             
-            response = requests.get(
-                self.ddg_api,
-                params=params,
-                headers={'User-Agent': self.user_agent},
-                timeout=10
-            )
+            response = await self._client.get(self.ddg_api, params=params)
             response.raise_for_status()
             data = response.json()
-            
+
             result = {
                 'query': query,
                 'timestamp': datetime.utcnow().isoformat(),
@@ -101,14 +95,14 @@ class WebSearchService:
             logger.info(f"Web search completed for: {query}")
             return result
             
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             logger.error(f"Search timeout for query: {query}")
             return {'error': 'Search timeout', 'query': query}
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Search error for query '{query}': {e}")
             return {'error': str(e), 'query': query}
-    
-    def search_wikipedia(self, query: str, language: str = 'de') -> Dict:
+
+    async def search_wikipedia(self, query: str, language: str = 'de') -> Dict:
         """
         Search Wikipedia for quick facts
         
@@ -121,12 +115,8 @@ class WebSearchService:
         """
         try:
             api_url = f"https://{language}.wikipedia.org/api/rest_v1/page/summary/{query}"
-            
-            response = requests.get(
-                api_url,
-                headers={'User-Agent': self.user_agent},
-                timeout=10
-            )
+
+            response = await self._client.get(api_url)
             response.raise_for_status()
             data = response.json()
             
@@ -140,11 +130,11 @@ class WebSearchService:
                 'timestamp': datetime.utcnow().isoformat()
             }
             
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Wikipedia search error: {e}")
             return {'error': str(e), 'query': query}
-    
-    def get_weather_info(self, location: str) -> Dict:
+
+    async def get_weather_info(self, location: str) -> Dict:
         """
         Get weather information using open-meteo.com (no API key needed)
         
@@ -164,7 +154,7 @@ class WebSearchService:
                 'format': 'json'
             }
             
-            geo_response = requests.get(geocode_url, params=geocode_params, timeout=10)
+            geo_response = await self._client.get(geocode_url, params=geocode_params)
             geo_response.raise_for_status()
             geo_data = geo_response.json()
             
@@ -184,7 +174,7 @@ class WebSearchService:
                 'timezone': 'Europe/Berlin'
             }
             
-            weather_response = requests.get(weather_url, params=weather_params, timeout=10)
+            weather_response = await self._client.get(weather_url, params=weather_params)
             weather_response.raise_for_status()
             weather_data = weather_response.json()
             
@@ -203,7 +193,7 @@ class WebSearchService:
                 'timezone': weather_data.get('timezone')
             }
             
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Weather API error: {e}")
             return {'error': str(e), 'location': location}
     

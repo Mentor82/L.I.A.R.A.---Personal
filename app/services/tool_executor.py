@@ -255,7 +255,7 @@ class ToolExecutor:
             return await self._execute_web_search_general(query, language, policy)
 
         if search_type == "wikipedia":
-            result = self.web_search.search_wikipedia(query, language)
+            result = await self.web_search.search_wikipedia(query, language)
         else:
             result = await self.web_search.search_instant_answer(query)
 
@@ -374,7 +374,7 @@ class ToolExecutor:
         city = params.get("city")
         country = params.get("country")
 
-        result = self.web_search.get_weather_info(city)
+        result = await self.web_search.get_weather_info(city)
 
         if "error" in result:
             return {
@@ -422,8 +422,8 @@ class ToolExecutor:
         query = params.get("query")
         language = params.get("language", "de")
         
-        result = self.web_search.search_wikipedia(query, language)
-        
+        result = await self.web_search.search_wikipedia(query, language)
+
         return {
             "query": query,
             "summary": result.get("extract", "Kein Ergebnis gefunden"),
@@ -509,9 +509,13 @@ class ToolExecutor:
             )
             
             if not param_def:
-                # Unknown parameter - warning but allow
-                logger.warning(f"Unknown parameter: {param_name} for tool {tool_def.name}")
-                continue
+                # Unknown parameter - reject by default (issue #9): no tool
+                # currently needs extensible parameters, and accepting
+                # undeclared fields weakens the tool boundary as new tools
+                # get added. A tool that genuinely needs this should get an
+                # explicit opt-in on its ToolDefinition, not a silent global
+                # allowance.
+                return f"Unknown parameter: {param_name}"
             
             # Type check (basic)
             expected_type = param_def.type

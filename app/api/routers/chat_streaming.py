@@ -143,7 +143,7 @@ async def perform_web_search(query: str, intent: str, user_id: Optional[int] = N
                     return None, {'error': 'no_location', 'message': 'Kein Standort verfügbar'}, 'weather', risk_score
             
             logger.info(f"Fetching weather for location: {location}")
-            result = web_search.get_weather_info(location)
+            result = await web_search.get_weather_info(location)
             logger.info(f"Weather result: {result}")
             if 'error' not in result:
                 formatted = web_search.format_for_llm(result, 'weather')
@@ -157,7 +157,7 @@ async def perform_web_search(query: str, intent: str, user_id: Optional[int] = N
             
             # Wikipedia search
             logger.info(f"Searching Wikipedia for: {query}")
-            result = web_search.search_wikipedia(query, language='de')
+            result = await web_search.search_wikipedia(query, language='de')
             logger.info(f"Wikipedia result: {result}")
             if 'error' not in result:
                 formatted = web_search.format_for_llm(result, 'wikipedia')
