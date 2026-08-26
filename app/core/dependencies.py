@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, status, WebSocket
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from api.models.base_models import User, UserRole
-from core.security import verify_token
+from core.security import verify_access_token
 from core.database import get_db
 
 # HTTP Bearer token scheme
@@ -26,16 +26,18 @@ async def get_current_user(
         HTTPException 404: User not found
     """
     token = credentials.credentials
-    
-    # Verify token
-    payload = verify_token(token)
+
+    # Verify token - must be an access token, not a refresh token (issue #11:
+    # a refresh token is a validly-signed JWT too and would otherwise pass
+    # the generic verify_token() check and authenticate as a normal user).
+    payload = verify_access_token(token)
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Extract user_id
     user_id: Optional[int] = payload.get("user_id")
     if user_id is None:
@@ -44,7 +46,7 @@ async def get_current_user(
             detail="Invalid token payload",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Fetch user from database
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
@@ -52,7 +54,17 @@ async def get_current_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
+    # Active-user enforcement belongs here, not only in require_active_user()
+    # (issue #11) - routes depending directly on get_current_user() instead
+    # of require_active_user() would otherwise keep accepting a deactivated
+    # user's still-valid access token.
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user"
+        )
+
     return user
 
 
@@ -80,8 +92,9 @@ async def get_current_user_ws(
     if not token:
         raise Exception("No authentication token provided")
     
-    # Verify token
-    payload = verify_token(token)
+    # Verify token - must be an access token, not a refresh token (issue #11,
+    # same reasoning as get_current_user() above).
+    payload = verify_access_token(token)
     if payload is None:
         raise Exception("Invalid or expired token")
     

@@ -53,9 +53,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     else:
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": "access"})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    
+
     return encoded_jwt
 
 
@@ -74,6 +74,24 @@ def verify_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def verify_access_token(token: str) -> Optional[dict]:
+    """
+    Verify access token and check type (issue #11) - without this, a valid
+    refresh token (30 days) passes generic verify_token() and authenticates
+    normal requests as if it were a 60-minute access token.
+
+    Args:
+        token: Access token string
+
+    Returns:
+        Decoded payload or None if invalid/not an access token
+    """
+    payload = verify_token(token)
+    if payload and payload.get("type") == "access":
+        return payload
+    return None
 
 
 def create_refresh_token(data: dict) -> str:
