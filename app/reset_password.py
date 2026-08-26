@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
 from core.database import SessionLocal
 from api.models.base_models import User
-from core.security import hash_password
+from core.security import hash_password, invalidate_sessions
 
 def reset_password(username: str, new_password: str):
     """Reset user password"""
@@ -29,8 +29,10 @@ def reset_password(username: str, new_password: str):
         # Hash new password
         hashed_pw = hash_password(new_password)
         
-        # Update password
+        # Update password - also ends every existing session (issue #11
+        # item 3), same reasoning as the API's password-change paths.
         user.hashed_password = hashed_pw
+        invalidate_sessions(user)
         db.commit()
         
         print(f"✅ Password updated for user '{user.username}'")

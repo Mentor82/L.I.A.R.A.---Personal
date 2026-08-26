@@ -102,10 +102,13 @@ def update_user(
         update_data.pop('is_active', None)
         # Note: role is not in UserUpdate schema, so no need to remove
     
-    # Update password if provided
+    # Update password if provided - also ends every existing session (issue
+    # #11 item 3): a stolen token surviving a password change would defeat
+    # the point of changing it.
     if 'password' in update_data and update_data['password']:
-        from core.security import hash_password
+        from core.security import hash_password, invalidate_sessions
         user.hashed_password = hash_password(update_data.pop('password'))
+        invalidate_sessions(user)
     
     # Update other fields
     for field, value in update_data.items():

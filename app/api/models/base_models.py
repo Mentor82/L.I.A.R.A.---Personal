@@ -45,6 +45,11 @@ class User(Base):
     # JWT Tokens
     refresh_token = Column(String(500), nullable=True)  # Store current refresh token
     refresh_token_expires = Column(DateTime, nullable=True)
+    # Security epoch (issue #11 items 2/3): embedded in every access/refresh
+    # JWT at issuance and compared against this column on every request -
+    # bumping it (logout, password change) instantly invalidates every
+    # previously-issued token without needing a token blocklist.
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
     
     # Privacy & Consent (DSGVO)
     privacy_accepted = Column(Boolean, default=False)  # Datenschutz akzeptiert

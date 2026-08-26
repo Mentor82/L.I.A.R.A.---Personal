@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, status, WebSocket
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from api.models.base_models import User, UserRole
-from core.security import verify_access_token
+from core.security import verify_access_token, token_version_matches
 from core.database import get_db
 
 # HTTP Bearer token scheme
@@ -53,6 +53,18 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
+        )
+
+    # Session revocation (issue #11 items 2/3): logout and password changes
+    # bump user.token_version instead of maintaining a token blocklist - an
+    # access token issued before that point carries the old value and stops
+    # authenticating here immediately, rather than remaining valid until its
+    # own (up to 60-minute) expiry.
+    if not token_version_matches(payload, user.token_version):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token revoked (session invalidated)",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # Active-user enforcement belongs here, not only in require_active_user()
@@ -106,7 +118,11 @@ async def get_current_user_ws(
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise Exception("User not found")
-    
+
+    # Session revocation (issue #11 items 2/3), same as get_current_user() above.
+    if not token_version_matches(payload, user.token_version):
+        raise Exception("Token revoked (session invalidated)")
+
     # Check if user is active
     if not user.is_active:
         raise Exception("Inactive user")

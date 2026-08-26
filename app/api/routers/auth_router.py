@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from core.security import (
     verify_password, hash_password, create_access_token, create_refresh_token,
-    verify_refresh_token, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+    verify_refresh_token, token_version_matches, invalidate_sessions,
+    ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 )
 from core.dependencies import get_current_user, require_active_user
 from api.models.base_models import User, UserRole
@@ -74,15 +75,17 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         data={
             "user_id": new_user.id,
             "username": new_user.username,
-            "role": new_user.role.value
+            "role": new_user.role.value,
+            "token_version": new_user.token_version
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    
+
     refresh_token = create_refresh_token(
         data={
             "user_id": new_user.id,
-            "username": new_user.username
+            "username": new_user.username,
+            "token_version": new_user.token_version
         }
     )
     
@@ -142,23 +145,25 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
         data={
             "user_id": user.id,
             "username": user.username,
-            "role": user.role.value
+            "role": user.role.value,
+            "token_version": user.token_version
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    
+
     refresh_token = create_refresh_token(
         data={
             "user_id": user.id,
-            "username": user.username
+            "username": user.username,
+            "token_version": user.token_version
         }
     )
-    
+
     # Store refresh token in database
     user.refresh_token = refresh_token
     user.refresh_token_expires = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     db.commit()
-    
+
     return Token(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -181,16 +186,18 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 @router.post("/logout")
 async def logout(current_user: User = Depends(require_active_user), db: Session = Depends(get_db)):
     """
-    Logout user - invalidate refresh token
-    
-    - Clears refresh token from database
-    - Client should delete tokens from storage
+    Logout user - invalidate refresh token AND every already-issued access
+    token (issue #11 item 2).
+
+    Previously this only cleared the stored refresh token, so future
+    /auth/refresh calls failed but any access JWT issued before logout kept
+    authenticating normally until its own 60-minute expiry. Bumping
+    token_version (see core.security.invalidate_sessions) makes logout
+    actually end the session immediately, not just block its renewal.
     """
-    # Clear refresh token from database
-    current_user.refresh_token = None
-    current_user.refresh_token_expires = None
+    invalidate_sessions(current_user)
     db.commit()
-    
+
     return {
         "message": "Logged out successfully",
         "username": current_user.username
@@ -233,7 +240,19 @@ async def refresh_access_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token mismatch - possible security issue"
         )
-    
+
+    # Belt-and-suspenders alongside the stored-token equality check above
+    # (issue #11 items 2/3): today invalidate_sessions() always clears
+    # refresh_token in the same call that bumps token_version, so this is
+    # currently implied by the check above - but unlike that check, this
+    # one doesn't depend on every future revocation path remembering to
+    # also clear the stored token.
+    if not token_version_matches(payload, user.token_version):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token revoked (session invalidated)"
+        )
+
     # Check if refresh token expired
     if user.refresh_token_expires and user.refresh_token_expires < datetime.utcnow():
         raise HTTPException(
@@ -253,15 +272,17 @@ async def refresh_access_token(
         data={
             "user_id": user.id,
             "username": user.username,
-            "role": user.role.value
+            "role": user.role.value,
+            "token_version": user.token_version
         },
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    
+
     new_refresh_token = create_refresh_token(
         data={
             "user_id": user.id,
-            "username": user.username
+            "username": user.username,
+            "token_version": user.token_version
         }
     )
     

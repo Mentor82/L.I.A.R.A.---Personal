@@ -139,10 +139,10 @@ def create_refresh_token(data: dict) -> str:
 def verify_refresh_token(token: str) -> Optional[dict]:
     """
     Verify refresh token and check type
-    
+
     Args:
         token: Refresh token string
-        
+
     Returns:
         Decoded payload or None if invalid/not refresh token
     """
@@ -150,3 +150,33 @@ def verify_refresh_token(token: str) -> Optional[dict]:
     if payload and payload.get("type") == "refresh":
         return payload
     return None
+
+
+def token_version_matches(payload: dict, current_version: int) -> bool:
+    """
+    Compares a decoded JWT's token_version claim against the user's current
+    value (issue #11 items 2/3). Tokens issued before this field existed
+    carry no claim at all - treated as version 0, matching the column's own
+    default, so already-issued tokens keep working right after this ships
+    and only a future logout/password-change (which bumps the column)
+    actually revokes anything.
+    """
+    return payload.get("token_version", 0) == current_version
+
+
+def invalidate_sessions(user) -> None:
+    """
+    Bumps user.token_version (issue #11 items 2/3) so every access/refresh
+    JWT issued before this call - each carries the token_version active at
+    issuance - stops authenticating from now on, without needing a token
+    blocklist. Also clears the stored refresh token so an outstanding
+    refresh attempt fails immediately via the existing equality check
+    rather than only via its own token_version claim.
+
+    Call sites: logout, password change (self-service, admin reset-via-
+    token, and the reset_password.py CLI tool). Caller still owns
+    db.commit().
+    """
+    user.token_version = (user.token_version or 0) + 1
+    user.refresh_token = None
+    user.refresh_token_expires = None

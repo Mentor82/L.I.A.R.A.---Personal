@@ -393,10 +393,14 @@ async def complete_password_reset(
             detail="Password must be at least 6 characters"
         )
     
-    # Update password
+    # Update password - also ends every existing session (issue #11 item 3),
+    # since a "forgot password" reset is exactly the scenario where an
+    # already-issued token might be in someone else's hands.
+    from core.security import invalidate_sessions
     user.hashed_password = hash_password(new_password)
+    invalidate_sessions(user)
     db.commit()
-    
+
     # Invalidate token
     password_reset_service.invalidate_token(token)
     
