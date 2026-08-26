@@ -41,6 +41,58 @@ def _load_redis_password() -> str:
     return password
 
 
+# add_to_context() lost-update fix (issue #7 item 2): the old Python-side
+# GET -> mutate -> SETEX was a classic read-modify-write on one JSON blob -
+# two concurrent calls for the same session could both read the same
+# starting object, both append their own context item, and whichever
+# SETEX ran last would silently overwrite the other's entry and undercount
+# message_count/action_count. A Lua script runs atomically on the Redis
+# server itself (Redis never interleaves another command mid-script), so
+# every add_to_context() call - however many arrive concurrently - is
+# guaranteed to see and build on the immediately-preceding one.
+_ADD_TO_CONTEXT_LUA = """
+local session_key = KEYS[1]
+local sessions_set_key = KEYS[2]
+local session_id = ARGV[1]
+local ttl_seconds = tonumber(ARGV[2])
+local context_item_json = ARGV[3]
+local content_type = ARGV[4]
+local last_activity = ARGV[5]
+local max_context = tonumber(ARGV[6])
+local default_session_json = ARGV[7]
+
+local raw = redis.call('GET', session_key)
+local session
+if raw then
+    session = cjson.decode(raw)
+else
+    session = cjson.decode(default_session_json)
+end
+
+table.insert(session.context, cjson.decode(context_item_json))
+local n = #session.context
+if n > max_context then
+    local trimmed = {}
+    for i = n - max_context + 1, n do
+        table.insert(trimmed, session.context[i])
+    end
+    session.context = trimmed
+end
+
+if content_type == 'message' then
+    session.message_count = session.message_count + 1
+else
+    session.action_count = session.action_count + 1
+end
+session.last_activity = last_activity
+
+local encoded = cjson.encode(session)
+redis.call('SETEX', session_key, ttl_seconds, encoded)
+redis.call('SADD', sessions_set_key, session_id)
+return encoded
+"""
+
+
 class RedisSessionService:
     """Service for managing session context in Redis"""
 
@@ -59,6 +111,7 @@ class RedisSessionService:
         self.port = port
         self.db = db
         self._client = None
+        self._add_to_context_script = None
         self._password = password if password is not None else _load_redis_password()
         logger.info(f"Initializing RedisSessionService: {host}:{port}")
     
@@ -147,12 +200,14 @@ class RedisSessionService:
                 json.dumps(session)
             )
     
-    def add_to_context(self, user_id: int, session_id: str, 
-                       content_type: str, content_id: int, 
+    def add_to_context(self, user_id: int, session_id: str,
+                       content_type: str, content_id: int,
                        content_summary: str, metadata: Optional[Dict] = None):
         """
-        Add item to session context window
-        
+        Add item to session context window (race-safe, issue #7 item 2 -
+        see _ADD_TO_CONTEXT_LUA above for why this is a Lua script rather
+        than a Python-side GET/mutate/SETEX).
+
         Args:
             user_id: User ID
             session_id: Session ID
@@ -161,39 +216,42 @@ class RedisSessionService:
             content_summary: Brief summary of content
             metadata: Additional metadata
         """
-        session = self.get_session(user_id, session_id)
-        if not session:
-            session = self.create_session(user_id, session_id)
-        
+        if self._add_to_context_script is None:
+            self._add_to_context_script = self.client.register_script(_ADD_TO_CONTEXT_LUA)
+
+        now_iso = datetime.utcnow().isoformat()
         context_item = {
             'content_type': content_type,
             'content_id': content_id,
             'content_summary': content_summary,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': now_iso,
             'metadata': metadata or {}
         }
-        
-        session['context'].append(context_item)
-        
-        # Keep only last 20 items in context window
-        if len(session['context']) > 20:
-            session['context'] = session['context'][-20:]
-        
-        # Update message/action count
-        if content_type == 'message':
-            session['message_count'] += 1
-        else:
-            session['action_count'] += 1
-        
-        session['last_activity'] = datetime.utcnow().isoformat()
-        
+        default_session = {
+            'user_id': user_id,
+            'session_id': session_id,
+            'started_at': now_iso,
+            'last_activity': now_iso,
+            'message_count': 0,
+            'action_count': 0,
+            'context': []
+        }
+
         session_key = f"session:{user_id}:{session_id}"
-        self.client.setex(
-            session_key,
-            timedelta(hours=24),
-            json.dumps(session)
+        sessions_set_key = f"user:{user_id}:sessions"
+        self._add_to_context_script(
+            keys=[session_key, sessions_set_key],
+            args=[
+                session_id,
+                int(timedelta(hours=24).total_seconds()),
+                json.dumps(context_item),
+                content_type,
+                now_iso,
+                20,
+                json.dumps(default_session),
+            ]
         )
-        
+
         logger.debug(f"Added to context: {content_type}:{content_id}")
     
     def get_context_window(self, user_id: int, session_id: str, 

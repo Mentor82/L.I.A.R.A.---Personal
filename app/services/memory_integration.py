@@ -9,7 +9,7 @@ UPDATED: 2025-12-04
 """
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import logging
@@ -334,13 +334,13 @@ def search_semantic_memory(
     embedding_service = get_embedding_service()
     query_embedding = embedding_service.generate_embedding(query)
     
-    content_filter = ""
-    if content_types:
-        types_str = "','".join(content_types)
-        content_filter = f"AND content_type IN ('{types_str}')"
-    
+    # content_types filter as a bind parameter, not string interpolation
+    # (issue #7 item 7) - expanding=True lets SQLAlchemy turn the list into
+    # a safely parameterized IN (...) regardless of its contents.
+    content_filter = "AND content_type IN :content_types" if content_types else ""
+
     sql = text(f"""
-    SELECT 
+    SELECT
         content_type,
         content_id,
         1 - (embedding <=> CAST(:query_embedding AS vector)) as similarity,
@@ -358,14 +358,20 @@ def search_semantic_memory(
     ORDER BY embedding <=> CAST(:query_embedding AS vector)
     LIMIT :limit
     """)
-    
-    result = db.execute(sql, {
+    if content_types:
+        sql = sql.bindparams(bindparam('content_types', expanding=True))
+
+    params = {
         'user_id': user_id,
         'query_embedding': str(query_embedding),
         'min_similarity': min_similarity,
         'limit': limit
-    })
-    
+    }
+    if content_types:
+        params['content_types'] = content_types
+
+    result = db.execute(sql, params)
+
     return [dict(row._mapping) for row in result]
 
 
@@ -387,13 +393,12 @@ def get_temporal_context(
     Returns:
         List of recent content with temporal metadata
     """
-    content_filter = ""
-    if content_types:
-        types_str = "','".join(content_types)
-        content_filter = f"AND t.content_type IN ('{types_str}')"
-    
+    # content_types filter as a bind parameter, not string interpolation
+    # (issue #7 item 7) - same reasoning as search_semantic_memory() above.
+    content_filter = "AND t.content_type IN :content_types" if content_types else ""
+
     sql = text(f"""
-    SELECT 
+    SELECT
         t.content_type,
         t.content_id,
         t.timestamp,
@@ -406,8 +411,8 @@ def get_temporal_context(
         s.topics
     FROM temporal_index t
     LEFT JOIN semantic_metadata s ON (
-        t.user_id = s.user_id 
-        AND t.content_type = s.content_type 
+        t.user_id = s.user_id
+        AND t.content_type = s.content_type
         AND t.content_id = s.content_id
     )
     WHERE t.user_id = :user_id
@@ -415,8 +420,14 @@ def get_temporal_context(
     ORDER BY t.sequence_number DESC
     LIMIT :limit
     """)
-    
-    result = db.execute(sql, {'user_id': user_id, 'limit': limit})
+    if content_types:
+        sql = sql.bindparams(bindparam('content_types', expanding=True))
+
+    params = {'user_id': user_id, 'limit': limit}
+    if content_types:
+        params['content_types'] = content_types
+
+    result = db.execute(sql, params)
     return [dict(row._mapping) for row in result]
 
 
@@ -571,18 +582,29 @@ def store_message_with_concepts(
     for concept, embedding in concept_embeddings.items():
         try:
             with neo4j.driver.session() as session:
+                # mention_count is incremented on the (Message)-[:CONTAINS]->
+                # (Concept) relationship's ON CREATE, not the Concept node's
+                # ON MATCH (issue #7 item 5): the old version bumped it
+                # whenever the Concept already existed, regardless of
+                # whether THIS message had already been linked to it - a
+                # retry of the same message re-processing this exact
+                # concept would double-count it. Tying the increment to the
+                # relationship's own creation makes it idempotent per
+                # (message, concept) pair - a replay finds the relationship
+                # already there, MERGE is a no-op, ON CREATE SET doesn't
+                # fire again.
                 session.run("""
                     MATCH (m:Message {user_id: $user_id, message_id: $message_id})
                     MERGE (c:Concept {text: $concept, user_id: $user_id})
-                    ON CREATE SET 
+                    ON CREATE SET
                         c.embedding = $embedding,
                         c.created_at = datetime(),
-                        c.mention_count = 1
-                    ON MATCH SET 
+                        c.mention_count = 0
+                    MERGE (m)-[r:CONTAINS]->(c)
+                    ON CREATE SET
+                        r.created_at = datetime(),
                         c.mention_count = c.mention_count + 1,
                         c.last_mentioned = datetime()
-                    MERGE (m)-[r:CONTAINS]->(c)
-                    ON CREATE SET r.created_at = datetime()
                 """,
                     user_id=user_id,
                     message_id=message_id,
