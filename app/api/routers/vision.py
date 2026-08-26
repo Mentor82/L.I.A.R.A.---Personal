@@ -13,10 +13,14 @@ import time
 from pathlib import Path
 from datetime import datetime
 
+from sqlalchemy.orm import Session
+
 from api.models.base_models import User
 from core.dependencies import require_active_user
+from core.database import get_db
 from services.vision_service import VisionService, get_vision_service
 from services.vision_detection_service import get_vision_detection_service
+from services.chat_persistence import persist_chat_turn
 
 router = APIRouter(
     prefix="/vision",
@@ -192,40 +196,48 @@ async def detect_image(
 async def vision_chat(
     file: UploadFile = File(...),
     message: str = "Was siehst du auf diesem Bild?",
-    current_user: User = Depends(require_active_user)
+    session_id: Optional[int] = None,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db)
 ):
     """
     💬 Chat mit Bild-Kontext (für Chat-Integration)
-    
+
     Kombiniert Bildanalyse mit Konversation.
     Kann mehrere Fragen zum selben Bild beantworten.
     """
     # Validierung
     if not file.content_type.startswith('image/'):
         raise HTTPException(status_code=400, detail="Nur Bilder erlaubt")
-    
+
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Bild zu groß (max 10 MB)")
-    
+
     image_base64 = base64.b64encode(content).decode('utf-8')
-    
+
     vision_service = get_vision_service()
-    
+
     try:
         result = await vision_service.analyze_image(
             image_base64=image_base64,
             prompt=message,
             user_id=current_user.id
         )
-        
+
+        # issue #13: persist this turn ourselves (server-side, before
+        # responding) rather than have the client post the description
+        # back afterward as a trusted "assistant" message.
+        if session_id:
+            persist_chat_turn(db, session_id, current_user.id, message, result['description'], model=result['model_used'])
+
         return {
             'response': result['description'],
             'model_used': result['model_used'],
             'has_image': True,
             'image_format': file.content_type
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

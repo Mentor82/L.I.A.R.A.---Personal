@@ -67,28 +67,6 @@ export async function getSessionMessages(sessionId) {
 }
 
 /**
- * Save a chat message to database
- */
-export async function saveChatMessage(messageData) {
-  const token = localStorage.getItem('liara_token')
-  
-  const response = await fetch(`${API_BASE}/chat/messages/`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(messageData)
-  })
-  
-  if (!response.ok) {
-    throw new Error('Failed to save message')
-  }
-  
-  return await response.json()
-}
-
-/**
  * Delete a chat session
  */
 export async function deleteChatSession(sessionId) {

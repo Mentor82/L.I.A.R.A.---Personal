@@ -4,6 +4,7 @@ Automatische Ausführung von Tool-Calls mit Privacy-Checks
 """
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -130,16 +131,35 @@ class ToolExecutor:
         try:
             logger.info(f"Executing tool: {tool_call.tool_name} for user {user_id}")
 
+            start = time.monotonic()
             result = await self._execute_tool(tool_def, tool_call.parameters, user_id, db, session_id)
-            
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+
+            # Normalize inner-error-as-outer-success (issue #14): several
+            # tool implementations signal a normal (non-exception) failure
+            # by returning a dict with a top-level "error" key (weather,
+            # location, current-time, workspace proposals) rather than
+            # raising. Without this check, every one of those was wrapped
+            # as success=True below - the Agent loop, agent_steps status,
+            # and structured UI gating all key off the outer "success"
+            # field, so a tool could fail while its execution trace said it
+            # completed fine.
+            if isinstance(result, dict) and "error" in result:
+                return self._error_result(
+                    tool_call.tool_name,
+                    result["error"],
+                    result=result,
+                    execution_time_ms=elapsed_ms,
+                )
+
             return {
                 "success": True,
                 "tool": tool_call.tool_name,
                 "result": result,
                 "timestamp": datetime.utcnow().isoformat(),
-                "execution_time_ms": 0  # TODO: Measure actual time
+                "execution_time_ms": elapsed_ms
             }
-            
+
         except Exception as e:
             logger.error(f"Tool execution failed: {tool_call.tool_name}: {e}")
             return self._error_result(
@@ -608,15 +628,26 @@ class ToolExecutor:
         self,
         tool_name: str,
         error_msg: str,
-        consent_required: bool = False
+        consent_required: bool = False,
+        result: Optional[Dict] = None,
+        execution_time_ms: int = 0,
     ) -> Dict[str, Any]:
-        """Erstellt Fehler-Result"""
+        """
+        Erstellt Fehler-Result. Same top-level key set as the success shape
+        in execute() (issue #14: "Model tool-history receives a consistent
+        status shape") - result/execution_time_ms default to None/0 for
+        failures that never actually ran a tool (unknown tool, consent
+        denied, bad parameters), and are populated for failures normalized
+        from a genuinely-executed tool's own error dict.
+        """
         return {
             "success": False,
             "tool": tool_name,
             "error": error_msg,
             "consent_required": consent_required,
-            "timestamp": datetime.utcnow().isoformat()
+            "result": result,
+            "timestamp": datetime.utcnow().isoformat(),
+            "execution_time_ms": execution_time_ms,
         }
 
 

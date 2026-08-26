@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { chatAPI, moodAPI } from '../services/api';
-import { getChatSessions, createChatSession, saveChatMessage, getSessionMessages, deleteChatSession } from '../services/chatService';
+import { getChatSessions, createChatSession, getSessionMessages, deleteChatSession } from '../services/chatService';
 import { analyzeSentimentDebounced } from '../services/sentimentService';
 import { shouldUseSSE } from '../services/systemLoadService';
 import SearchingIndicator from './SearchingIndicator';
@@ -380,12 +380,12 @@ function Chat() {
           // that genuinely has zero sessions of its own.
           //
           // This must be a real DB session, not a client-only Date.now()
-          // id: saveMessageToDB() posts to /chat/messages/ with the active
-          // session's id, and that endpoint 404s (silently, since the
-          // failure is only logged, never surfaced) when the id doesn't
-          // exist in chat_sessions - so a fake local id would let a user's
-          // very first conversation look fine in the UI while never
-          // actually being persisted.
+          // id: the chat/vision/hailo-vision endpoints persist server-side
+          // using this session_id, and silently skip persistence (only
+          // logged, never surfaced) when the id doesn't exist in
+          // chat_sessions - so a fake local id would let a user's very
+          // first conversation look fine in the UI while never actually
+          // being persisted.
           const dbSession = await createChatSession('Neue Konversation');
           if (sessionActionTakenRef.current) return;
           const freshSession = { id: dbSession.id, title: dbSession.title, messages: [], timestamp: dbSession.created_at };
@@ -400,27 +400,6 @@ function Chat() {
     
     loadSessions();
   }, []);
-
-  // Save message to database
-  const saveMessageToDB = async (sessionId, messageData) => {
-    try {
-      await saveChatMessage({
-        session_id: sessionId,
-        role: messageData.role,
-        content: messageData.content,
-        model: messageData.model || null,
-        mood: messageData.mood || null,
-        web_search_results: messageData.webSearchResults || null,
-        search_type: messageData.searchType || null,
-        risk_score: messageData.riskScore || null,
-        action_result: messageData.actionResult || null,
-        timestamp: messageData.timestamp
-      });
-    } catch (error) {
-      console.error('Failed to save message to DB:', error);
-      // Continue anyway - localStorage has it
-    }
-  };
 
   const handleStop = () => {
     console.log('[Chat] Stop button pressed - aborting request');
@@ -575,10 +554,6 @@ function Chat() {
         console.log('[Chat] SYNC MODE: Using /api/chat/message');
         console.log(`[FRONTEND_LOG] ${timestamp} - HTTP_START - Sending POST to /api/chat/message`);
 
-        // /chat/message (chat.py) doesn't persist messages server-side like
-        // /chat/stream now does, so this path still needs to save it itself.
-        saveMessageToDB(activeSessionId, userMessage);
-
         const response = await fetch('/api/chat/message', {
           method: 'POST',
           headers: {
@@ -587,7 +562,8 @@ function Chat() {
           },
           body: JSON.stringify({
             message: trimmedMessage,
-            model: modelToUse
+            model: modelToUse,
+            session_id: activeSessionId
           }),
           signal: requestAbortController.signal
         });
@@ -616,7 +592,6 @@ function Chat() {
             : session
         ));
         
-        saveMessageToDB(activeSessionId, liaraMessage);
         setLoading(false);
         
         // Update mood
@@ -1104,6 +1079,7 @@ function Chat() {
       const formData = new FormData();
       formData.append('file', selectedImage);
       formData.append('message', message.trim());
+      formData.append('session_id', activeSessionId);
 
       const token = localStorage.getItem('liara_token');
       const response = await fetch('/api/vision/chat', {
@@ -1145,10 +1121,6 @@ function Chat() {
           : session
       ));
 
-      // Save to DB
-      saveMessageToDB(activeSessionId, userMessage);
-      saveMessageToDB(activeSessionId, liaraMessage);
-
       // Reset
       setMessage('');
       removeImage();
@@ -1174,24 +1146,18 @@ function Chat() {
     try {
       const formData = new FormData();
       formData.append('file', selectedImage);
+      formData.append('task', hailoTask);
+      formData.append('model', hailoModel);
+      if (hailoTask === 'detect') {
+        formData.append('confidence', hailoConfidence);
+      }
+      formData.append('message', message.trim());
+      formData.append('session_id', activeSessionId);
 
       const token = localStorage.getItem('liara_token');
-      const params = new URLSearchParams();
-      params.append('model', hailoModel);
-      if (hailoTask === 'detect') {
-        params.append('confidence', hailoConfidence);
-      }
-
-      const endpointMap = {
-        detect: '/api/hailo/vision/detect',
-        pose: '/api/hailo/vision/pose',
-        segment: '/api/hailo/vision/segment'
-      };
-
-      const endpoint = endpointMap[hailoTask] || endpointMap.detect;
       const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-      const response = await fetch(`${endpoint}?${params.toString()}` , {
+      const response = await fetch('/api/chat/hailo-vision', {
         method: 'POST',
         headers,
         body: formData
@@ -1231,9 +1197,6 @@ function Chat() {
           ? { ...session, messages: [...session.messages, userMessage, hailoMessage] }
           : session
       ));
-
-      saveMessageToDB(activeSessionId, userMessage);
-      saveMessageToDB(activeSessionId, hailoMessage);
 
       setMessage('');
       removeImage();

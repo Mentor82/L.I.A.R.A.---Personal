@@ -34,14 +34,6 @@ class ChatSessionUpdate(BaseModel):
     title: str
 
 
-class ChatMessageCreate(BaseModel):
-    session_id: int
-    role: str
-    content: str
-    model: Optional[str] = None
-    mood: Optional[str] = None
-
-
 class ChatMessage(BaseModel):
     id: int
     role: str
@@ -207,58 +199,6 @@ async def get_session_messages(
         })
     
     return messages
-
-
-@router.post("/messages/", response_model=ChatMessage)
-async def create_chat_message(
-    message: ChatMessageCreate,
-    current_user: User = Depends(require_active_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Neue Message zu einer Session hinzufügen
-    """
-    # Verify session belongs to user
-    session_check = db.execute(text("""
-        SELECT id FROM chat_sessions 
-        WHERE id = :session_id AND user_id = :user_id
-    """), {'session_id': message.session_id, 'user_id': current_user.id}).first()
-    
-    if not session_check:
-        raise HTTPException(status_code=404, detail="Session not found or access denied")
-    
-    # Insert message
-    result = db.execute(text("""
-        INSERT INTO chat_messages (session_id, role, content, model, mood, timestamp)
-        VALUES (:session_id, :role, :content, :model, :mood, CURRENT_TIMESTAMP)
-        RETURNING id, role, content, model, mood, timestamp
-    """), {
-        'session_id': message.session_id,
-        'role': message.role,
-        'content': message.content,
-        'model': message.model,
-        'mood': message.mood
-    })
-    db.commit()
-    
-    row = result.first()
-    if not row:
-        raise HTTPException(status_code=500, detail="Failed to create message")
-    
-    # Update session timestamp
-    db.execute(text("""
-        UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
-    """), {'session_id': message.session_id})
-    db.commit()
-    
-    return {
-        'id': row.id,
-        'role': row.role,
-        'content': row.content,
-        'model': row.model,
-        'mood': row.mood,
-        'timestamp': row.timestamp
-    }
 
 
 @router.put("/sessions/{session_id}", response_model=ChatSession)

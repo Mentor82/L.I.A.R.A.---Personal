@@ -1,7 +1,8 @@
 """Chat Router - API Endpoints für Liara Konversation."""
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List, Dict
+import base64
 import subprocess
 import json
 import logging
@@ -27,6 +28,8 @@ from services.tool_executor import get_tool_executor
 from services.image_generation import get_image_generation_service
 from services.user_preferences_service import get_user_preferences
 from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions
+from services.chat_persistence import persist_chat_turn
+from services.hailo_rpi5_client import get_rpi5_client, RPi5Status
 
 # === Hailo-8L Backend Router Integration ===
 from services.backend_router import get_backend_router, BackendRouter, BackendType
@@ -565,10 +568,16 @@ class ChatRequest(BaseModel):
     context: Optional[str] = None
     model: Optional[str] = None
     temperature: float = 0.7
-    
+
     # === Hailo Integration Fields ===
     use_accelerator: Optional[str] = "auto"  # auto|hailo|vllm|ollama|llama_cpp
     attachments: Optional[List[Dict]] = None  # [{"type": "image", "data": "base64..."}]
+
+    # issue #13: when given, this endpoint persists the user+assistant turn
+    # itself (server-side, via chat_persistence.persist_chat_turn) instead
+    # of relying on the client to post the assistant reply back afterward -
+    # the client can no longer choose what gets stored as "assistant".
+    session_id: Optional[int] = None
 
 
 class ChatResponse(BaseModel):
@@ -596,6 +605,14 @@ async def chat_with_liara(
     """
     Chat mit Liara über Ollama mit Intent Detection und Personalisierung
     """
+    # issue #13: captured before `db` potentially gets shadowed by the
+    # `with get_db_context() as db:` block further down (intent-action
+    # execution) - that block closes its own session on exit but leaves
+    # the name `db` bound to it for the rest of this function, so anything
+    # persisted afterward must use this captured reference, never `db`
+    # directly, to avoid touching an already-closed session.
+    request_db = db
+
     # Mirko Debug Logging
     from core.mirko_logger import get_mirko_logger, should_log_for_user
     mlogger = get_mirko_logger()
@@ -613,8 +630,11 @@ async def chat_with_liara(
             
             if not image_service.is_enabled():
                 # Stable Diffusion WebUI nicht erreichbar
+                reply = "Ich würde dir sehr gerne ein Bild erstellen! 🎨 Allerdings ist meine lokale Stable Diffusion derzeit nicht gestartet. Mein Administrator kann sie mit `./webui.sh --api --listen` im AUTOMATIC1111-Verzeichnis starten. Dann kann ich wunderschöne Bilder für dich erstellen - komplett privat auf diesem Server! 🌟"
+                if request.session_id:
+                    persist_chat_turn(request_db, request.session_id, current_user.id, request.message, reply, model="system-policy")
                 return ChatResponse(
-                    response="Ich würde dir sehr gerne ein Bild erstellen! 🎨 Allerdings ist meine lokale Stable Diffusion derzeit nicht gestartet. Mein Administrator kann sie mit `./webui.sh --api --listen` im AUTOMATIC1111-Verzeichnis starten. Dann kann ich wunderschöne Bilder für dich erstellen - komplett privat auf diesem Server! 🌟",
+                    response=reply,
                     model_used="system-policy",
                     intent="image_generation_unavailable"
                 )
@@ -630,15 +650,21 @@ async def chat_with_liara(
             if result["success"]:
                 # Nutze Base64 für direkte Anzeige (keine externe URL!)
                 image_data = result.get("image_base64", result.get("image_url"))
+                reply = f"🎨 Hier ist dein Bild! Ich habe es mit meiner lokalen Stable Diffusion erstellt.\n\n![Generiertes Bild]({image_data})\n\n✨ Generiert in {result['generation_time']:.1f} Sekunden - komplett privat auf diesem Server! 🔒"
+                if request.session_id:
+                    persist_chat_turn(request_db, request.session_id, current_user.id, request.message, reply, model=result["model"])
                 return ChatResponse(
-                    response=f"🎨 Hier ist dein Bild! Ich habe es mit meiner lokalen Stable Diffusion erstellt.\n\n![Generiertes Bild]({image_data})\n\n✨ Generiert in {result['generation_time']:.1f} Sekunden - komplett privat auf diesem Server! 🔒",
+                    response=reply,
                     model_used=result["model"],
                     intent="image_generation",
                     action_result=result
                 )
             else:
+                reply = f"Oh nein, bei der Bild-Generierung ist etwas schief gelaufen: {result['error']} 😔"
+                if request.session_id:
+                    persist_chat_turn(request_db, request.session_id, current_user.id, request.message, reply, model="sdxl-lightning")
                 return ChatResponse(
-                    response=f"Oh nein, bei der Bild-Generierung ist etwas schief gelaufen: {result['error']} 😔",
+                    response=reply,
                     model_used="sdxl-lightning",
                     intent="image_generation_failed",
                     action_result=result
@@ -654,8 +680,11 @@ async def chat_with_liara(
             from api.models.base_models import UserRole
             if current_user.role != UserRole.ADMIN:
                 # Nicht-Admins bekommen freundliche Ablehnung
+                reply = "Systemstatus-Abfragen sind nur für Administratoren verfügbar. Als normaler User kannst du mich aber gerne fragen, wie ich dir helfen kann! 😊"
+                if request.session_id:
+                    persist_chat_turn(request_db, request.session_id, current_user.id, request.message, reply, model="system-policy")
                 return ChatResponse(
-                    response="Systemstatus-Abfragen sind nur für Administratoren verfügbar. Als normaler User kannst du mich aber gerne fragen, wie ich dir helfen kann! 😊",
+                    response=reply,
                     model_used="system-policy",
                     intent="health_check_denied",
                     action_result={"status": "forbidden", "message": "Admin privileges required"}
@@ -679,6 +708,8 @@ async def chat_with_liara(
 
             if health_result['status'] == 'success':
                 # Erfolgreicher Health Check - direkt zurückgeben
+                if request.session_id:
+                    persist_chat_turn(request_db, request.session_id, current_user.id, request.message, health_result['message'], model="system-health")
                 return ChatResponse(
                     response=health_result['message'],
                     model_used="system-health",
@@ -689,8 +720,11 @@ async def chat_with_liara(
                 # Health Check selbst fehlgeschlagen - Fehler zurückgeben statt
                 # stillschweigend an den normalen Chat durchzureichen, wo das
                 # LLM sonst einen erfundenen Systemstatus generieren würde
+                reply = f"⚠️ Health Check fehlgeschlagen: {health_result.get('message', 'Unbekannter Fehler')}"
+                if request.session_id:
+                    persist_chat_turn(request_db, request.session_id, current_user.id, request.message, reply, model="system-health")
                 return ChatResponse(
-                    response=f"⚠️ Health Check fehlgeschlagen: {health_result.get('message', 'Unbekannter Fehler')}",
+                    response=reply,
                     model_used="system-health",
                     intent="health_check_failed",
                     action_result=health_result
@@ -736,6 +770,8 @@ async def chat_with_liara(
         
         # 4. Wenn Aktion erfolgreich: Bestätigungsnachricht
         if action_result and action_result.get('success'):
+            if request.session_id:
+                persist_chat_turn(request_db, request.session_id, current_user.id, request.message, action_result['message'], model=request.model or "llama3.2:3b", mood=new_mood.value)
             return ChatResponse(
                 response=action_result['message'],
                 model_used=request.model or "llama3.2:3b",
@@ -883,13 +919,15 @@ async def chat_with_liara(
                 intent=intent
             )
         
+        if request.session_id:
+            persist_chat_turn(request_db, request.session_id, current_user.id, request.message, response_text, model=request.model or "llama3.2:3b", mood=new_mood.value)
         return ChatResponse(
             response=response_text,
             model_used=request.model or "llama3.2:3b",
             intent=intent,
             action_result=action_result,
             tool_result=tool_result,
-            
+
             # === Backend Tracking ===
             backend_used=backend_used,
             backend_fallback=backend_fallback,
@@ -924,7 +962,9 @@ async def chat_with_liara(
             )
             response.raise_for_status()
             response_text = response.json()["message"]["content"]
-            
+
+            if request.session_id:
+                persist_chat_turn(request_db, request.session_id, current_user.id, request.message, response_text, model=request.model or "llama3.2:3b")
             return ChatResponse(
                 response=response_text,
                 model_used=request.model or "llama3.2:3b",
@@ -990,5 +1030,88 @@ async def generate_image(
         width=request.width,
         height=request.height
     )
-    
+
     return ImageGenerationResponse(**result)
+
+
+@router.post("/hailo-vision")
+async def chat_hailo_vision(
+    file: UploadFile = File(...),
+    task: str = Form("detect"),  # detect|pose|segment
+    model: Optional[str] = Form(None),
+    confidence: float = Form(0.5),
+    message: str = Form(""),
+    session_id: Optional[int] = Form(None),
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Chat-integrierter Hailo-Vision-Endpunkt (issue #13).
+
+    Ruft denselben HailoRPi5Client wie hailo_router.py's /hailo/vision/*
+    Endpunkte auf, aber formatiert das Ergebnis serverseitig zum
+    Anzeige-Text und persistiert (falls session_id gegeben) die User+
+    Assistant-Nachricht selbst - der Client bekommt das fertige Ergebnis
+    nur noch zur Anzeige, er kann nicht mehr bestimmen, was als
+    "Assistant"-Antwort im Chat-Verlauf landet. hailo_router.py selbst
+    bleibt unverändert - ein eigenständiger, Chat-unabhängiger Vision-Dienst.
+    """
+    client = get_rpi5_client()
+
+    if client.status != RPi5Status.HEALTHY:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Hailo RPi5 API unavailable: {client.status.value}"
+        )
+
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type: {file.content_type}. Only images allowed."
+        )
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(status_code=413, detail="Image too large (max 10MB)")
+
+    image_base64 = base64.b64encode(content).decode('utf-8')
+
+    try:
+        if task == "pose":
+            model_name = model or "yolov8s_pose"
+            result = await client.pose_estimation(image_base64=image_base64, model_name=model_name)
+        elif task == "segment":
+            model_name = model or "yolov5n_seg"
+            result = await client.segmentation(image_base64=image_base64, model_name=model_name)
+        else:
+            model_name = model or "yolov8n"
+            result = await client.detect_objects(
+                image_base64=image_base64, model_name=model_name, confidence_threshold=confidence
+            )
+    except Exception as e:
+        logger.error(f"Hailo vision error ({task}): {e}")
+        raise HTTPException(status_code=500, detail=f"Hailo inference failed: {str(e)}")
+
+    if result is None:
+        raise HTTPException(status_code=504, detail="Inference timeout or RPi5 error")
+
+    output = result.get("output")
+    # Same shape the client used to format itself before this endpoint
+    # existed (data.output if present, else a JSON dump) - kept identical
+    # so the persisted assistant text matches what's actually shown.
+    assistant_content = output if isinstance(output, str) else json.dumps(result, ensure_ascii=False, indent=2)
+    user_content = message.strip() or f"Bildanalyse (Hailo {task}, {model_name})"
+
+    if session_id:
+        persist_chat_turn(db, session_id, current_user.id, user_content, assistant_content, model=f"hailo:{model_name}")
+
+    return {
+        "model": model_name,
+        "task": task,
+        "status": result.get("status", "unknown"),
+        "output": output,
+        "latency_ms": result.get("latency_ms"),
+        "timestamp": result.get("timestamp"),
+        "rpi5_status": client.status.value,
+        "source": "hailo-rpi5",
+    }
