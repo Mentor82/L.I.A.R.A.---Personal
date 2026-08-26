@@ -553,7 +553,6 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         MAX_AGENT_ITERATIONS = 3
         agent_tool_used = False
         agent_steps: List[Dict] = []
-        full_response_text = ""
 
         for iteration in range(MAX_AGENT_ITERATIONS + 1):
             iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
@@ -654,6 +653,12 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                                         if content_part:
                                             turn_content += content_part
+                                            # Updated here, not just once at the end of the
+                                            # iteration (issue #7 item 3): a disconnect/exception
+                                            # mid-stream would otherwise see full_response_text
+                                            # still empty even though several 'content' events
+                                            # (this one included) already reached the browser.
+                                            full_response_text += content_part
                                             # Mirko Debug Logging
                                             try:
                                                 if username and should_log_for_user(username):
@@ -677,6 +682,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                             yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
                                         if leftover_content:
                                             turn_content += leftover_content
+                                            full_response_text += leftover_content
                                             yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
                                     # Anything the extractor itself still had buffered (plain
                                     # trailing content, or an incomplete <tasks> block - the
@@ -684,6 +690,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                     final_task_content = task_extractor.flush()
                                     if final_task_content:
                                         turn_content += final_task_content
+                                        full_response_text += final_task_content
                                         yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
                                     break
 
@@ -762,24 +769,15 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                         tool_message["tool_call_id"] = tc["id"]
                     messages.append(tool_message)
 
-                # Accumulate this turn's visible prose before moving to the
-                # next iteration (issue #6) - a turn that requests a tool call
-                # can still contain visible text ("Ich schaue kurz nach...")
-                # that was already streamed to the user via 'content' events
-                # above; without this, only the LAST iteration's content ever
-                # made it into full_response_text, dropping every earlier
-                # iteration's visible prose from what gets persisted.
-                full_response_text += turn_content
+                # full_response_text no longer needs a bulk merge here (issue
+                # #6/#7 item 3): it's now updated incrementally at each
+                # 'content' yield above, in this iteration and every earlier
+                # one, rather than only once at the end of a completed
+                # iteration - which used to mean a mid-stream disconnect saw
+                # it still empty even after several 'content' events had
+                # already reached the browser.
                 continue
 
-            # Accumulate, don't overwrite (issue #6): every turn_content chunk
-            # across every iteration was already streamed to the user 1:1 as a
-            # 'content' SSE event (see the yields above). Overwriting here
-            # would silently drop any visible pre-tool-call prose from an
-            # earlier iteration - the user already saw it, but it would never
-            # reach chat_messages, so a later request's conversation_history
-            # wouldn't match what was actually shown.
-            full_response_text += turn_content
             break
 
         # Mirko Debug Logging
