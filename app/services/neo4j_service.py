@@ -5,6 +5,7 @@ Dimension 4: Relational Layer
 Manages knowledge graph in Neo4j for complex relationship tracking.
 """
 
+import os
 from neo4j import GraphDatabase
 from typing import List, Dict, Optional, Any
 import logging
@@ -12,25 +13,49 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Fail closed (issue #7 item 6): no default fallback, same reasoning as
+# LIARA_SECRET_KEY in core/security.py - a deployment that omits
+# NEO4J_PASSWORD, or still has the known development placeholder, would
+# otherwise silently run production Neo4j with a password that's public in
+# this repository's git history.
+_KNOWN_PLACEHOLDER = "liara_neo4j_2025"
+
+
+def _load_neo4j_password() -> str:
+    password = os.getenv("NEO4J_PASSWORD")
+    if not password:
+        raise RuntimeError(
+            "NEO4J_PASSWORD must be configured (no default fallback) - "
+            "generate one with e.g. `openssl rand -hex 32` and set it in "
+            ".env, matching the actual Neo4j user password"
+        )
+    if password == _KNOWN_PLACEHOLDER:
+        raise RuntimeError(
+            "NEO4J_PASSWORD is still set to the known development "
+            "placeholder - generate a real secret with e.g. "
+            "`openssl rand -hex 32` and update Neo4j's user password to match"
+        )
+    return password
+
 
 class Neo4jGraphService:
     """Service for managing Neo4j knowledge graph"""
-    
-    def __init__(self, uri: str = "bolt://localhost:7687", 
-                 user: str = "neo4j", 
-                 password: str = "liara_neo4j_2025"):
+
+    def __init__(self, uri: str = "bolt://localhost:7687",
+                 user: str = "neo4j",
+                 password: Optional[str] = None):
         """
         Initialize Neo4j connection
-        
+
         Args:
             uri: Neo4j bolt URI
             user: Database user
-            password: Database password
+            password: Database password - loaded from NEO4J_PASSWORD if not given
         """
         self.uri = uri
         self.user = user
         self._driver = None
-        self._password = password
+        self._password = password if password is not None else _load_neo4j_password()
         logger.info(f"Initializing Neo4jGraphService: {uri}")
     
     @property

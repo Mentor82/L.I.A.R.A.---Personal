@@ -2,20 +2,27 @@ version: '3.8'
 
 services:
   # Redis - Session Memory & Short-Term Storage
+  #
+  # Bound to 127.0.0.1 only (issue #7 item 6, same reasoning as SearXNG
+  # below) - only the Liara backend process on this same host ever needs
+  # to reach it. REDIS_PASSWORD comes from the .env file in this directory
+  # (docker compose reads it automatically) - no secret is committed here;
+  # see .env.example. Must match REDIS_PASSWORD in app/.env, which the
+  # Python service (services/redis_service.py) reads separately.
   redis:
     image: redis:7-alpine
     container_name: liara_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --requirepass liara_redis_2025
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     networks:
       - liara_network
 
   # SearXNG - self-hosted, keyless general web search (issue #4 phase 1).
-  # Bound to 127.0.0.1 only, deliberately unlike redis/neo4j above - this
+  # Bound to 127.0.0.1 only, same reasoning as redis/neo4j above - this
   # must never be reachable from the LAN/internet, only from the Liara
   # backend process on this same host. settings.yml is NOT committed to the
   # repo (contains a generated secret_key) - see searxng/README.md.
@@ -33,18 +40,27 @@ services:
       - liara_network
 
   # Neo4j - Knowledge Graph & Relations
+  #
+  # Bound to 127.0.0.1 only (issue #7 item 6, same reasoning as redis
+  # above). NEO4J_AUTH only sets the password on first-ever container
+  # startup with an empty data volume - Neo4j persists its own auth store
+  # in that volume afterward, so rotating the live password later means
+  # running `ALTER CURRENT USER SET PASSWORD ...` via cypher-shell, not
+  # just changing this value. NEO4J_PASSWORD comes from the .env file in
+  # this directory; must match NEO4J_PASSWORD in app/.env, which the
+  # Python service (services/neo4j_service.py) reads separately.
   neo4j:
     image: neo4j:5-community
     container_name: liara_neo4j
     restart: unless-stopped
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "127.0.0.1:7474:7474"  # HTTP
+      - "127.0.0.1:7687:7687"  # Bolt
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
     environment:
-      - NEO4J_AUTH=neo4j/liara_neo4j_2025
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_dbms_memory_heap_max__size=512M

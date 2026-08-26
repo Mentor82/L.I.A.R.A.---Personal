@@ -5,6 +5,7 @@ Short-term context and session management
 Manages conversation context windows and temporary state in Redis.
 """
 
+import os
 import redis
 import json
 import time
@@ -15,26 +16,50 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Fail closed (issue #7 item 6): no default fallback, same reasoning as
+# LIARA_SECRET_KEY in core/security.py - a deployment that omits
+# REDIS_PASSWORD, or still has the known development placeholder, would
+# otherwise silently run production Redis with a password that's public in
+# this repository's git history.
+_KNOWN_PLACEHOLDER = "liara_redis_2025"
+
+
+def _load_redis_password() -> str:
+    password = os.getenv("REDIS_PASSWORD")
+    if not password:
+        raise RuntimeError(
+            "REDIS_PASSWORD must be configured (no default fallback) - "
+            "generate one with e.g. `openssl rand -hex 32` and set it in "
+            ".env, matching Redis's own requirepass"
+        )
+    if password == _KNOWN_PLACEHOLDER:
+        raise RuntimeError(
+            "REDIS_PASSWORD is still set to the known development "
+            "placeholder - generate a real secret with e.g. "
+            "`openssl rand -hex 32` and update Redis's own requirepass to match"
+        )
+    return password
+
 
 class RedisSessionService:
     """Service for managing session context in Redis"""
-    
-    def __init__(self, host: str = "localhost", port: int = 6379, 
-                 password: str = "liara_redis_2025", db: int = 0):
+
+    def __init__(self, host: str = "localhost", port: int = 6379,
+                 password: Optional[str] = None, db: int = 0):
         """
         Initialize Redis connection
-        
+
         Args:
             host: Redis host
             port: Redis port
-            password: Redis password
+            password: Redis password - loaded from REDIS_PASSWORD if not given
             db: Redis database number
         """
         self.host = host
         self.port = port
         self.db = db
         self._client = None
-        self._password = password
+        self._password = password if password is not None else _load_redis_password()
         logger.info(f"Initializing RedisSessionService: {host}:{port}")
     
     @property
