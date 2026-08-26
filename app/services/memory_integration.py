@@ -204,9 +204,8 @@ def store_in_4d_memory(
             'model': analysis['embedding_model'],
             'version': analysis['embedding_version']
         })
-        db.commit()
         result['semantic'] = semantic_result.scalar()
-        
+
         # DIMENSION 2: Temporal Tracking
         sequence_sql = text("SELECT get_next_temporal_sequence() as seq")
         sequence_num = db.execute(sequence_sql).scalar()
@@ -236,9 +235,17 @@ def store_in_4d_memory(
             'mood': mood,
             'energy': energy_level
         })
-        db.commit()
         result['temporal'] = temporal_result.scalar()
-        
+
+        # Single commit for both PostgreSQL dimensions together (issue #7
+        # item 4): previously each had its own commit, so a failure between
+        # them (e.g. the temporal_index insert) left the semantic_metadata
+        # row permanently committed with no matching temporal_index row -
+        # the outer except's db.rollback() below is a no-op for work
+        # that's already committed. Either both land together or neither
+        # does.
+        db.commit()
+
         # DIMENSION 4: Neo4j Graph
         try:
             neo4j = get_neo4j_service()

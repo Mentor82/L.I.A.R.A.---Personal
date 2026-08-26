@@ -417,6 +417,79 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
     if await model_supports_tools(model):
         ollama_tools = get_tool_registry().get_tools_for_ollama()
 
+    # Defined here, not inside the try (issue #7 item 3), and initialized
+    # before it so both are always in scope for the finally block below,
+    # regardless of where inside the try a disconnect/exception happens.
+    full_response_text = ""
+    persisted_attempted = False
+
+    def persist_assistant_turn(interrupted: bool = False) -> bool:
+        from core.database import SessionLocal
+        db_final = SessionLocal()
+        try:
+            insert_result = db_final.execute(text("""
+                INSERT INTO chat_messages
+                    (user_id, session_id, role, content, model, mood, timestamp)
+                VALUES
+                    (:user_id, :session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+                RETURNING id
+            """), {
+                'user_id': user_id,
+                'session_id': session_id,
+                'content': full_response_text,
+                # Tags interrupted-turn rows distinctly (issue #7 item 3's
+                # "completed vs interrupted must be distinguishable") without
+                # a schema migration - greppable via the existing model column.
+                'model': f"{model} (interrupted)" if interrupted else model,
+                'mood': mood_snapshot["mood"]
+            })
+            db_final.commit()
+            assistant_message_id = insert_result.scalar()
+
+            db_final.execute(text("""
+                UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
+            """), {'session_id': session_id})
+            db_final.commit()
+
+            if memory_enabled and assistant_message_id:
+                try:
+                    store_message_with_concepts(
+                        user_id=user_id,
+                        message_id=assistant_message_id,
+                        content=full_response_text,
+                        role='assistant',
+                        timestamp=datetime.utcnow(),
+                        session_id=session_id
+                    )
+                except Exception as e:
+                    logger.error(f"Assistant concept storage failed: {e}")
+
+                if user_message_id:
+                    try:
+                        get_neo4j_service().create_relationship(
+                            source_type='Message', source_id=user_message_id,
+                            target_type='Message', target_id=assistant_message_id,
+                            relation_type='RESULTED_IN', user_id=user_id,
+                            properties={
+                                'personality': personality,
+                                'mood': mood_snapshot["mood"],
+                                'model': model,
+                                # Agent's own tool_calls loop can use tools even when the
+                                # pre-LLM heuristics (used_tools, computed by the caller
+                                # before this generator even runs) found none.
+                                'used_tools': used_tools or agent_tool_used,
+                                'interrupted': interrupted,
+                            }
+                        )
+                    except Exception as e:
+                        logger.error(f"RESULTED_IN relationship failed: {e}")
+            return True
+        except Exception as e:
+            logger.error(f"Assistant message persistence failed: {e}")
+            return False
+        finally:
+            db_final.close()
+
     try:
         # Sende Metadata Event with session_id
         metadata = {
@@ -728,68 +801,11 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # link below) never matched what the user
         # actually saw.
         if user_id is not None and session_id is not None and full_response_text:
-            def persist_assistant_turn() -> bool:
-                from core.database import SessionLocal
-                db_final = SessionLocal()
-                try:
-                    insert_result = db_final.execute(text("""
-                        INSERT INTO chat_messages
-                            (user_id, session_id, role, content, model, mood, timestamp)
-                        VALUES
-                            (:user_id, :session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
-                        RETURNING id
-                    """), {
-                        'user_id': user_id,
-                        'session_id': session_id,
-                        'content': full_response_text,
-                        'model': model,
-                        'mood': mood_snapshot["mood"]
-                    })
-                    db_final.commit()
-                    assistant_message_id = insert_result.scalar()
-
-                    db_final.execute(text("""
-                        UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
-                    """), {'session_id': session_id})
-                    db_final.commit()
-
-                    if memory_enabled and assistant_message_id:
-                        try:
-                            store_message_with_concepts(
-                                user_id=user_id,
-                                message_id=assistant_message_id,
-                                content=full_response_text,
-                                role='assistant',
-                                timestamp=datetime.utcnow(),
-                                session_id=session_id
-                            )
-                        except Exception as e:
-                            logger.error(f"Assistant concept storage failed: {e}")
-
-                        if user_message_id:
-                            try:
-                                get_neo4j_service().create_relationship(
-                                    source_type='Message', source_id=user_message_id,
-                                    target_type='Message', target_id=assistant_message_id,
-                                    relation_type='RESULTED_IN', user_id=user_id,
-                                    properties={
-                                        'personality': personality,
-                                        'mood': mood_snapshot["mood"],
-                                        'model': model,
-                                        # Agent's own tool_calls loop can use tools even when the
-                                        # pre-LLM heuristics (used_tools, computed by the caller
-                                        # before this generator even runs) found none.
-                                        'used_tools': used_tools or agent_tool_used
-                                    }
-                                )
-                            except Exception as e:
-                                logger.error(f"RESULTED_IN relationship failed: {e}")
-                    return True
-                except Exception as e:
-                    logger.error(f"Assistant message persistence failed: {e}")
-                    return False
-                finally:
-                    db_final.close()
+            # Marks that the normal path is about to attempt persistence
+            # (issue #7 item 3) - the finally block below only falls back to
+            # its own best-effort persist when this never got set, i.e. when
+            # a disconnect/exception happened before we even got here.
+            persisted_attempted = True
 
             # 'done' fires immediately, same as before - the UI shouldn't
             # wait on persistence to know the reply finished streaming.
@@ -856,6 +872,21 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # four except branches, including a client disconnecting mid-stream
         # (Starlette closes the generator, which runs this finally too).
         _release_session_lock(session_lock)
+
+        # issue #7 item 3: the normal path above only persists the
+        # assistant's reply after the whole agent loop finishes. A
+        # disconnect or exception at any point before that (timeout,
+        # Ollama connection error, client navigating away mid-stream) used
+        # to silently drop whatever had already been streamed to and shown
+        # in the user's browser - persisted_attempted stays False in every
+        # one of those cases, so this is a last-chance best-effort save of
+        # that partial reply, distinguishable from a normal turn via the
+        # "(interrupted)" model suffix persist_assistant_turn() adds.
+        if not persisted_attempted and full_response_text and user_id is not None and session_id is not None:
+            try:
+                await asyncio.to_thread(persist_assistant_turn, True)
+            except Exception as e:
+                logger.error(f"Interrupted-turn persistence failed: {e}")
 
 
 @router.post("/stream")
