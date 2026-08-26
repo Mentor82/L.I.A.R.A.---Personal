@@ -29,6 +29,7 @@ from core.dependencies import require_active_user
 from core.database import get_db
 from api.models.base_models import User
 from services.chat_persistence import persist_assistant_message
+from services.redis_service import get_redis_service
 from services.memory_integration import store_in_4d_memory, store_message_with_concepts, get_relevant_context
 from services.neo4j_service import get_neo4j_service
 from services.embedding_service import get_embedding_service
@@ -57,6 +58,61 @@ SEARCH_INTENTS = ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']
 # conversation turns (not just long-term semantic-memory retrieval) in every
 # request to the model - see the comment at its usage for why this exists.
 HISTORY_TURNS_LIMIT = 20
+
+# issue #13 item 2: generously above the worst-case generation time (280s
+# Ollama read timeout * up to MAX_AGENT_ITERATIONS+1 rounds - see the agent
+# loop below), so a crashed/never-released lock can't wedge a session shut
+# indefinitely, while a legitimately slow turn never gets its lock yanked
+# out from under it mid-generation.
+SESSION_GENERATION_LOCK_TTL = 1200  # seconds
+
+
+def _acquire_session_lock(session_id: int):
+    """
+    Best-effort Redis lock serializing one active /chat/stream generation
+    per session (issue #13 item 2). Without this, two concurrent requests
+    for the SAME session could both read the same pre-turn history and
+    generate independently, letting assistant-completion order diverge
+    from user-message order (a slower first request's reply could get
+    persisted after a faster second request's).
+
+    A Redis lock rather than an in-process asyncio.Lock (the pattern
+    code_exec_router.py uses for issue #8) because gunicorn runs multiple
+    worker processes - an in-process lock only serializes requests that
+    happen to land on the same worker, not the two that actually race.
+
+    Blocks (via the caller's asyncio.to_thread) for up to
+    SESSION_GENERATION_LOCK_TTL waiting for a concurrent turn on the same
+    session to finish, matching "serialize" rather than "reject" semantics.
+
+    Returns None (never raises) if Redis is unavailable or the wait times
+    out - matching this file's existing "storage/memory side-effects are
+    best-effort, never block the actual reply" posture (see the bare
+    `except Exception` around this function's caller). Proceeding without
+    the lock just reopens the pre-fix race, it doesn't break chat.
+    """
+    try:
+        lock = get_redis_service().client.lock(
+            f"chat_stream_lock:{session_id}",
+            timeout=SESSION_GENERATION_LOCK_TTL,
+            blocking_timeout=SESSION_GENERATION_LOCK_TTL,
+        )
+        return lock if lock.acquire(blocking=True) else None
+    except Exception as e:
+        logger.warning(f"Session generation lock unavailable for session {session_id}: {e}")
+        return None
+
+
+def _release_session_lock(lock) -> None:
+    if lock is None:
+        return
+    try:
+        lock.release()
+    except Exception as e:
+        # e.g. LockNotOwnedError if the TTL already expired and someone else
+        # acquired it in the meantime - not our lock to release anymore,
+        # not an error worth surfacing above debug.
+        logger.debug(f"Session generation lock release skipped: {e}")
 
 
 def get_location_context(db: Session, user_id: int) -> Optional[str]:
@@ -261,6 +317,7 @@ async def stream_ollama_response(
     used_tools: bool = False,
     conversation_history: Optional[List[Dict]] = None,
     db: Optional[Session] = None,
+    session_lock=None,  # issue #13 item 2 - released in this function's finally
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -785,6 +842,13 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         )
         yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
 
+    finally:
+        # issue #13 item 2 - covers every exit from the try above: the
+        # action-shortcut early return, the normal completion path, and all
+        # four except branches, including a client disconnecting mid-stream
+        # (Starlette closes the generator, which runs this finally too).
+        _release_session_lock(session_lock)
+
 
 @router.post("/stream")
 async def stream_chat(
@@ -1017,6 +1081,11 @@ async def stream_chat(
     message_id = None
     used_tools = False
     conversation_history = []
+    # issue #13 item 2: only ever acquired for an EXISTING session (below) -
+    # a brand-new session's very first message has no prior history/turn
+    # for a second request to race against, since nothing else can
+    # reference a session_id that doesn't exist yet.
+    session_lock = None
 
     try:
         # Get or create session_id
@@ -1039,8 +1108,15 @@ async def stream_chat(
             
             if not session_check:
                 raise HTTPException(status_code=404, detail="Session not found or access denied")
-            
+
             session_id = request.session_id
+
+            # issue #13 item 2: serialize this session's turns from here -
+            # the history read immediately below through the assistant
+            # persistence at the end of stream_ollama_response() - before a
+            # second concurrent request for this same session can read the
+            # same pre-turn history this one is about to.
+            session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
 
         # Short-term conversational history: without this, every request sent
         # only (system prompt + the single current message) with no prior
@@ -1175,7 +1251,8 @@ async def stream_chat(
             user_message_id=message_id,
             memory_enabled=user_prefs['memory_enabled'],
             used_tools=used_tools,
-            db=db
+            db=db,
+            session_lock=session_lock
         ),
         media_type="text/event-stream",
         headers={
