@@ -9,8 +9,8 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
+from core.database import SessionLocal
 from services.tool_registry import get_tool_registry, ToolDefinition
 from services.tool_parser import ToolCall
 from services.web_search_service import get_web_search_service
@@ -69,7 +69,6 @@ class ToolExecutor:
         tool_call: ToolCall,
         user_id: int,
         check_consent: bool = True,
-        db: Optional[Session] = None,
         session_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -79,9 +78,6 @@ class ToolExecutor:
             tool_call: Der auszuführende Tool-Call
             user_id: User-ID für Privacy-Checks
             check_consent: Ob Consent geprüft werden soll
-            db: DB-Session, nötig für Tools mit echter Consent-Prüfung
-                (aktuell nur detect_location) - optional, da die meisten
-                Aufrufer (z.B. Agent) sie nie brauchen.
             session_id: Aktuelle Chat-Session, nötig für die workspace_*-Tools.
                 Kommt ausschließlich vom Aufrufer (chat_streaming.py's eigener,
                 serverseitig bekannter session_id) - das Modell selbst liefert
@@ -93,6 +89,19 @@ class ToolExecutor:
 
         Raises:
             ToolExecutionError: Bei Ausführungsfehlern
+
+        Note (issue #13 item 6): this used to also accept an optional `db`
+        for the handful of tools needing a real consent/data lookup
+        (detect_location, web_search, workspace_*) - callers (chat.py,
+        chat_streaming.py's SSE agent loop) would thread their own
+        request-scoped session through. For chat_streaming.py that session
+        stays open for the entire multi-minute SSE stream, so a tool call
+        deep into a long generation was reading through a connection that
+        had already been idle-but-open for however long the model had been
+        generating. Every DB touch below now opens and closes its own
+        short-lived SessionLocal() instead, same pattern this file's
+        persist_assistant_turn()/store_memory_async() already use for
+        the same reason.
         """
         # Tool aus Registry holen
         tool_def = self.registry.get_tool(tool_call.tool_name)
@@ -105,7 +114,7 @@ class ToolExecutor:
 
         # Privacy-Check
         if check_consent and tool_def.requires_consent:
-            has_consent = await self._check_user_consent(user_id, tool_def, db)
+            has_consent = await self._check_user_consent(user_id, tool_def)
             if not has_consent:
                 return self._error_result(
                     tool_call.tool_name,
@@ -132,7 +141,7 @@ class ToolExecutor:
             logger.info(f"Executing tool: {tool_call.tool_name} for user {user_id}")
 
             start = time.monotonic()
-            result = await self._execute_tool(tool_def, tool_call.parameters, user_id, db, session_id)
+            result = await self._execute_tool(tool_def, tool_call.parameters, user_id, session_id)
             elapsed_ms = int((time.monotonic() - start) * 1000)
 
             # Normalize inner-error-as-outer-success (issue #14): several
@@ -172,7 +181,6 @@ class ToolExecutor:
         tool_def: ToolDefinition,
         parameters: Dict[str, Any],
         user_id: int,
-        db: Optional[Session] = None,
         session_id: Optional[int] = None
     ) -> Any:
         """
@@ -188,7 +196,7 @@ class ToolExecutor:
 
         # Location Detection
         elif tool_def.name == "detect_location":
-            return await self._execute_location(user_id, db)
+            return await self._execute_location(user_id)
 
         # Wikipedia
         elif tool_def.name == "wikipedia_search":
@@ -412,7 +420,15 @@ class ToolExecutor:
             "wind_speed": result.get("wind_speed")
         }
     
-    async def _execute_location(self, user_id: int, db: Optional[Session] = None) -> Dict:
+    def _get_user_location(self, user_id: int) -> Optional[Dict]:
+        """Short-lived-session wrapper around location_service.get_user_location (issue #13 item 6)."""
+        db = SessionLocal()
+        try:
+            return self.location_service.get_user_location(db, user_id)
+        finally:
+            db.close()
+
+    async def _execute_location(self, user_id: int) -> Dict:
         """
         Returns the user's already-consented stored location (see
         PrivacySettings.jsx / location_router.py) - never a live IP lookup
@@ -420,10 +436,7 @@ class ToolExecutor:
         end-user request's IP anyway (calling get_location_from_ip(None)
         would just resolve this server's own IP, not the user's).
         """
-        if db is None:
-            return {"error": "Standort nicht verfügbar (keine DB-Verbindung)"}
-
-        location = self.location_service.get_user_location(db, user_id)
+        location = self._get_user_location(user_id)
         if not location:
             return {
                 "error": "Kein Standort hinterlegt",
@@ -552,7 +565,7 @@ class ToolExecutor:
         
         return None
     
-    async def _check_user_consent(self, user_id: int, tool_def: ToolDefinition, db: Optional[Session] = None) -> bool:
+    async def _check_user_consent(self, user_id: int, tool_def: ToolDefinition) -> bool:
         """
         Prüft ob User Consent für Tool gegeben hat
         """
@@ -562,7 +575,7 @@ class ToolExecutor:
         # privacy_level shortcut below since both tools are "low" but should
         # still respect an explicit opt-out.
         if tool_def.name in ("web_search", "wikipedia_search"):
-            return self._check_web_search_consent(user_id, db)
+            return self._check_web_search_consent(user_id)
 
         # workspace_* tools need their own dedicated opt-in
         # (user_preferences.workspace_agent_enabled) - unlike web_search this
@@ -570,7 +583,7 @@ class ToolExecutor:
         # propose changes to a user's own files is a bigger step than a
         # public web lookup, so silence should mean "off" here.
         if tool_def.name in WORKSPACE_AGENT_TOOLS:
-            return self._check_workspace_agent_consent(user_id, db)
+            return self._check_workspace_agent_consent(user_id)
 
         # detect_location has a real, already-shipped consent mechanism
         # (user_location_preferences / PrivacySettings.jsx / location_router.py)
@@ -578,9 +591,8 @@ class ToolExecutor:
         # a blanket deny. No generic "user_tool_consents" table exists for
         # any other tool, so everything else still falls through to the
         # honest "not implemented" denial below.
-        if tool_def.name == "detect_location" and db is not None:
-            stored_location = self.location_service.get_user_location(db, user_id)
-            return stored_location is not None
+        if tool_def.name == "detect_location":
+            return self._get_user_location(user_id) is not None
 
         # Für jetzt: Erlaube alle übrigen Tools mit niedrigem Privacy-Level
         if tool_def.privacy_level == "low":
@@ -590,39 +602,42 @@ class ToolExecutor:
         logger.warning(f"Consent check not fully implemented - denying {tool_def.name}")
         return False
 
-    def _check_web_search_consent(self, user_id: int, db: Optional[Session]) -> bool:
+    def _check_web_search_consent(self, user_id: int) -> bool:
         """
-        Checks user_privacy_settings.allow_web_search. Defaults to allowed
-        (matches the column's own DEFAULT TRUE) when there's no db session
-        or no settings row yet, so a user who's never opened Privacy
-        Settings isn't silently blocked - only an explicit opt-out denies.
+        Checks user_privacy_settings.allow_web_search via its own short-lived
+        session (issue #13 item 6) rather than a caller-supplied one whose
+        lifetime might span an entire multi-minute SSE stream. Defaults to
+        allowed (matches the column's own DEFAULT TRUE) when there's no
+        settings row yet, so a user who's never opened Privacy Settings
+        isn't silently blocked - only an explicit opt-out denies.
         """
-        if db is None:
-            return True
-        row = db.execute(
-            text("SELECT allow_web_search FROM user_privacy_settings WHERE user_id = :user_id"),
-            {"user_id": user_id}
-        ).first()
-        if row is None:
-            return True
-        return bool(row[0])
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text("SELECT allow_web_search FROM user_privacy_settings WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            ).first()
+            return True if row is None else bool(row[0])
+        finally:
+            db.close()
 
-    def _check_workspace_agent_consent(self, user_id: int, db: Optional[Session]) -> bool:
+    def _check_workspace_agent_consent(self, user_id: int) -> bool:
         """
-        Checks user_preferences.workspace_agent_enabled. Opt-in: defaults to
-        False when there's no db session or no row yet - opposite default
-        direction from _check_web_search_consent, deliberately, since this
-        gates the model reading/proposing changes to the user's own files.
+        Checks user_preferences.workspace_agent_enabled via its own
+        short-lived session (issue #13 item 6). Opt-in: defaults to False
+        when there's no row yet - opposite default direction from
+        _check_web_search_consent, deliberately, since this gates the model
+        reading/proposing changes to the user's own files.
         """
-        if db is None:
-            return False
-        row = db.execute(
-            text("SELECT workspace_agent_enabled FROM user_preferences WHERE user_id = :user_id"),
-            {"user_id": user_id}
-        ).first()
-        if row is None:
-            return False
-        return bool(row[0])
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text("SELECT workspace_agent_enabled FROM user_preferences WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            ).first()
+            return False if row is None else bool(row[0])
+        finally:
+            db.close()
 
     def _error_result(
         self,

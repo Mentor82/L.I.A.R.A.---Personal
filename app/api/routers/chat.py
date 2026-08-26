@@ -139,7 +139,7 @@ def _detect_image_generation_request(message: str) -> bool:
     return any(keyword in message_lower for keyword in image_keywords)
 
 
-async def _execute_tool_call_if_needed(response_text: str, user_id: int, db: Optional[Session] = None) -> tuple[str, Optional[Dict]]:
+async def _execute_tool_call_if_needed(response_text: str, user_id: int) -> tuple[str, Optional[Dict]]:
     """
     Prüft ob Response einen Tool-Call enthält und führt ihn aus.
 
@@ -157,9 +157,10 @@ async def _execute_tool_call_if_needed(response_text: str, user_id: int, db: Opt
     if not tool_call:
         return response_text, None
 
-    # Führe Tool aus
+    # Führe Tool aus - ToolExecutor verwaltet seine eigenen, kurzlebigen
+    # DB-Sessions selbst (issue #13 item 6), braucht keine von hier.
     tool_executor = get_tool_executor()
-    tool_result = await tool_executor.execute(tool_call, user_id, db=db)
+    tool_result = await tool_executor.execute(tool_call, user_id)
     
     # Entferne Tool-Call aus Response
     cleaned_response = tool_parser.remove_tool_calls(response_text)
@@ -900,7 +901,7 @@ async def chat_with_liara(
         # === END BACKEND ROUTING ===
         
         # Prüfe auf Tool-Call und führe aus
-        response_text, tool_result = await _execute_tool_call_if_needed(response_text, current_user.id, db=db)
+        response_text, tool_result = await _execute_tool_call_if_needed(response_text, current_user.id)
         
         # Falls Tool verwendet: Zweite LLM-Anfrage mit Tool-Result
         if tool_result:

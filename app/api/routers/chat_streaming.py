@@ -316,7 +316,6 @@ async def stream_ollama_response(
     memory_enabled: bool = True,
     used_tools: bool = False,
     conversation_history: Optional[List[Dict]] = None,
-    db: Optional[Session] = None,
     session_lock=None,  # issue #13 item 2 - released in this function's finally
 ) -> AsyncGenerator[str, None]:
     """
@@ -447,8 +446,17 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # but this confirmation never did - a reload showed the
                 # question with no reply. Assistant-only, not
                 # persist_chat_turn() - the user row already exists here.
-                if user_id and session_id and db:
-                    persist_assistant_message(db, session_id, user_id, confirmation_text)
+                #
+                # Own short-lived session (issue #13 item 6) rather than the
+                # route handler's request-scoped one, which callers of this
+                # generator no longer pass in at all.
+                if user_id and session_id:
+                    from core.database import SessionLocal
+                    db_shortcut = SessionLocal()
+                    try:
+                        persist_assistant_message(db_shortcut, session_id, user_id, confirmation_text)
+                    finally:
+                        db_shortcut.close()
 
                 yield f"data: {json.dumps({'type': 'content', 'text': confirmation_text})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'action_executed': True})}\n\n"
@@ -632,7 +640,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                     tool_call = ToolCall(tool_name=tool_name, parameters=arguments, raw_text="", confidence=1.0)
                     try:
-                        tool_result = await tool_executor.execute(tool_call, user_id or 0, db=db, session_id=session_id)
+                        tool_result = await tool_executor.execute(tool_call, user_id or 0, session_id=session_id)
                     except Exception as e:
                         logger.error(f"Agent tool execution failed: {tool_name}: {e}")
                         tool_result = {"success": False, "error": str(e)}
@@ -1251,7 +1259,6 @@ async def stream_chat(
             user_message_id=message_id,
             memory_enabled=user_prefs['memory_enabled'],
             used_tools=used_tools,
-            db=db,
             session_lock=session_lock
         ),
         media_type="text/event-stream",
