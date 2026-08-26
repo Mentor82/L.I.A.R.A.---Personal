@@ -54,7 +54,17 @@ async def websocket_pty(
         await websocket.close(code=1008)  # Policy Violation
         return
 
-    await websocket.accept()
+    # Echo the offered subprotocol back (issue #10 follow-up, found live):
+    # per the WebSocket spec, if the client's handshake offered a
+    # Sec-WebSocket-Protocol and the server's response omits a matching
+    # one, standards-compliant browsers (confirmed: Chrome) abort the
+    # connection immediately - even though the upgrade itself succeeded and
+    # auth passed. curl doesn't enforce this, which is why a direct curl
+    # test looked fine while the real browser failed instantly. The value
+    # itself (the JWT) is never actually used as a negotiated protocol, just
+    # echoed back to satisfy this handshake requirement.
+    offered_protocol = websocket.headers.get("sec-websocket-protocol", "").split(",")[0].strip() or None
+    await websocket.accept(subprotocol=offered_protocol)
 
     try:
         # Get connection parameters from query string
