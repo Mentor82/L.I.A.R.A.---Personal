@@ -33,9 +33,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from services.session_workspace import (
-    SESSION_FILES_DIR, MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME,
-    record_file_event, MAX_SESSION_FILE, MAX_SESSION_TOTAL, workspace_total_size,
-    workspace_lock, ensure_session_venv_dir,
+    SESSION_FILES_DIR, record_file_event, MAX_SESSION_FILE, MAX_SESSION_TOTAL,
+    workspace_total_size, workspace_lock, ensure_session_venv_dir,
+    ensure_session_metadata_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,12 +109,15 @@ def _snapshot(workspace_dir: Path) -> Dict[str, Tuple[int, float]]:
     """Keyed by the full relative (`/`-separated) path, not just the bare
     name, so a script that creates its own subfolder is tracked correctly -
     same path identity used everywhere else in the workspace (explorer,
-    editor tabs, tool-calling)."""
+    editor tabs, tool-calling). No sidecar-filename exclusion needed here
+    (issue #6) - LIARA's own manifest/proposals/lock state lives in
+    metadata/, a sibling of workspace_dir, so it was never reachable via
+    this rglob() to begin with."""
     snapshot = {}
     if not workspace_dir.exists():
         return snapshot
     for entry in workspace_dir.rglob("*"):
-        if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
+        if entry.is_file() and not entry.is_symlink():
             stat = entry.stat()
             relpath = entry.relative_to(workspace_dir).as_posix()
             snapshot[relpath] = (stat.st_size, stat.st_mtime)
@@ -131,7 +134,7 @@ def _diff_snapshot(
         # Symlinks are rejected outright, both for downloads and here - a
         # script could otherwise os.symlink() a sensitive path into its
         # workspace and have it show up as a normal "generated file".
-        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
+        if entry.is_symlink() or not entry.is_file():
             continue
         relpath = entry.relative_to(workspace_dir).as_posix()
         stat = entry.stat()
@@ -243,6 +246,14 @@ def run_code(
     # Same reasoning for .venv (issue #5) - see ensure_session_venv_dir's
     # docstring for why this can't just be liara-runner creating it itself.
     ensure_session_venv_dir(session_dir)
+    # metadata/ (issue #6) - pre-created here too so a brand-new session's
+    # very first run already has it at the right (0o700, backend-only)
+    # permissions, same as workspace_dir/.venv above. Not strictly required
+    # (record_file_event's first call would create it lazily too), but
+    # matches the existing precedent of pre-creating every session
+    # sub-directory up front rather than leaving it to whichever call
+    # happens to touch it first.
+    ensure_session_metadata_dir(session_dir)
 
     result = SandboxResult(run_id=run_id)
 

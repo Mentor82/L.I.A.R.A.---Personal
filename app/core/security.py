@@ -9,8 +9,32 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from api.models.base_models import UserRole
 
-# JWT Configuration - Load from environment
-SECRET_KEY = os.getenv("LIARA_SECRET_KEY", "your-secret-key-change-in-production-use-env-var")
+# JWT Configuration - Load from environment. Fail closed (issue #6): no
+# default fallback. A deployment that omits LIARA_SECRET_KEY, or still has
+# the known development placeholder, would otherwise start successfully
+# while signing every access/refresh token with a secret that's public in
+# this repository - anyone could forge valid tokens, including admin ones.
+_KNOWN_PLACEHOLDER = "your-secret-key-change-in-production-use-env-var"
+_MIN_SECRET_LENGTH = 32  # HS256 wants at least 256 bits of key material
+
+SECRET_KEY = os.getenv("LIARA_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "LIARA_SECRET_KEY must be configured (no default fallback) - "
+        "generate one with e.g. `openssl rand -hex 32` and set it in .env"
+    )
+if SECRET_KEY == _KNOWN_PLACEHOLDER:
+    raise RuntimeError(
+        "LIARA_SECRET_KEY is still set to the known development placeholder "
+        "- generate a real secret with e.g. `openssl rand -hex 32`"
+    )
+if len(SECRET_KEY) < _MIN_SECRET_LENGTH:
+    raise RuntimeError(
+        f"LIARA_SECRET_KEY is too short ({len(SECRET_KEY)} chars, need at "
+        f"least {_MIN_SECRET_LENGTH}) - generate one with e.g. "
+        "`openssl rand -hex 32`"
+    )
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60  # 1 hour (reduced from 7 days)
 REFRESH_TOKEN_EXPIRE_DAYS = 30  # 30 days

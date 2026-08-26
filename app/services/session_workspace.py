@@ -47,20 +47,24 @@ MAX_SESSION_TOTAL = 500 * 1024 * 1024  # 500 MiB per session workspace
 
 # Sidecar metadata the filesystem itself can't tell us (id/source/created_at/
 # execution_id/context-selection) - the filesystem stays the source of truth
-# for content/size/mtime/mime-type, this is a thin overlay only. Excluded
-# from every directory listing/diff so it never shows up as a "file".
+# for content/size/mtime/mime-type, this is a thin overlay only. Lives in
+# metadata/ (see ensure_session_metadata_dir), a sibling of workspace/ - never
+# shows up as a "file" in listing/diff/search because it's structurally
+# outside workspace_dir, not because of a by-name filter (issue #6: it used
+# to live inside workspace_dir with only a by-name exclusion, which did
+# nothing to stop sandboxed code from reading/overwriting it directly).
 MANIFEST_FILENAME = ".liara_manifest.json"
 
 # LIARA's proposed-but-not-yet-applied workspace changes (Agent-Vorbereitung
 # v1) - deliberately a separate sidecar from MANIFEST_FILENAME, not folded
 # into it: a proposal isn't a file yet (it may never become one, if rejected),
 # so it shouldn't share a schema/lifecycle with real, already-on-disk files.
-# Also excluded from every directory listing/diff.
+# Same metadata/ location and reasoning as MANIFEST_FILENAME above.
 PROPOSALS_FILENAME = ".liara_proposals.json"
 
 # Advisory-lock file for workspace_lock (issue #8 hardening) - like the
-# other sidecars above, it's bookkeeping, not workspace content, so it's
-# excluded from every directory listing/diff/size-total the same way.
+# other sidecars above, it's bookkeeping, not workspace content, so it lives
+# in metadata/ too, the same way.
 LOCK_FILENAME = ".liara.lock"
 
 # Project-wide text search limits - a single chat session's workspace is
@@ -75,17 +79,22 @@ MAX_SEARCH_FILES = 100
 
 def _session_dir(user_id: int, session_id: int) -> Path:
     # Siblings living directly under this dir (not under workspace/): .runs/
-    # (code_sandbox.py, per-execution script staging) and, since issue #5,
-    # .venv/ (run_sandboxed.sh, this session's own Python environment) - both
+    # (code_sandbox.py, per-execution script staging), .venv/ (issue #5,
+    # run_sandboxed.sh's per-session Python environment), and metadata/
+    # (issue #6, LIARA's own manifest/proposals/lock state) - all three
     # outside workspace/ on purpose, so they're invisible to the
     # Explorer/diff/search surface without any exclusion-by-name logic, and
-    # both get cleaned up for free by delete_session_workspace's recursive
+    # all get cleaned up for free by delete_session_workspace's recursive
     # removal of this whole directory.
     return SESSION_FILES_DIR / str(user_id) / str(session_id)
 
 
 def _workspace_dir(user_id: int, session_id: int) -> Path:
     return _session_dir(user_id, session_id) / "workspace"
+
+
+def _metadata_dir(user_id: int, session_id: int) -> Path:
+    return _session_dir(user_id, session_id) / "metadata"
 
 
 def ensure_session_venv_dir(session_dir: Path) -> Path:
@@ -113,6 +122,30 @@ def ensure_session_venv_dir(session_dir: Path) -> Path:
     except OSError:
         pass
     return venv_dir
+
+
+def ensure_session_metadata_dir(session_dir: Path) -> Path:
+    """
+    Sibling of workspace/ (like .venv/ and .runs/) holding LIARA's own
+    control-plane state - the manifest, pending proposals, and the
+    workspace_lock advisory-lock file (issue #6). Before this, those three
+    files lived INSIDE workspace_dir, which run_sandboxed.sh chmods 0o777
+    recursively after every run - a sandboxed script could read/overwrite/
+    delete LIARA's own trusted state through nothing more than a plain file
+    write. Deliberately 0o700 (owner/backend only), NOT 0o777 like
+    workspace_dir/.venv: liara-runner is a wholly separate OS user with no
+    shared group set up anywhere on this server, so 0o700 denies it read,
+    write, AND traversal here - there's no legitimate reason for the sandbox
+    to ever touch this directory at all, unlike workspace_dir/.venv where
+    both the backend and the runner are supposed to write.
+    """
+    metadata_dir = session_dir / "metadata"
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(metadata_dir, 0o700)
+    except OSError:
+        pass
+    return metadata_dir
 
 
 def _is_text_mime(mime_type: str) -> bool:
@@ -170,9 +203,8 @@ def workspace_lock(user_id: int, session_id: int):
             with _dev_fallback_lock:
                 yield
             return
-        workspace = _workspace_dir(user_id, session_id)
-        workspace.mkdir(parents=True, exist_ok=True)
-        lock_path = workspace / LOCK_FILENAME
+        metadata_dir = ensure_session_metadata_dir(_session_dir(user_id, session_id))
+        lock_path = metadata_dir / LOCK_FILENAME
         with open(lock_path, "w") as fh:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
             try:
@@ -209,12 +241,36 @@ def resolve_workspace_file(user_id: int, session_id: int, filename: str) -> Opti
     return resolved
 
 
+def _migrate_legacy_metadata_file(user_id: int, session_id: int, filename: str, new_path: Path) -> None:
+    """
+    One-time self-healing move for sessions that predate issue #6's
+    metadata/ separation, where manifest/proposals used to live directly
+    inside workspace_dir. If the new metadata/ copy doesn't exist yet but an
+    old one does, MOVE it across (not copy) - a leftover copy in
+    workspace_dir would otherwise start showing up as a normal file in the
+    Explorer/search/quota total now that the by-name exclusion there is
+    gone. Best-effort and safe to call redundantly: a session already
+    touched since this deploy has nothing left to migrate.
+    """
+    if new_path.exists():
+        return
+    legacy_path = _workspace_dir(user_id, session_id) / filename
+    if not legacy_path.exists():
+        return
+    try:
+        ensure_session_metadata_dir(_session_dir(user_id, session_id))
+        shutil.move(str(legacy_path), str(new_path))
+    except OSError as e:
+        logger.warning(f"session_workspace: legacy metadata migration failed for {legacy_path}: {e}")
+
+
 def _manifest_path(user_id: int, session_id: int) -> Path:
-    return _workspace_dir(user_id, session_id) / MANIFEST_FILENAME
+    return _metadata_dir(user_id, session_id) / MANIFEST_FILENAME
 
 
 def _load_manifest(user_id: int, session_id: int) -> dict:
     path = _manifest_path(user_id, session_id)
+    _migrate_legacy_metadata_file(user_id, session_id, MANIFEST_FILENAME, path)
     if not path.exists():
         return {}
     try:
@@ -225,6 +281,7 @@ def _load_manifest(user_id: int, session_id: int) -> dict:
 
 
 def _save_manifest(user_id: int, session_id: int, manifest: dict) -> None:
+    ensure_session_metadata_dir(_session_dir(user_id, session_id))
     _atomic_write_json(_manifest_path(user_id, session_id), manifest)
 
 
@@ -355,7 +412,7 @@ def workspace_total_size(workspace: Path) -> int:
     total = 0
     if workspace.exists():
         for entry in workspace.rglob("*"):
-            if entry.is_file() and not entry.is_symlink() and entry.name not in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
+            if entry.is_file() and not entry.is_symlink():
                 total += entry.stat().st_size
     return total
 
@@ -496,7 +553,7 @@ def search_workspace(user_id: int, session_id: int, query: str, case_sensitive: 
     truncated = False
 
     for entry in sorted(workspace.rglob("*")):
-        if entry.is_symlink() or not entry.is_file() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
+        if entry.is_symlink() or not entry.is_file():
             continue
 
         relpath = entry.relative_to(workspace).as_posix()
@@ -549,9 +606,15 @@ def list_session_files(user_id: int, session_id: int) -> List[dict]:
     if not workspace.exists():
         return []
     manifest = _load_manifest(user_id, session_id)
+    # Also triggers the proposals sidecar's own migration (issue #6) - the
+    # Explorer is the first surface nearly every session touches, so this
+    # guarantees a pre-migration session's stale .liara_proposals.json in
+    # workspace_dir never has a chance to appear as a plain file below,
+    # even for a session whose proposals were never separately touched.
+    _load_proposals(user_id, session_id)
     entries = []
     for entry in sorted(workspace.rglob("*")):
-        if entry.is_symlink() or entry.name in (MANIFEST_FILENAME, PROPOSALS_FILENAME, LOCK_FILENAME):
+        if entry.is_symlink():
             continue
         relpath = entry.relative_to(workspace).as_posix()
         parent = relpath.rsplit("/", 1)[0] if "/" in relpath else ""
@@ -631,11 +694,12 @@ def read_session_file(user_id: int, session_id: int, filename: str) -> dict:
 
 
 def _proposals_path(user_id: int, session_id: int) -> Path:
-    return _workspace_dir(user_id, session_id) / PROPOSALS_FILENAME
+    return _metadata_dir(user_id, session_id) / PROPOSALS_FILENAME
 
 
 def _load_proposals(user_id: int, session_id: int) -> List[dict]:
     path = _proposals_path(user_id, session_id)
+    _migrate_legacy_metadata_file(user_id, session_id, PROPOSALS_FILENAME, path)
     if not path.exists():
         return []
     try:
@@ -646,6 +710,7 @@ def _load_proposals(user_id: int, session_id: int) -> List[dict]:
 
 
 def _save_proposals(user_id: int, session_id: int, proposals: List[dict]) -> None:
+    ensure_session_metadata_dir(_session_dir(user_id, session_id))
     _atomic_write_json(_proposals_path(user_id, session_id), proposals)
 
 

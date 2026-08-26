@@ -613,9 +613,24 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                         tool_message["tool_call_id"] = tc["id"]
                     messages.append(tool_message)
 
+                # Accumulate this turn's visible prose before moving to the
+                # next iteration (issue #6) - a turn that requests a tool call
+                # can still contain visible text ("Ich schaue kurz nach...")
+                # that was already streamed to the user via 'content' events
+                # above; without this, only the LAST iteration's content ever
+                # made it into full_response_text, dropping every earlier
+                # iteration's visible prose from what gets persisted.
+                full_response_text += turn_content
                 continue
 
-            full_response_text = turn_content
+            # Accumulate, don't overwrite (issue #6): every turn_content chunk
+            # across every iteration was already streamed to the user 1:1 as a
+            # 'content' SSE event (see the yields above). Overwriting here
+            # would silently drop any visible pre-tool-call prose from an
+            # earlier iteration - the user already saw it, but it would never
+            # reach chat_messages, so a later request's conversation_history
+            # wouldn't match what was actually shown.
+            full_response_text += turn_content
             break
 
         # Mirko Debug Logging
