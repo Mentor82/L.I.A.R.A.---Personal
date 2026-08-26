@@ -3,13 +3,15 @@ MCP Validation Router - Code validation and review via MCP (Ollama)
 Provides semantic analysis, code review, and AI-powered validation
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 import logging
 
 from services.ai_validator_mcp_service import get_mcp_validator
+from core.dependencies import require_active_user, require_admin
+from api.models.base_models import User
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +54,11 @@ class TextGenerationRequest(BaseModel):
 # ============================================================================
 
 @router.get("/health")
-async def health_check():
-    """Check MCP server health"""
+async def health_check(current_user: User = Depends(require_admin)):
+    """Check MCP server health
+
+    Admin-only (issue #16): response leaks the internal MCP backend endpoint URL.
+    """
     try:
         mcp = await get_mcp_validator()
         is_healthy = await mcp.health_check()
@@ -68,7 +73,7 @@ async def health_check():
         raise HTTPException(status_code=503, detail=f"Health check failed: {str(e)}")
 
 @router.get("/models")
-async def list_models():
+async def list_models(current_user: User = Depends(require_active_user)):
     """List available Ollama models"""
     try:
         mcp = await get_mcp_validator()
@@ -84,8 +89,11 @@ async def list_models():
         raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
 
 @router.get("/tools")
-async def list_tools():
-    """List available MCP tools"""
+async def list_tools(current_user: User = Depends(require_admin)):
+    """List available MCP tools
+
+    Admin-only (issue #16): reveals internal MCP tool/endpoint topology.
+    """
     try:
         mcp = await get_mcp_validator()
         tools = await mcp.list_tools()
@@ -100,7 +108,7 @@ async def list_tools():
         raise HTTPException(status_code=500, detail=f"Failed to list tools: {str(e)}")
 
 @router.post("/generate")
-async def generate_text(request: TextGenerationRequest):
+async def generate_text(request: TextGenerationRequest, current_user: User = Depends(require_active_user)):
     """Generate text using Ollama model via MCP"""
     try:
         mcp = await get_mcp_validator()
@@ -129,7 +137,7 @@ async def generate_text(request: TextGenerationRequest):
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @router.post("/analyze")
-async def analyze_code(request: CodeRequest):
+async def analyze_code(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze code for errors and issues using AI"""
     try:
         mcp = await get_mcp_validator()
@@ -147,7 +155,7 @@ async def analyze_code(request: CodeRequest):
         raise HTTPException(status_code=500, detail=f"Code analysis failed: {str(e)}")
 
 @router.post("/review")
-async def review_code(request: CodeReviewRequest):
+async def review_code(request: CodeReviewRequest, current_user: User = Depends(require_active_user)):
     """Perform semantic code review"""
     try:
         mcp = await get_mcp_validator()
@@ -165,7 +173,7 @@ async def review_code(request: CodeReviewRequest):
         raise HTTPException(status_code=500, detail=f"Code review failed: {str(e)}")
 
 @router.post("/suggest-fixes")
-async def suggest_fixes(request: FixSuggestionsRequest):
+async def suggest_fixes(request: FixSuggestionsRequest, current_user: User = Depends(require_active_user)):
     """Generate fix suggestions for code issues"""
     try:
         mcp = await get_mcp_validator()
@@ -183,37 +191,37 @@ async def suggest_fixes(request: FixSuggestionsRequest):
         raise HTTPException(status_code=500, detail=f"Fix suggestion failed: {str(e)}")
 
 @router.post("/python-analyze")
-async def analyze_python(request: CodeRequest):
+async def analyze_python(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze Python code"""
     request.language = "python"
-    return await analyze_code(request)
+    return await analyze_code(request, current_user)
 
 @router.post("/javascript-analyze")
-async def analyze_javascript(request: CodeRequest):
+async def analyze_javascript(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze JavaScript code"""
     request.language = "javascript"
-    return await analyze_code(request)
+    return await analyze_code(request, current_user)
 
 @router.post("/typescript-analyze")
-async def analyze_typescript(request: CodeRequest):
+async def analyze_typescript(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze TypeScript code"""
     request.language = "typescript"
-    return await analyze_code(request)
+    return await analyze_code(request, current_user)
 
 @router.post("/cpp-analyze")
-async def analyze_cpp(request: CodeRequest):
+async def analyze_cpp(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze C++ code"""
     request.language = "c++"
-    return await analyze_code(request)
+    return await analyze_code(request, current_user)
 
 @router.post("/go-analyze")
-async def analyze_go(request: CodeRequest):
+async def analyze_go(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze Go code"""
     request.language = "go"
-    return await analyze_code(request)
+    return await analyze_code(request, current_user)
 
 @router.post("/rust-analyze")
-async def analyze_rust(request: CodeRequest):
+async def analyze_rust(request: CodeRequest, current_user: User = Depends(require_active_user)):
     """Analyze Rust code"""
     request.language = "rust"
-    return await analyze_code(request)
+    return await analyze_code(request, current_user)

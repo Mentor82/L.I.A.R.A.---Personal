@@ -5,12 +5,14 @@ Fallback: liara (192.168.178.50:11434)
 Syntax: ai-validator (192.168.178.150:5000)
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from services.multi_backend_validator import get_validator
+from core.dependencies import require_active_user
+from api.models.base_models import User
 
 router = APIRouter(prefix="/validate", tags=["validation"])
 
@@ -38,7 +40,7 @@ class TextGenerationRequest(BaseModel):
 # ============================================================================
 
 @router.post("/code")
-async def validate_code(request: ValidationRequest):
+async def validate_code(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate code snippet
     
     Supports: python, javascript, bash, json, yaml, c, cpp, go, rust, php, ruby, sql, html, css, java, typescript
@@ -54,31 +56,31 @@ async def validate_code(request: ValidationRequest):
     return result
 
 @router.post("/python")
-async def validate_python(request: ValidationRequest):
+async def validate_python(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate Python code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="python")
 
 @router.post("/javascript")
-async def validate_javascript(request: ValidationRequest):
+async def validate_javascript(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate JavaScript/TypeScript code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="javascript")
 
 @router.post("/bash")
-async def validate_bash(request: ValidationRequest):
+async def validate_bash(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate Bash/Shell script"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="bash")
 
 @router.post("/json")
-async def validate_json(request: ValidationRequest):
+async def validate_json(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate JSON"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="json")
 
 @router.post("/yaml")
-async def validate_yaml(request: ValidationRequest):
+async def validate_yaml(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate YAML"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="yaml")
@@ -88,67 +90,67 @@ async def validate_yaml(request: ValidationRequest):
 # ============================================================================
 
 @router.post("/typescript")
-async def validate_typescript(request: ValidationRequest):
+async def validate_typescript(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate TypeScript code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="typescript")
 
 @router.post("/c")
-async def validate_c(request: ValidationRequest):
+async def validate_c(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate C code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="c")
 
 @router.post("/cpp")
-async def validate_cpp(request: ValidationRequest):
+async def validate_cpp(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate C++ code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="cpp")
 
 @router.post("/go")
-async def validate_go(request: ValidationRequest):
+async def validate_go(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate Go code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="go")
 
 @router.post("/rust")
-async def validate_rust(request: ValidationRequest):
+async def validate_rust(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate Rust code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="rust")
 
 @router.post("/php")
-async def validate_php(request: ValidationRequest):
+async def validate_php(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate PHP code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="php")
 
 @router.post("/ruby")
-async def validate_ruby(request: ValidationRequest):
+async def validate_ruby(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate Ruby code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="ruby")
 
 @router.post("/sql")
-async def validate_sql(request: ValidationRequest):
+async def validate_sql(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate SQL code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="sql")
 
 @router.post("/html")
-async def validate_html(request: ValidationRequest):
+async def validate_html(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate HTML code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="html")
 
 @router.post("/css")
-async def validate_css(request: ValidationRequest):
+async def validate_css(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate CSS code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="css")
 
 @router.post("/java")
-async def validate_java(request: ValidationRequest):
+async def validate_java(request: ValidationRequest, current_user: User = Depends(require_active_user)):
     """Validate Java code"""
     validator = await get_validator()
     return await validator.validate_syntax(code=request.code, language="java")
@@ -158,7 +160,7 @@ async def validate_java(request: ValidationRequest):
 # ============================================================================
 
 @router.get("/health")
-async def validation_health():
+async def validation_health(current_user: User = Depends(require_active_user)):
     """Check all validation backends health"""
     validator = await get_validator()
     health = await validator.health_check()
@@ -170,7 +172,7 @@ async def validation_health():
     }
 
 @router.get("/models")
-async def get_available_models():
+async def get_available_models(current_user: User = Depends(require_active_user)):
     """Get available models from active backend"""
     validator = await get_validator()
     models = await validator.get_models()
@@ -182,7 +184,7 @@ async def get_available_models():
     }
 
 @router.post("/generate")
-async def generate_text(request: TextGenerationRequest):
+async def generate_text(request: TextGenerationRequest, current_user: User = Depends(require_active_user)):
     """Generate text using active backend (liara-core or liara)"""
     validator = await get_validator()
     

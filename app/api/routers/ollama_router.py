@@ -3,7 +3,7 @@ Ollama Management API Router
 Model download, deletion, and management operations
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 import subprocess
@@ -11,6 +11,9 @@ import requests
 import asyncio
 import time
 from datetime import datetime
+
+from core.dependencies import require_admin
+from api.models.base_models import User
 
 router = APIRouter(prefix="/ollama", tags=["Ollama Management"])
 
@@ -110,11 +113,17 @@ async def get_available_models():
 
 
 @router.post("/pull")
-async def pull_model(request: ModelPullRequest, background_tasks: BackgroundTasks):
+async def pull_model(
+    request: ModelPullRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_admin),
+):
     """
     Start pulling (downloading) a model from Ollama library
-    
+
     This is a background operation - use /ollama/pull/status/{model_name} to check progress
+
+    Admin-only (issue #16): downloads real disk/network resources.
     """
     model_name = request.model_name
     
@@ -191,14 +200,16 @@ async def execute_pull(model_name: str):
 
 
 @router.get("/pull/status/{model_name}")
-async def get_pull_status(model_name: str):
+async def get_pull_status(model_name: str, current_user: User = Depends(require_admin)):
     """
     Get the current status of a model pull operation
-    
+
     Returns:
         - status: "in_progress", "completed", or "failed"
         - progress: 0-100
         - message: Current status message
+
+    Admin-only (issue #16): status of an admin-only pull operation.
     """
     if model_name not in pull_status:
         raise HTTPException(status_code=404, detail="No pull operation found for this model")
@@ -207,11 +218,13 @@ async def get_pull_status(model_name: str):
 
 
 @router.delete("/model/{model_name}")
-async def delete_model(model_name: str):
+async def delete_model(model_name: str, current_user: User = Depends(require_admin)):
     """
     Delete a downloaded model
-    
+
     This frees up disk space
+
+    Admin-only (issue #16): permanently deletes an installed model.
     """
     try:
         result = subprocess.run(
@@ -263,11 +276,13 @@ async def search_library(query: str):
 
 
 @router.get("/storage")
-async def get_storage_info():
+async def get_storage_info(current_user: User = Depends(require_admin)):
     """
     Get storage information for Ollama models
-    
+
     Returns disk usage and model sizes
+
+    Admin-only (issue #16): reveals installed-model inventory and disk usage.
     """
     try:
         # Get list of installed models with sizes

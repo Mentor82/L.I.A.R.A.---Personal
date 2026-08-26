@@ -36,6 +36,9 @@ from services.hailo_rpi5_client import (
     RPi5Status
 )
 
+from core.dependencies import require_active_user
+from api.models.base_models import User
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/hailo", tags=["hailo"])
@@ -107,7 +110,8 @@ class PowerProfile(BaseModel):
 # ============================================================================
 
 @router.get("/health", tags=["hailo"])
-async def hailo_health(service: HailoService = Depends(get_hailo_service)):
+async def hailo_health(service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)):
     """Check Hailo service health"""
     is_healthy = await service.health_check()
     device = service.device
@@ -122,7 +126,8 @@ async def hailo_health(service: HailoService = Depends(get_hailo_service)):
 
 
 @router.get("/device", response_model=DeviceInfo, tags=["hailo"])
-async def get_device_info(service: HailoService = Depends(get_hailo_service)):
+async def get_device_info(service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)):
     """Get Hailo device information"""
     device = await service.get_device_info()
     
@@ -148,7 +153,8 @@ async def get_device_info(service: HailoService = Depends(get_hailo_service)):
 # ============================================================================
 
 @router.get("/models", response_model=List[ModelInfo], tags=["hailo"])
-async def list_models(service: HailoService = Depends(get_hailo_service)):
+async def list_models(service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)):
     """List available HEF models"""
     models = await service.list_models()
     
@@ -169,7 +175,8 @@ async def list_models(service: HailoService = Depends(get_hailo_service)):
 @router.get("/models/{model_name}", response_model=ModelInfo, tags=["hailo"])
 async def get_model_info(
     model_name: str,
-    service: HailoService = Depends(get_hailo_service)
+    service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)
 ):
     """Get detailed information about a specific HEF model"""
     models = await service.list_models()
@@ -199,7 +206,8 @@ async def get_model_info(
 @router.post("/infer", response_model=InferenceResponse, tags=["hailo"])
 async def run_inference(
     request: InferenceRequest,
-    service: HailoService = Depends(get_hailo_service)
+    service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)
 ):
     """Run inference on Hailo accelerator"""
     if not service.is_available():
@@ -236,7 +244,8 @@ async def run_inference(
 @router.get("/metrics/model/{model_name}", response_model=MetricsResponse, tags=["hailo"])
 async def get_model_metrics(
     model_name: str,
-    service: HailoService = Depends(get_hailo_service)
+    service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)
 ):
     """Get inference metrics for a specific model"""
     metrics = await service.get_inference_metrics(model_name)
@@ -261,7 +270,8 @@ async def get_model_metrics(
 
 @router.get("/power", response_model=PowerProfile, tags=["hailo"])
 async def get_power_consumption(
-    service: HailoService = Depends(get_hailo_service)
+    service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)
 ):
     """Get current power consumption profile"""
     profile = await service.get_power_profile()
@@ -280,7 +290,8 @@ async def get_power_consumption(
 
 @router.get("/metrics", response_class=PlainTextResponse, tags=["hailo"])
 async def prometheus_metrics(
-    service: HailoService = Depends(get_hailo_service)
+    service: HailoService = Depends(get_hailo_service),
+    current_user: User = Depends(require_active_user)
 ):
     """
     Prometheus metrics endpoint for Hailo accelerator
@@ -420,7 +431,8 @@ class VisionResultResponse(BaseModel):
 
 @router.get("/vision/models", tags=["vision"])
 async def list_vision_models(
-    client: HailoRPi5Client = Depends(get_rpi5_client)
+    client: HailoRPi5Client = Depends(get_rpi5_client),
+    current_user: User = Depends(require_active_user)
 ):
     """List available vision models on Hailo-8L RPi5"""
     models = await client.list_models()
@@ -438,7 +450,8 @@ async def detect_objects(
     file: UploadFile = File(...),
     model: str = Query("yolov8n", description="Object detection model"),
     confidence: float = Query(0.5, ge=0.0, le=1.0, description="Confidence threshold"),
-    client: HailoRPi5Client = Depends(get_rpi5_client)
+    client: HailoRPi5Client = Depends(get_rpi5_client),
+    current_user: User = Depends(require_active_user)
 ):
     """
     🎯 Detect objects in image using YOLOv8 on Hailo-8L NPU (RPi5)
@@ -513,7 +526,8 @@ async def detect_objects(
 async def estimate_pose(
     file: UploadFile = File(...),
     model: str = Query("yolov8s_pose", description="Pose estimation model"),
-    client: HailoRPi5Client = Depends(get_rpi5_client)
+    client: HailoRPi5Client = Depends(get_rpi5_client),
+    current_user: User = Depends(require_active_user)
 ):
     """
     🧍 Estimate human pose using YOLOv8-Pose on Hailo-8L NPU (RPi5)
@@ -587,7 +601,8 @@ async def detect_faces(
     file: UploadFile = File(...),
     model: str = Query("yolov8s", description="Face detection model"),
     confidence: float = Query(0.6, ge=0.0, le=1.0, description="Confidence threshold"),
-    client: HailoRPi5Client = Depends(get_rpi5_client)
+    client: HailoRPi5Client = Depends(get_rpi5_client),
+    current_user: User = Depends(require_active_user)
 ):
     """
     👤 Detect faces in image using YOLOv8 on Hailo-8L NPU (RPi5)
@@ -660,7 +675,8 @@ async def detect_faces(
 async def segment_objects(
     file: UploadFile = File(...),
     model: str = Query("yolov5n_seg", description="Segmentation model"),
-    client: HailoRPi5Client = Depends(get_rpi5_client)
+    client: HailoRPi5Client = Depends(get_rpi5_client),
+    current_user: User = Depends(require_active_user)
 ):
     """
     🎨 Instance segmentation using YOLOv5-Seg on Hailo-8L NPU (RPi5)
