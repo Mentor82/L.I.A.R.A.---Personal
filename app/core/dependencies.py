@@ -73,22 +73,21 @@ async def get_current_user_ws(
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Get current authenticated user from WebSocket connection
-    Token can be in query params (?token=...) or Sec-WebSocket-Protocol header
-    
+    Get current authenticated user from WebSocket connection.
+
+    Token must arrive via the Sec-WebSocket-Protocol header, never a query
+    string (issue #10) - a browser WebSocket can't set custom headers, so
+    the subprotocol list is the only way to carry an auth-like value off
+    the URL. Query-string bearer tokens are far more likely to leak into
+    reverse-proxy/access logs, browser diagnostics, or monitoring than a
+    protocol value, and this is an admin-only PTY endpoint.
+
     Raises:
         Exception: Invalid or expired token, user not found
     """
-    # Try to get token from query params first
-    token = websocket.query_params.get("token")
-    
-    # If not in query params, try Sec-WebSocket-Protocol header
-    if not token:
-        protocols = websocket.headers.get("sec-websocket-protocol", "")
-        if protocols:
-            # Token might be in protocol list
-            token = protocols.split(",")[0].strip()
-    
+    protocols = websocket.headers.get("sec-websocket-protocol", "")
+    token = protocols.split(",")[0].strip() if protocols else None
+
     if not token:
         raise Exception("No authentication token provided")
     

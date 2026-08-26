@@ -35,23 +35,28 @@ async def websocket_pty(
     1. Local: Direct shell on Liara server (?type=local)
     2. SSH: Connect to remote server via SSH (?type=ssh&ssh_host=...&ssh_user=...&ssh_port=...)
     
-    Requires admin authentication via query param: ?token=...
+    Requires admin authentication via the Sec-WebSocket-Protocol header
+    (see core.dependencies.get_current_user_ws).
     """
-    await websocket.accept()
-    
+    # Authenticate BEFORE accept() (issue #10) - websocket.headers/query_params
+    # are already populated from the ASGI scope at this point, no need to
+    # accept first just to read them. A rejected handshake here never
+    # creates any PTY/SSH state, and closing before accept() makes uvicorn
+    # deny the WS upgrade at the protocol level instead of accepting then
+    # immediately closing. There's no accepted connection yet to send a JSON
+    # error over - the frontend already shows a generic disconnect message
+    # on any WS close (TerminalTabs.jsx), which avoids leaking str(e) to an
+    # unauthenticated client as a side effect.
     try:
-        # Authenticate user (admin only)
-        try:
-            user = await get_current_user_ws(websocket, db)
-        except Exception as e:
-            logger.error(f"WebSocket auth failed: {e}")
-            await websocket.send_json({
-                "type": "error", 
-                "data": f"Authentication failed: {str(e)}"
-            })
-            await websocket.close(code=1008)  # Policy Violation
-            return
-        
+        user = await get_current_user_ws(websocket, db)
+    except Exception as e:
+        logger.error(f"WebSocket auth failed: {e}")
+        await websocket.close(code=1008)  # Policy Violation
+        return
+
+    await websocket.accept()
+
+    try:
         # Get connection parameters from query string
         connection_type = websocket.query_params.get('type', 'local')
         
@@ -71,11 +76,16 @@ async def websocket_pty(
                 await websocket.close(code=1008)
                 return
             
-            # Build SSH command
+            # Build SSH command. StrictHostKeyChecking=accept-new (issue #10,
+            # OpenSSH >=7.6): a host seen for the first time is trusted and
+            # its key recorded in the default ~/.ssh/known_hosts (no
+            # UserKnownHostsFile override - reuses whatever this OS user has
+            # already verified manually too) - but if a KNOWN host's key
+            # later changes (the actual MITM signal this is meant to catch),
+            # the connection fails closed instead of silently proceeding.
             shell_cmd = [
                 'ssh',
-                '-o', 'StrictHostKeyChecking=no',  # Auto-accept host keys
-                '-o', 'UserKnownHostsFile=/dev/null',  # Don't save host keys
+                '-o', 'StrictHostKeyChecking=accept-new',
                 '-p', ssh_port,
                 f'{ssh_user}@{ssh_host}'
             ]

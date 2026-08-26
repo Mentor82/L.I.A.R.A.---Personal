@@ -15,6 +15,7 @@ than the one that started the job.
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -124,18 +125,52 @@ def _tail(file_obj, n: int) -> str:
     return file_obj.read().decode("utf-8", errors="replace")
 
 
+_SECRET_KEY_WORD = r'(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)'
+
+# Redacts common secret-bearing CLI forms before they reach the long-lived
+# audit log (issue #10) - stdout/stderr are already excluded, but the raw
+# command itself frequently carries secrets directly (curl auth headers,
+# --password/--token flags, export FOO_KEY=..., credentials embedded in a
+# connection-string URL). Best-effort by design: this is pattern matching on
+# free-form shell text, not a shell parser - it catches the common,
+# documented forms, not an exhaustive guarantee.
+_SECRET_PATTERNS = [
+    # key=value / key="value" - env assignments, --flag=value, URL query params
+    re.compile(rf'(?i)((?:--)?(?:export\s+)?{_SECRET_KEY_WORD}[a-z0-9_]*\s*=\s*)(["\']?)(\S+?)(\2)(?=\s|$)'),
+    # --flag value / -flag value - space-separated CLI args
+    re.compile(rf'(?i)(--?{_SECRET_KEY_WORD}[a-z0-9_-]*\s+)(["\']?)(\S+?)(\2)(?=\s|$)'),
+    # Authorization: Bearer/Basic <value> header (typically curl -H "...")
+    re.compile(r'(?i)(authorization["\']?\s*:?\s*(?:bearer|basic)\s+)(\S+)'),
+    # credentials embedded in a URL: scheme://user:PASSWORD@host (DB
+    # connection strings, git remotes with an embedded token, etc.)
+    re.compile(r'(?i)(://[^\s:/@]+:)([^\s@/]+)(@)'),
+]
+
+
+def _redact_secrets(command: str) -> str:
+    redacted = command
+    for pattern in _SECRET_PATTERNS[:2]:
+        redacted = pattern.sub(lambda m: m.group(1) + m.group(2) + "***REDACTED***" + m.group(2), redacted)
+    redacted = _SECRET_PATTERNS[2].sub(lambda m: m.group(1) + "***REDACTED***", redacted)
+    redacted = _SECRET_PATTERNS[3].sub(lambda m: m.group(1) + "***REDACTED***" + m.group(3), redacted)
+    return redacted
+
+
 def _write_audit_log(job: ExecJob, cwd: str):
     """
     Append-only audit trail, kept separately from the ephemeral Redis job
     result. Intentionally excludes stdout/stderr (may contain secrets) - just
-    who ran what, when, and how it ended.
+    who ran what, when, and how it ended. The command itself is redacted
+    (see _redact_secrets) since this log persists far longer than the 1h
+    Redis job TTL; the unredacted command stays in Redis, already protected
+    by the job-owner check in get_exec_result().
     """
     try:
         audit_logger.info(json.dumps({
             "job_id": job.job_id,
             "user_id": job.user_id,
             "username": job.username,
-            "command": job.command,
+            "command": _redact_secrets(job.command),
             "cwd": cwd,
             "started_at": job.started_at,
             "finished_at": job.finished_at,

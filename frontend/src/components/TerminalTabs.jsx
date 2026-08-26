@@ -147,19 +147,24 @@ function TerminalTabs() {
         throw new Error('Keine Authentifizierung gefunden');
       }
 
-      // Build WebSocket URL
+      // Build WebSocket URL - the JWT itself travels via the WS subprotocol
+      // list, not the query string (issue #10): query-string bearer tokens
+      // are far more likely to leak into reverse-proxy/access logs or
+      // browser diagnostics than a protocol value, and a browser WebSocket
+      // can't set a custom Authorization header, so this is the only way to
+      // keep it off the URL. type/ssh_* aren't secrets and stay in the query
+      // string.
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      let wsUrl = `${protocol}//${host}/api/admin/terminal/ws?token=${encodeURIComponent(token)}`;
-      
-      wsUrl += `&type=${tab.type}`;
+      let wsUrl = `${protocol}//${host}/api/admin/terminal/ws?type=${tab.type}`;
+
       if (tab.type === 'ssh') {
         wsUrl += `&ssh_host=${encodeURIComponent(tab.config.host)}`;
         wsUrl += `&ssh_port=${encodeURIComponent(tab.config.port)}`;
         wsUrl += `&ssh_user=${encodeURIComponent(tab.config.username)}`;
       }
 
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrl, [token]);
 
       ws.onopen = () => {
         console.log('WebSocket connected for tab:', tabId);
