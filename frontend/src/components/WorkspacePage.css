@@ -871,6 +871,29 @@
   flex-direction: column;
 }
 
+/* @uiw/react-codemirror's `height="100%"` prop only generates a CodeMirror
+   theme CSS rule (`.cm-editor { height: 100% }`) - a plain percentage that
+   hits the exact same non-definite-containing-block problem .workspace-page
+   itself had (see the comment there), one level deeper: its direct wrapper
+   (`.cm-theme-dark`/`.cm-theme-light`, added by the library) doesn't grow on
+   its own, and neither does `.cm-editor` under it. Forcing both onto the
+   same flex: 1 chain the rest of this pane already uses sidesteps that
+   entirely, the same fix applied one level down. `.cm-editor` already sets
+   its own `display: flex; flex-direction: column` (CodeMirror's own
+   internal layout for the gutter/content row) - min-height: 0 keeps that
+   from re-tripping the same issue for the line content underneath. */
+.workspace-editor-wrapper > div {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-editor-wrapper .cm-editor {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Terminal execution panel - a persistent scrollback of every run in this
    pane (not a real shell, just a UX upgrade over the old single-result
    view; underlying execution is still the same sandboxed codeExecAPI.run()). */
