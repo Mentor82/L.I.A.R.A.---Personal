@@ -351,6 +351,37 @@ function EditorPane({
   );
 }
 
+/**
+ * Right-hand panel scaffold - the layout/toggle plumbing for a future direct
+ * chat with LIARA scoped to this workspace session (file context, code
+ * proposals, no navigating away to /chat). Not wired to any backend yet:
+ * the input is intentionally disabled rather than silently doing nothing.
+ */
+function AgentChatPanel({ onClose }) {
+  return (
+    <aside className="workspace-agent-panel">
+      <div className="workspace-agent-header">
+        <span>🤖 Agent-Chat</span>
+        <button className="workspace-icon-btn" title="Schließen" onClick={onClose}>✕</button>
+      </div>
+      <div className="workspace-agent-body">
+        <div className="workspace-empty">
+          <div className="workspace-empty-icon">🤖</div>
+          <p className="workspace-empty-title">Bald verfügbar</p>
+          <p className="workspace-empty-subtitle">
+            Hier entsteht der direkte Chat mit LIARA im Workspace-Kontext -
+            mit Zugriff auf die aktuell geöffnete Datei.
+          </p>
+        </div>
+      </div>
+      <div className="workspace-agent-input-row">
+        <input type="text" placeholder="Nachricht an den Agent…" disabled />
+        <button className="workspace-btn-primary" disabled>Senden</button>
+      </div>
+    </aside>
+  );
+}
+
 function WorkspacePage() {
   const [sessions, setSessions] = useState([]);
   const [sessionId, setSessionId] = useState(null);
@@ -447,6 +478,14 @@ function WorkspacePage() {
   // once split (see EditorPane's isActivePane), so it adds no noise in the
   // common single-pane case (issue #5: "aktiver Bereich klar erkennbar").
   const [activePane, setActivePane] = useState('primary');
+
+  // Explorer collapse and the right-hand agent chat panel - plain client
+  // state (like collapsedFolders above), not persisted server-side. Both
+  // just resize the 3-way grid in .workspace-body; unmounting the collapsed
+  // sidebar/closed panel loses no data since all the state that matters
+  // (tabs, files, search) lives here in WorkspacePage regardless.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -997,9 +1036,23 @@ function WorkspacePage() {
     <div className="workspace-page">
       <div className="workspace-header">
         <div className="workspace-header-left">
+          <button
+            className="workspace-icon-btn"
+            title={sidebarCollapsed ? 'Explorer einblenden' : 'Explorer ausblenden'}
+            onClick={() => setSidebarCollapsed((v) => !v)}
+          >
+            {sidebarCollapsed ? '▶' : '◀'}
+          </button>
           <h1>🗂️ Workspace</h1>
         </div>
         <div className="workspace-header-right">
+          <button
+            className={`workspace-icon-btn ${agentPanelOpen ? 'active' : ''}`}
+            title={agentPanelOpen ? 'Agent-Chat ausblenden' : 'Agent-Chat einblenden'}
+            onClick={() => setAgentPanelOpen((v) => !v)}
+          >
+            🤖
+          </button>
           <div className="workspace-env-status">
             <button
               className="workspace-env-chip"
@@ -1133,7 +1186,8 @@ function WorkspacePage() {
         </div>
       )}
 
-      <div className="workspace-body">
+      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''}`}>
+        {!sidebarCollapsed && (
         <aside
           className={`workspace-sidebar ${dragOverTarget === 'root' ? 'workspace-drag-over' : ''}`}
           onDragOver={(e) => e.preventDefault()}
@@ -1238,6 +1292,7 @@ function WorkspacePage() {
             </>
           )}
         </aside>
+        )}
 
         <div className="workspace-editor-row">
           <EditorPane
@@ -1291,6 +1346,8 @@ function WorkspacePage() {
             />
           )}
         </div>
+
+        {agentPanelOpen && <AgentChatPanel onClose={() => setAgentPanelOpen(false)} />}
       </div>
 
       {newFileOpen && (

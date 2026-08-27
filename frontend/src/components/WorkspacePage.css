@@ -55,6 +55,12 @@
   gap: 1rem;
 }
 
+/* Explorer collapse toggle lives in the header (not inside the sidebar
+   itself) so it stays reachable once the sidebar is collapsed to nothing. */
+.workspace-header-left .workspace-icon-btn {
+  font-size: 0.9rem;
+}
+
 .workspace-header-right {
   display: flex;
   align-items: center;
@@ -378,6 +384,24 @@
   flex: 1;
   min-height: 0;
   padding: 1.25rem 2rem 1.5rem;
+}
+
+/* Explorer collapse / agent panel open - both just resize this grid.
+   Gated to the same breakpoint as the sidebar breakout below so they never
+   fight the mobile single-column stack (max-width: 900px block further
+   down), which always wins there regardless of either toggle's state. */
+@media (min-width: 901px) {
+  .workspace-body.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-body.agent-open {
+    grid-template-columns: 280px 1fr 320px;
+  }
+
+  .workspace-body.sidebar-collapsed.agent-open {
+    grid-template-columns: 1fr 320px;
+  }
 }
 
 .workspace-sidebar {
@@ -861,6 +885,68 @@
    the CodeMirror height="100%" prop (see WorkspacePage.jsx) then resolves
    against this. A real IDE's editor dominates the window; a fixed small box
    didn't. */
+/* Right-hand agent chat panel scaffold - a third grid column (see
+   .workspace-body.agent-open above), same card language as the Explorer
+   sidebar. Not wired to a backend yet (see AgentChatPanel in
+   WorkspacePage.jsx) - the input row is deliberately disabled rather than
+   silently doing nothing. */
+.workspace-agent-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.workspace-agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.workspace-agent-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-agent-input-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.workspace-agent-input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg-card);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.workspace-agent-input-row input:disabled,
+.workspace-agent-input-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .workspace-editor-wrapper {
   border: 1px solid var(--color-border);
   border-radius: 10px;
