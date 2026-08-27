@@ -4,7 +4,16 @@
 .workspace-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* `.app-main` (App.css/modern-design.css) is a flex column and this is its
+     only child on this route, so `flex: 1; min-height: 0;` reliably fills
+     the remaining viewport height. A plain `height: 100%` looked equivalent
+     but silently didn't resolve (`.app`, the ultimate ancestor, only sets
+     `min-height: 100vh`, not `height`, which breaks percentage-height
+     resolution through the chain) - this is what let the whole page,
+     including the code editor below, collapse to its content's natural
+     height instead of actually filling the screen. */
+  flex: 1;
+  min-height: 0;
   background: var(--bg-subtle);
   border-radius: 16px;
   overflow: hidden;

@@ -232,8 +232,17 @@ body {
   line-height: 1;
 }
 
-/* Main Content Area */
+/* Main Content Area - display: flex (column) so a page that needs to fill
+   the remaining viewport height (e.g. WorkspacePage's `flex: 1` root) can
+   actually do so: .app only has `min-height: 100vh` (not `height`), so a
+   plain block child's `height: 100%` here doesn't resolve against it - flex
+   distribution isn't affected by that same definite-height requirement. A
+   single normal-flow child (every other page) renders identically either
+   way, since a non-growing flex item's main-axis size still defaults to its
+   content size, same as block layout. */
 .app-main {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   max-width: 1280px;
   width: 100%;
