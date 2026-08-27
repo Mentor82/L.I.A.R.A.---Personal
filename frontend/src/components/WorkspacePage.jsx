@@ -373,6 +373,24 @@ function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
   const [error, setError] = useState(null);
   const scrollRef = useRef(null);
 
+  // Model selector - shares the same localStorage key Chat.jsx reads/writes
+  // (liara_selected_model), so picking one here also becomes the main chat's
+  // pre-selected model next time it opens, and vice versa - one "last used
+  // model" for the user, not two independently-drifting selections.
+  const [models, setModels] = useState([]);
+  const [model, setModel] = useState(() => localStorage.getItem('liara_selected_model') || 'llama3.2:3b');
+
+  useEffect(() => {
+    chatAPI.getModels()
+      .then((data) => setModels(data?.models || []))
+      .catch(() => setModels([]));
+  }, []);
+
+  const changeModel = (value) => {
+    setModel(value);
+    localStorage.setItem('liara_selected_model', value);
+  };
+
   // Loads this session's existing conversation (the same one visible in
   // /chat) so the panel isn't confusingly blank on open - it's one shared
   // history, not a separate workspace-only thread.
@@ -412,10 +430,6 @@ function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
     let assistantContent = '';
     try {
       const token = localStorage.getItem('liara_token');
-      // Same key Chat.jsx reads/writes (liara_selected_model) - no separate
-      // model-selector UI here, this panel just follows whatever the user
-      // last picked in the main chat.
-      const model = localStorage.getItem('liara_selected_model') || undefined;
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -471,7 +485,20 @@ function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
     <aside className="workspace-agent-panel">
       <div className="workspace-agent-header">
         <span>🤖 Agent-Chat</span>
-        <button className="workspace-icon-btn" title="Schließen" onClick={onClose}>✕</button>
+        <div className="workspace-agent-header-actions">
+          <select
+            className="workspace-agent-model-select"
+            value={model}
+            onChange={(e) => changeModel(e.target.value)}
+            title="Modell auswählen"
+          >
+            {models.length === 0 && <option value={model}>{model}</option>}
+            {models.map((m) => (
+              <option key={m.name} value={m.name}>{m.name} {m.speed}</option>
+            ))}
+          </select>
+          <button className="workspace-icon-btn" title="Schließen" onClick={onClose}>✕</button>
+        </div>
       </div>
 
       <div className="workspace-agent-body" ref={scrollRef}>
