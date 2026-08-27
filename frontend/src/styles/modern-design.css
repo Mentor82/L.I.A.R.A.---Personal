@@ -239,11 +239,20 @@ body {
    distribution isn't affected by that same definite-height requirement. A
    single normal-flow child (every other page) renders identically either
    way, since a non-growing flex item's main-axis size still defaults to its
-   content size, same as block layout. */
+   content size, same as block layout.
+   min-height: 0 overrides the flex item's automatic min size (initial
+   value: auto, i.e. its content's min-content height) - without it, deeply
+   nested content that genuinely wants to be tall (e.g. a long agent-chat
+   history several levels down in WorkspacePage) bubbles its min-content
+   size all the way up through every flex/grid ancestor, however many
+   `min-height: 0`s THEY have, and inflates .app-main - and with it the
+   whole page - to fit instead of letting its own overflow: auto containers
+   clip/scroll it. */
 .app-main {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
   max-width: 1280px;
   width: 100%;
   margin: 0 auto;
