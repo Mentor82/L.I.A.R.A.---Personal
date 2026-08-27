@@ -186,19 +186,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# TEMPORARY diagnostic (workspace agent-chat 500 investigation) - writes any
-# unhandled exception's full traceback to a plain file, since journalctl
-# (StandardError=journal in the systemd unit) needs sudo we don't have here.
-# Remove once the bug behind the 500 is found.
-import traceback as _traceback
-@app.exception_handler(Exception)
-async def _debug_log_unhandled_exception(request, exc):
-    with open("/opt/liara/app/liara_debug_traceback.log", "a") as f:
-        f.write(f"\n--- {request.method} {request.url.path} ---\n")
-        f.write("".join(_traceback.format_exception(type(exc), exc, exc.__traceback__)))
-    from starlette.responses import PlainTextResponse
-    return PlainTextResponse("Internal Server Error", status_code=500)
-
 app.include_router(system_router)
 app.include_router(dashboard_router)
 app.include_router(auth_router)  # Authentication endpoints
