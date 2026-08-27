@@ -380,6 +380,16 @@
 .workspace-body {
   display: grid;
   grid-template-columns: 280px 1fr;
+  /* Without this, the implicit row's default "auto" sizing hugs the
+     MAX-CONTENT height of whichever column has the most content (e.g. a
+     long agent-chat history) and grows the whole grid - and page - to fit
+     it, instead of clipping at the available height and letting that
+     column scroll internally the way .workspace-sidebar/-agent-panel
+     already intend to (overflow-y: auto). minmax(0, 1fr) pins the row to
+     exactly the space .workspace-body itself has (flex: 1 below already
+     makes that definite), the same "don't size to content, size to
+     available space" fix already applied via flex elsewhere on this page. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 1.25rem;
   flex: 1;
   min-height: 0;
@@ -410,6 +420,10 @@
   border-radius: 12px;
   padding: 1rem;
   overflow-y: auto;
+  /* Grid items default to min-height: auto (their content's own min size),
+     which fights the row's minmax(0, 1fr) cap above once there are enough
+     files to matter - same reasoning as .workspace-agent-panel/-editor-row. */
+  min-height: 0;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
@@ -967,6 +981,16 @@
 
 .workspace-agent-message.assistant p:last-child {
   margin-bottom: 0;
+}
+
+/* MarkdownMessage's .markdown-table is width: 100% (fine in the wide main
+   chat) - at this panel's ~320px it just forces every cell to wrap word by
+   word instead of scrolling. Its .table-wrapper already has overflow-x:
+   auto (MarkdownMessage.css) - sizing the table to its content instead
+   lets that scroll horizontally as intended. */
+.workspace-agent-message.assistant .markdown-table {
+  width: max-content;
+  min-width: 100%;
 }
 
 .workspace-agent-typing {
