@@ -193,7 +193,7 @@ app.add_middleware(
 import traceback as _traceback
 @app.exception_handler(Exception)
 async def _debug_log_unhandled_exception(request, exc):
-    with open("/tmp/liara_debug_traceback.log", "a") as f:
+    with open("/opt/liara/app/liara_debug_traceback.log", "a") as f:
         f.write(f"\n--- {request.method} {request.url.path} ---\n")
         f.write("".join(_traceback.format_exception(type(exc), exc, exc.__traceback__)))
     from starlette.responses import PlainTextResponse
