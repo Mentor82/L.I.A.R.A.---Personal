@@ -922,6 +922,65 @@
   justify-content: center;
 }
 
+/* Once there are messages, .workspace-agent-body switches from centering
+   the empty-state card to a normal top-to-bottom scrolling list. */
+.workspace-agent-body:has(.workspace-agent-messages) {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0.85rem;
+}
+
+.workspace-agent-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.workspace-agent-message {
+  max-width: 92%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.workspace-agent-message.user {
+  align-self: flex-end;
+  background: var(--bg-purple-muted);
+  border: 1px solid rgba(159, 122, 234, 0.35);
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+
+.workspace-agent-message.assistant {
+  align-self: flex-start;
+  background: var(--bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.workspace-agent-message.assistant p {
+  margin: 0 0 0.5rem;
+}
+
+.workspace-agent-message.assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.workspace-agent-typing {
+  color: var(--color-text-faint);
+  font-style: italic;
+}
+
+.workspace-agent-error {
+  margin: 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
 .workspace-agent-input-row {
   display: flex;
   gap: 0.5rem;

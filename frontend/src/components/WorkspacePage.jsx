@@ -5,8 +5,10 @@ import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
 import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
 import { chatAPI, workspaceAPI, codeExecAPI, preferencesAPI } from '../services/api';
+import { getSessionMessages } from '../services/chatService';
 import CodeRunResult from './CodeRunResult';
 import DiffView from './DiffView';
+import MarkdownMessage from './MarkdownMessage';
 import './WorkspacePage.css';
 
 const PROPOSAL_ACTION_LABELS = {
@@ -352,35 +354,171 @@ function EditorPane({
 }
 
 /**
- * Right-hand panel scaffold - the layout/toggle plumbing for a future direct
- * chat with LIARA scoped to this workspace session (file context, code
- * proposals, no navigating away to /chat). Not wired to any backend yet:
- * the input is intentionally disabled rather than silently doing nothing.
+ * Right-hand chat panel scoped to the Workspace's current session - reuses
+ * the exact same /api/chat/stream agent Chat.jsx talks to (same session_id,
+ * same tool registry, same workspace_propose_change tool), not a separate
+ * workspace-only agent (deliberate call, see the architecture discussion:
+ * the session's workspace manifest + "add to context" files already flow
+ * into that one shared agent server-side, keyed by session_id). This is
+ * intentionally a minimal SSE consumer - only 'content', 'workspace_proposal'
+ * and 'error' are handled, unlike Chat.jsx's full event set (thinking/tasks/
+ * web search/agent steps), since this panel is for quick workspace-scoped
+ * asks, not a replacement for the main chat.
  */
-function AgentChatPanel({ onClose }) {
+function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
+  const [messages, setMessages] = useState([]); // [{role: 'user'|'assistant', content}]
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [error, setError] = useState(null);
+  const scrollRef = useRef(null);
+
+  // Loads this session's existing conversation (the same one visible in
+  // /chat) so the panel isn't confusingly blank on open - it's one shared
+  // history, not a separate workspace-only thread.
+  useEffect(() => {
+    if (!sessionId) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingHistory(true);
+    getSessionMessages(sessionId)
+      .then((list) => {
+        if (!cancelled) setMessages((list || []).map((m) => ({ role: m.role, content: m.content })));
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingHistory(false);
+      });
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || sending || !sessionId) return;
+    setError(null);
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    setSending(true);
+
+    let assistantAdded = false;
+    let assistantContent = '';
+    try {
+      const token = localStorage.getItem('liara_token');
+      // Same key Chat.jsx reads/writes (liara_selected_model) - no separate
+      // model-selector UI here, this panel just follows whatever the user
+      // last picked in the main chat.
+      const model = localStorage.getItem('liara_selected_model') || undefined;
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ message: text, model, session_id: sessionId }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { continue; }
+
+          if (parsed.type === 'content') {
+            assistantContent += parsed.text;
+            if (!assistantAdded) {
+              assistantAdded = true;
+              setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }]);
+            } else {
+              setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', content: assistantContent }]);
+            }
+          } else if (parsed.type === 'workspace_proposal') {
+            // A proposal was created via this chat - refresh the Explorer/
+            // proposals list the same way approving/rejecting one already does.
+            onWorkspaceProposal?.();
+          } else if (parsed.type === 'error') {
+            const message = typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message || 'Unbekannter Fehler.');
+            throw new Error(message);
+          }
+        }
+      }
+    } catch (err) {
+      setError(err.message || 'Fehler bei der Kommunikation mit LIARA.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Once the assistant's reply has actually started streaming in (the last
+  // message is that growing entry), a separate "LIARA schreibt…" bubble
+  // would just duplicate it - only show it before the first content chunk
+  // arrives (last message is still the user's own).
+  const assistantIsReplying = messages.length > 0 && messages[messages.length - 1].role === 'assistant';
+
   return (
     <aside className="workspace-agent-panel">
       <div className="workspace-agent-header">
         <span>🤖 Agent-Chat</span>
         <button className="workspace-icon-btn" title="Schließen" onClick={onClose}>✕</button>
       </div>
-      <div className="workspace-agent-body">
-        <div className="workspace-empty">
-          <div className="workspace-empty-icon">🤖</div>
-          <p className="workspace-empty-title">Bald verfügbar</p>
-          <p className="workspace-empty-subtitle">
-            Hier entsteht der direkte Chat mit LIARA im Workspace-Kontext -
-            mit Zugriff auf die aktuell geöffnete Datei.
-          </p>
-        </div>
+
+      <div className="workspace-agent-body" ref={scrollRef}>
+        {loadingHistory && <p className="workspace-hint">Lade Verlauf…</p>}
+        {!loadingHistory && messages.length === 0 && (
+          <div className="workspace-empty">
+            <div className="workspace-empty-icon">🤖</div>
+            <p className="workspace-empty-title">Noch keine Nachrichten</p>
+            <p className="workspace-empty-subtitle">
+              Frag LIARA direkt zu dieser Session - Dateien im Kontext werden
+              automatisch berücksichtigt.
+            </p>
+          </div>
+        )}
+        {!loadingHistory && messages.length > 0 && (
+          <div className="workspace-agent-messages">
+            {messages.map((m, i) => (
+              <div key={i} className={`workspace-agent-message ${m.role === 'user' ? 'user' : 'assistant'}`}>
+                {m.role === 'user' ? m.content : <MarkdownMessage content={m.content} sessionId={sessionId} />}
+              </div>
+            ))}
+            {sending && !assistantIsReplying && (
+              <div className="workspace-agent-message assistant workspace-agent-typing">LIARA schreibt…</div>
+            )}
+          </div>
+        )}
       </div>
+
+      {error && <div className="workspace-error workspace-agent-error">{error} <button onClick={() => setError(null)}>✕</button></div>}
+
       <div className="workspace-agent-input-row">
-        <input type="text" placeholder="Nachricht an den Agent…" disabled />
-        <button className="workspace-btn-primary" disabled>Senden</button>
+        <input
+          type="text"
+          placeholder="Nachricht an LIARA…"
+          value={input}
+          disabled={sending || !sessionId}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+        />
+        <button className="workspace-btn-primary" disabled={sending || !input.trim() || !sessionId} onClick={sendMessage}>
+          {sending ? '…' : 'Senden'}
+        </button>
       </div>
     </aside>
   );
 }
+
 
 function WorkspacePage() {
   const [sessions, setSessions] = useState([]);
@@ -1347,7 +1485,13 @@ function WorkspacePage() {
           )}
         </div>
 
-        {agentPanelOpen && <AgentChatPanel onClose={() => setAgentPanelOpen(false)} />}
+        {agentPanelOpen && (
+          <AgentChatPanel
+            sessionId={sessionId}
+            onClose={() => setAgentPanelOpen(false)}
+            onWorkspaceProposal={() => loadProposals(sessionId)}
+          />
+        )}
       </div>
 
       {newFileOpen && (
