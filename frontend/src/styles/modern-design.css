@@ -120,8 +120,21 @@ body {
 }
 
 /* ==================== LAYOUT ==================== */
+/* height (not min-height) is the actual root of the page-growing bug fixed
+   above via .app-main's flex/min-height: with only min-height set here,
+   .app's own box has no explicit size, so its auto/content-based height is
+   computed from its tallest descendant's preferred (max-content) size -
+   every min-height: 0 further down the tree only affects how far a flex
+   item can SHRINK, not this "no one above me sets a real height, so I grow
+   to fit my content" chain. Fixed height makes .app-main's flex: 1 finally
+   distribute a real, bounded amount of space regardless of how tall any
+   one page's content wants to be; overflow stays visible so a page with no
+   internal scroll container of its own still lets the whole document
+   scroll exactly as before - only pages that opt into internally scrolling
+   (Chat, Tasks, Workspace: all height: 100% + their own overflow-y: auto)
+   actually change behavior, and only for the better. */
 .app {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
