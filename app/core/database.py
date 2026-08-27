@@ -81,7 +81,18 @@ def get_db_context():
 
 
 def init_db():
-    """Erstelle alle Tables (für Development)."""
+    """
+    Erstelle alle Tables (nur für lokales Development/Bootstrap, NIE gegen
+    Produktion) - issue #12 item 5.
+
+    Alembic ist die einzige autoritative Schema-Quelle für Produktion
+    (`alembic upgrade head`). create_all() erstellt fehlende Tables anhand
+    der aktuellen Model-Definitionen, versioniert aber nichts und würde ein
+    unvollständiges/abweichendes Schema stillschweigend "reparieren" statt
+    die Abweichung sichtbar zu machen - das genaue Gegenteil von dem, was
+    ein Migrations-Tool leisten soll. Nur aus dem Standalone-Skript
+    `app/init_db.py` aufgerufen, nicht aus main.py's Startup.
+    """
     Base.metadata.create_all(bind=engine)
 
 

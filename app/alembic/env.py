@@ -1,5 +1,7 @@
+import os
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
@@ -8,9 +10,12 @@ from alembic import context
 # Import Base und Models
 from core.database import Base
 from api.models.base_models import (
-    Task, CalendarEvent, Note, Memory, PackingList, Routine, User
+    Task, CalendarEvent, Note, Memory, PackingList, Routine, User, SystemConfig
 )
 from api.models.auth_session import AuthSession
+from api.models.chat_session import ChatSession
+from api.models.chat_message import ChatMessage
+from api.models.mood_state import UserMoodState, MoodHistoryEntry
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -20,6 +25,17 @@ config = context.config
 # This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Runtime and Alembic must resolve the same database (issue #12 item 1) -
+# alembic.ini's own sqlalchemy.url is a separate, unsynchronized hardcoded
+# value that drifted from core.database.py's DATABASE_URL default (different
+# credentials in each). load_dotenv() here mirrors core/database.py exactly,
+# and overriding the ini value at runtime means both consumers always agree
+# on the same live .env, not two independently-maintained fallbacks.
+load_dotenv()
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    context.config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
