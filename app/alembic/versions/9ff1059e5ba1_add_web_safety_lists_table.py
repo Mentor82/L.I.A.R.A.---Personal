@@ -1,7 +1,7 @@
 """add web_safety_lists table
 
 Revision ID: 9ff1059e5ba1
-Revises: 54807c0debe8
+Revises: 11bb445a9470
 Create Date: 2026-08-27 08:00:00.000000
 
 Reconciliation migration (issue #12 item 1): web_safety_lists existed only
@@ -13,6 +13,14 @@ Reuses that file's own SQL nearly verbatim (already written with
 IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT DO NOTHING throughout), so
 this is safe to run both against a fresh database and against the existing
 production database where the table already exists from the manual SQL run.
+
+Branches off 11bb445a9470, not 54807c0debe8 (issue #11's still-deferred
+DROP COLUMN on the hot `users` table) - this and 54807c0debe8 are
+unrelated, and chaining after it would force that deferred, deliberately
+postponed migration to run now just to reach this one. Produces two
+independent heads until 54807c0debe8 is actually applied at its own
+maintenance window (then merge, or apply each branch explicitly by
+revision id rather than the bare "head").
 """
 from typing import Sequence, Union
 
@@ -20,7 +28,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '9ff1059e5ba1'
-down_revision: Union[str, Sequence[str], None] = '54807c0debe8'
+down_revision: Union[str, Sequence[str], None] = '11bb445a9470'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
