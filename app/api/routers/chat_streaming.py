@@ -115,6 +115,52 @@ def _release_session_lock(lock) -> None:
         logger.debug(f"Session generation lock release skipped: {e}")
 
 
+SSE_KEEPALIVE_INTERVAL = 20.0  # seconds
+
+
+async def _with_sse_keepalive(source, interval: float = SSE_KEEPALIVE_INTERVAL):
+    """
+    Interleaves ': keep-alive\\n\\n' SSE comment lines into `source` whenever
+    nothing real has been yielded for `interval` seconds.
+
+    The reverse-proxy chain in front of this app (Cloudflare's free-tier
+    edge has a ~100s idle timeout) drops the connection with a 524 if no
+    bytes arrive for that long - which happened routinely during the agent
+    loop's tool-calling turns: nothing is yielded between the initial
+    'metadata' event and the first real 'content' chunk while the model is
+    deciding on/executing a tool call, easily exceeding 100s. A comment
+    line (anything starting with ':') is part of the SSE spec precisely
+    for this - EventSource and this app's own hand-rolled SSE parsers both
+    silently ignore any line that isn't 'data: ...', so this is invisible
+    to every consumer.
+
+    Keeps the SAME pending __anext__() task across keep-alive ticks rather
+    than re-issuing it - a keep-alive tick must not cancel/restart whatever
+    the source was actually waiting on.
+    """
+    it = source.__aiter__()
+    pending = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if pending in done:
+                task, pending = pending, None
+                try:
+                    yield task.result()
+                except StopAsyncIteration:
+                    break
+            else:
+                yield ": keep-alive\n\n"
+    finally:
+        if pending is not None:
+            pending.cancel()
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
+
 def get_location_context(db: Session, user_id: int) -> Optional[str]:
     """
     Holt User Location aus DB (wenn Consent gegeben)
@@ -1268,7 +1314,7 @@ async def stream_chat(
         # Continue with chat even if message storage fails
     
     return StreamingResponse(
-        stream_ollama_response(
+        _with_sse_keepalive(stream_ollama_response(
             message=request.message,
             model=request.model,
             temperature=request.temperature,
@@ -1289,7 +1335,7 @@ async def stream_chat(
             memory_enabled=user_prefs['memory_enabled'],
             used_tools=used_tools,
             session_lock=session_lock
-        ),
+        )),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1486,7 +1532,7 @@ async def guest_stream_chat(request: GuestStreamRequest):
         )
     
     return StreamingResponse(
-        stream_guest_response(message),
+        _with_sse_keepalive(stream_guest_response(message)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
