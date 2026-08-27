@@ -331,7 +331,7 @@ function EditorPane({
           <div className="workspace-editor-wrapper">
             <CodeMirror
               value={tabData.content}
-              height="360px"
+              height="100%"
               theme={cmTheme}
               extensions={activeLang ? [activeLang.cm, fontSizeExtension] : [fontSizeExtension]}
               onChange={onChangeContent}
