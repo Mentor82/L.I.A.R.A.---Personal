@@ -67,6 +67,14 @@ set +e
 case "$LANGUAGE" in
   python)
     ulimit -v 1048576   # 1 GiB
+    # The script itself lives under .runs/{run_id}/, not $WORKSPACE_DIR, so
+    # Python's default sys.path[0] (the running script's own directory)
+    # never includes sibling workspace files - `from stack import Stack`
+    # fails with ModuleNotFoundError even though stack.py sits right next
+    # to test_stack.py in the Explorer. Adding $WORKSPACE_DIR to PYTHONPATH
+    # lets same-workspace local imports resolve without changing where the
+    # script itself is read from.
+    export PYTHONPATH="$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
     # This session's own venv (see above) if it exists, else the shared
     # runner-venv as a fallback - never the bare system python3 or the LIARA
     # backend's own venv, keeps sandboxed deps isolated from both.
