@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -60,6 +61,11 @@ from services.hailo_rpi5_client import initialize_rpi5_client, shutdown_rpi5_cli
 # Edge TPU Client (edge01)
 from services.edgetpu_client import initialize_edgetpu_client, shutdown_edgetpu_client
 
+# Redis / Neo4j singletons - close paths existed but nothing called them
+# (issue #15 items 1/2) until the lifespan context below.
+from services.redis_service import close_redis_service
+from services.neo4j_service import close_neo4j_service
+
 # Auth (optional)
 from core.auth import verify_credentials
 
@@ -78,36 +84,25 @@ PERSONA_CHANGELOG = {
 ENABLE_AUTH = os.getenv("LIARA_AUTH_ENABLED", "false").lower() == "true"
 dependencies = [Depends(verify_credentials)] if ENABLE_AUTH else []
 
-app = FastAPI(
-    title="🌙 Liara API",
-    description="Your warm, calm and helpful AI assistant",
-    version="1.2.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    dependencies=dependencies  # Auth nur wenn LIARA_AUTH_ENABLED=true
-)
-
-# CORS für Frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://192.168.178.50:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.on_event("startup")
-async def startup_event():
-    """Startup Checks."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Single owner for every long-lived service's init/teardown (issue #15
+    item 4) - previously split across `@app.on_event` hooks that only
+    covered the validator/Hailo/EdgeTPU clients, while Redis/Neo4j had
+    their own close()/close_*_service() helpers that nothing ever called
+    (items 1/2), and the (unused - see core/scheduler.py's removal in this
+    same change, item 3) scheduler had no owner at all. Each step is
+    exception-isolated so one service failing to start/stop doesn't skip
+    the others.
+    """
     print("🌙 Liara API starting...")
-    
-    # Check Database Connection
+
     if check_connection():
         print("✅ PostgreSQL connection successful")
     else:
         print("❌ PostgreSQL connection failed!")
-    
-    # Initialize Hailo RPi5 Client
+
     print("🎬 Initializing Hailo RPi5 Client...")
     try:
         await initialize_rpi5_client()
@@ -115,7 +110,6 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Hailo RPi5 Client initialization failed: {str(e)}")
 
-    # Initialize Edge TPU Client (edge01)
     print("🎬 Initializing Edge TPU Client...")
     try:
         await initialize_edgetpu_client()
@@ -123,7 +117,6 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Edge TPU Client initialization failed: {str(e)}")
 
-    # Initialize Multi-Backend Validator
     print("🔍 Initializing Multi-Backend Validator...")
     try:
         validator = await get_validator()
@@ -134,12 +127,11 @@ async def startup_event():
         print(f"   Active backend: {health['active']}")
     except Exception as e:
         print(f"⚠️  Multi-Backend Validator initialization failed: {str(e)}")
-    
+
     print("✨ Liara API ready")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Shutdown cleanup."""
+    yield
+
     print("🌙 Liara API shutting down...")
     try:
         validator = await get_validator()
@@ -147,22 +139,52 @@ async def shutdown_event():
         print("✅ Multi-Backend Validator shutdown complete")
     except Exception as e:
         print(f"⚠️  Validator shutdown error: {str(e)}")
-    
-    # Shutdown Hailo RPi5 Client
+
     try:
         await shutdown_rpi5_client()
         print("✅ Hailo RPi5 Client shutdown complete")
     except Exception as e:
         print(f"⚠️  Hailo RPi5 Client shutdown error: {str(e)}")
 
-    # Shutdown Edge TPU Client
     try:
         await shutdown_edgetpu_client()
         print("✅ Edge TPU Client shutdown complete")
     except Exception as e:
         print(f"⚠️  Edge TPU Client shutdown error: {str(e)}")
 
+    try:
+        close_redis_service()
+        print("✅ Redis client closed")
+    except Exception as e:
+        print(f"⚠️  Redis shutdown error: {str(e)}")
+
+    try:
+        close_neo4j_service()
+        print("✅ Neo4j driver closed")
+    except Exception as e:
+        print(f"⚠️  Neo4j shutdown error: {str(e)}")
+
     print("👋 Liara API stopped")
+
+
+app = FastAPI(
+    title="🌙 Liara API",
+    description="Your warm, calm and helpful AI assistant",
+    version="1.2.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    dependencies=dependencies,  # Auth nur wenn LIARA_AUTH_ENABLED=true
+    lifespan=lifespan,
+)
+
+# CORS für Frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://192.168.178.50:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(system_router)
 app.include_router(dashboard_router)
