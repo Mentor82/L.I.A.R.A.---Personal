@@ -169,7 +169,8 @@ class BaseAgent:
         task: str,
         user_id: Optional[int] = None,
         session_id: Optional[int] = None,
-        callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
+        callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        is_cancelled: Optional[Callable[[], Awaitable[bool]]] = None
     ) -> Dict[str, Any]:
         """
         Haupt-Ausführungsschleife (ReAct Loop).
@@ -194,6 +195,21 @@ class BaseAgent:
 
         while step < self.max_steps:
             step += 1
+
+            # Cooperative cancellation: the caller (agent_router.py) checks a
+            # cross-worker Redis flag here since a cancel POST can land on a
+            # different gunicorn worker than the one running this loop, so
+            # there's no local asyncio.Task handle to just .cancel().
+            if is_cancelled and await is_cancelled():
+                await emit("cancelled", {"step": step})
+                return {
+                    "success": False,
+                    "error": "Task durch Benutzer abgebrochen",
+                    "steps": step,
+                    "history": history_log,
+                    "cancelled": True
+                }
+
             await emit("step_start", {"step": step})
 
             # LLM anfragen

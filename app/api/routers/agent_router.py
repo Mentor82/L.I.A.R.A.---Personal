@@ -1,6 +1,14 @@
 """
 Specialized Agent Router für L.I.A.R.A.
 Verwaltet asynchrone Agent-Tasks und liefert Live-Events per Server-Sent Events (SSE).
+
+Task state (status/result/current_step) and the event log live in Redis via
+agent_task_store, not in an in-process dict - liara-backend runs multiple
+gunicorn workers, and nginx has no sticky routing for /api/agents/*, so the
+POST /run that starts a task and the later GET .../stream that follows it
+can land on different workers. See agent_task_store.py's docstring for the
+full reasoning (this replaced an in-memory-dict design that 404'd on every
+stream request that didn't luck into the same worker as the POST).
 """
 import asyncio
 import json
@@ -19,14 +27,18 @@ from core.database import get_db
 from api.models.base_models import User
 from services.agents.agent_registry import AgentRegistry
 from services.agents.base_agent import BaseAgent
+from services import agent_task_store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["Specialized Agents"])
 
-# In-Memory Task Registry für aktive und kürzlich beendete Agent-Läufe
-# (Key: task_id -> Task-Status, Event-Queue, Result)
-_ACTIVE_TASKS: Dict[str, Dict[str, Any]] = {}
+# Fire-and-forget asyncio.Task handles from start_agent_task, kept only so
+# they aren't garbage-collected mid-execution (asyncio's own documented
+# pitfall for tasks with no other reference) - NOT used for status lookup or
+# cancellation anymore, since a later request for the same task_id can land
+# on a different worker process than this one entirely.
+_BACKGROUND_TASKS: set = set()
 
 
 class AgentRunRequest(BaseModel):
@@ -66,52 +78,62 @@ async def _run_agent_task_worker(
     user_id: int,
     session_id: Optional[int]
 ):
-    task_entry = _ACTIVE_TASKS.get(task_id)
-    if not task_entry:
-        return
-
-    queue: asyncio.Queue = task_entry["queue"]
-
     async def event_callback(event: Dict[str, Any]):
         timestamp = datetime.now(timezone.utc).isoformat()
         event_payload = {**event, "timestamp": timestamp}
-        task_entry["events"].append(event_payload)
-        
+        await asyncio.to_thread(agent_task_store.append_event, task_id, event_payload)
         if "step" in event.get("data", {}):
-            task_entry["current_step"] = event["data"]["step"]
-        
-        await queue.put(event_payload)
+            await asyncio.to_thread(agent_task_store.update_task, task_id, current_step=event["data"]["step"])
+
+    async def is_cancelled() -> bool:
+        return await asyncio.to_thread(agent_task_store.is_cancel_requested, task_id)
+
+    await asyncio.to_thread(agent_task_store.update_task, task_id, status="running")
 
     try:
-        task_entry["status"] = "running"
         result = await agent.run(
             task=task_prompt,
             user_id=user_id,
             session_id=session_id,
-            callback=event_callback
+            callback=event_callback,
+            is_cancelled=is_cancelled
         )
 
-        task_entry["finished_at"] = datetime.now(timezone.utc).isoformat()
-        if result.get("success"):
-            task_entry["status"] = "done"
-            task_entry["result"] = result.get("answer")
+        finished_at = datetime.now(timezone.utc).isoformat()
+        if result.get("cancelled"):
+            await asyncio.to_thread(
+                agent_task_store.update_task, task_id,
+                status="cancelled", finished_at=finished_at, error=result.get("error")
+            )
+        elif result.get("success"):
+            await asyncio.to_thread(
+                agent_task_store.update_task, task_id,
+                status="done", finished_at=finished_at, result=result.get("answer")
+            )
         else:
-            task_entry["status"] = "error"
-            task_entry["error"] = result.get("error")
+            await asyncio.to_thread(
+                agent_task_store.update_task, task_id,
+                status="error", finished_at=finished_at, error=result.get("error")
+            )
 
     except asyncio.CancelledError:
-        task_entry["status"] = "cancelled"
-        task_entry["finished_at"] = datetime.now(timezone.utc).isoformat()
-        await queue.put({"event": "cancelled", "data": {"message": "Task durch Benutzer abgebrochen"}})
+        # Only reachable if something cancels our own asyncio.Task directly
+        # (e.g. a worker shutting down) - the normal user-facing cancel path
+        # is the cooperative is_cancelled() flag checked inside agent.run().
+        finished_at = datetime.now(timezone.utc).isoformat()
+        await asyncio.to_thread(agent_task_store.update_task, task_id, status="cancelled", finished_at=finished_at)
+        await asyncio.to_thread(
+            agent_task_store.append_event, task_id,
+            {"event": "cancelled", "data": {"message": "Task durch Benutzer abgebrochen"}, "timestamp": finished_at}
+        )
     except Exception as e:
         logger.exception(f"Unerwarteter Fehler im Agenten-Task {task_id}")
-        task_entry["status"] = "error"
-        task_entry["error"] = str(e)
-        task_entry["finished_at"] = datetime.now(timezone.utc).isoformat()
-        await queue.put({"event": "error", "data": {"error": str(e)}})
-    finally:
-        # Signalisiere Stream-Ende
-        await queue.put(None)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        await asyncio.to_thread(agent_task_store.update_task, task_id, status="error", finished_at=finished_at, error=str(e))
+        await asyncio.to_thread(
+            agent_task_store.append_event, task_id,
+            {"event": "error", "data": {"error": str(e)}, "timestamp": finished_at}
+        )
 
 
 @router.post("/run")
@@ -139,37 +161,23 @@ async def start_agent_task(
         raise HTTPException(status_code=400, detail=str(e))
 
     task_id = uuid.uuid4().hex
-    queue: asyncio.Queue = asyncio.Queue()
+    task_entry = agent_task_store.create_task(task_id, req.agent_id, req.task, user.id, req.session_id)
 
-    _ACTIVE_TASKS[task_id] = {
-        "task_id": task_id,
-        "agent_id": req.agent_id,
-        "status": "pending",
-        "task": req.task,
-        "current_step": 0,
-        "user_id": user.id,
-        "session_id": req.session_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "finished_at": None,
-        "result": None,
-        "error": None,
-        "events": [],
-        "queue": queue,
-        "async_task": None
-    }
-
-    # Starte Background-Task
+    # Fire-and-forget: execution stays in whichever worker handled this
+    # request (same as before), only the STATE is now cross-worker-visible
+    # via Redis. _BACKGROUND_TASKS just prevents GC of the running task.
     async_task = asyncio.create_task(
         _run_agent_task_worker(task_id, agent, req.task, user.id, req.session_id)
     )
-    _ACTIVE_TASKS[task_id]["async_task"] = async_task
+    _BACKGROUND_TASKS.add(async_task)
+    async_task.add_done_callback(_BACKGROUND_TASKS.discard)
 
     return {
         "success": True,
         "task_id": task_id,
         "agent_id": req.agent_id,
         "status": "running",
-        "created_at": _ACTIVE_TASKS[task_id]["created_at"]
+        "created_at": task_entry["created_at"]
     }
 
 
@@ -179,7 +187,7 @@ def get_task_status(
     user: User = Depends(require_active_user)
 ):
     """Liefert den aktuellen Status und Verlauf eines Agenten-Tasks."""
-    task_entry = _ACTIVE_TASKS.get(task_id)
+    task_entry = agent_task_store.get_task(task_id)
     if not task_entry:
         raise HTTPException(status_code=404, detail="Task nicht gefunden.")
 
@@ -187,18 +195,8 @@ def get_task_status(
     if task_entry["user_id"] != user.id and getattr(user, "role", "") != "admin":
         raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Task.")
 
-    return {
-        "task_id": task_entry["task_id"],
-        "agent_id": task_entry["agent_id"],
-        "status": task_entry["status"],
-        "task": task_entry["task"],
-        "current_step": task_entry["current_step"],
-        "created_at": task_entry["created_at"],
-        "finished_at": task_entry["finished_at"],
-        "result": task_entry["result"],
-        "error": task_entry["error"],
-        "events": task_entry["events"]
-    }
+    events = [event for _entry_id, event in agent_task_store.read_events_from_start(task_id)]
+    return {**task_entry, "events": events}
 
 
 @router.get("/tasks/{task_id}/stream")
@@ -208,36 +206,43 @@ async def stream_task_events(
 ):
     """
     Streamt Live-Events eines laufenden Agent-Tasks über Server-Sent Events (SSE).
+
+    Reads from the Redis stream in agent_task_store (see its docstring) so
+    this works regardless of which gunicorn worker started the task -
+    replays whatever already happened via XRANGE, then tails new entries via
+    blocking XREAD, re-checking the task's Redis status after each attempt to
+    know when to stop (there's no in-process queue sentinel anymore).
     """
-    task_entry = _ACTIVE_TASKS.get(task_id)
+    task_entry = agent_task_store.get_task(task_id)
     if not task_entry:
         raise HTTPException(status_code=404, detail="Task nicht gefunden.")
 
     if task_entry["user_id"] != user.id and getattr(user, "role", "") != "admin":
         raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Task.")
 
-    queue: asyncio.Queue = task_entry["queue"]
-
     async def event_generator():
-        # Sende zuerst bestehende historische Events, falls der Client später joint
-        for past_event in task_entry["events"]:
-            yield f"data: {json.dumps(past_event, ensure_ascii=False)}\n\n"
+        last_id = "0"
+        past_events = await asyncio.to_thread(agent_task_store.read_events_from_start, task_id)
+        for entry_id, event in past_events:
+            last_id = entry_id
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-        # Falls Task schon beendet ist, sofort schließen
-        if task_entry["status"] in ("done", "error", "cancelled"):
+        current = await asyncio.to_thread(agent_task_store.get_task, task_id)
+        if current is None or current["status"] in ("done", "error", "cancelled"):
             return
 
-        # Neue Events aus der Queue streamen
         while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                if event is None:
-                    # Ende des Streams
-                    break
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except asyncio.TimeoutError:
-                # Keep-alive Ping
+            new_events = await asyncio.to_thread(agent_task_store.read_new_events, task_id, last_id, 30000)
+            if new_events:
+                for entry_id, event in new_events:
+                    last_id = entry_id
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            else:
                 yield ": keep-alive\n\n"
+
+            current = await asyncio.to_thread(agent_task_store.get_task, task_id)
+            if current is None or current["status"] in ("done", "error", "cancelled"):
+                break
 
     return StreamingResponse(
         event_generator(),
@@ -255,18 +260,20 @@ def cancel_task(
     task_id: str,
     user: User = Depends(require_active_user)
 ):
-    """Bricht einen laufenden Agent-Task ab."""
-    task_entry = _ACTIVE_TASKS.get(task_id)
+    """
+    Fordert den Abbruch eines laufenden Agent-Tasks an (kooperativ - siehe
+    BaseAgent.run()s is_cancelled-Check - da die eigentliche Task-Loop auf
+    jedem beliebigen Worker laufen kann, nicht notwendigerweise diesem hier).
+    """
+    task_entry = agent_task_store.get_task(task_id)
     if not task_entry:
         raise HTTPException(status_code=404, detail="Task nicht gefunden.")
 
     if task_entry["user_id"] != user.id and getattr(user, "role", "") != "admin":
         raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Task.")
 
-    async_task: Optional[asyncio.Task] = task_entry.get("async_task")
-    if async_task and not async_task.done():
-        async_task.cancel()
-        task_entry["status"] = "cancelled"
-        return {"success": True, "message": "Task abgebrochen."}
+    if task_entry["status"] not in ("pending", "running"):
+        return {"success": False, "message": "Task läuft nicht mehr."}
 
-    return {"success": False, "message": "Task läuft nicht mehr."}
+    agent_task_store.request_cancel(task_id)
+    return {"success": True, "message": "Abbruch angefordert."}
