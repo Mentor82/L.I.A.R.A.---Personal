@@ -785,11 +785,24 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                     # Anything the extractor itself still had buffered (plain
                                     # trailing content, or an incomplete <tasks>/<factcheck> block
                                     # - the latter discarded per each extractor's flush() contract).
+                                    #
+                                    # task_extractor's own held-back "safe tail" bytes (its
+                                    # defense against a <tasks> tag split across chunks) can
+                                    # themselves be the START of a <factcheck> tag - e.g. "<fact"
+                                    # held back by task_extractor while "check>...</factcheck>"
+                                    # already went out the door separately. Observed live: without
+                                    # routing final_task_content through factcheck_extractor too,
+                                    # that fragment ("check>") leaked as literal visible text
+                                    # instead of ever being recognized as the tag it was part of.
                                     final_task_content = task_extractor.flush()
                                     if final_task_content:
-                                        turn_content += final_task_content
-                                        full_response_text += final_task_content
-                                        yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
+                                        final_task_content, final_task_factcheck_blocks = factcheck_extractor.feed(final_task_content)
+                                        for raw_block in final_task_factcheck_blocks:
+                                            yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                                        if final_task_content:
+                                            turn_content += final_task_content
+                                            full_response_text += final_task_content
+                                            yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
                                     final_factcheck_content = factcheck_extractor.flush()
                                     if final_factcheck_content:
                                         turn_content += final_factcheck_content
