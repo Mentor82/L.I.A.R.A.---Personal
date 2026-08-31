@@ -44,6 +44,7 @@ def persist_chat_turn(
     assistant_content: str,
     model: Optional[str] = None,
     mood: Optional[str] = None,
+    thinking: Optional[str] = None,
 ) -> bool:
     """
     Persists one user+assistant message pair for an existing chat session.
@@ -54,6 +55,13 @@ def persist_chat_turn(
     belong to user_id, matching the existing "persistence is best-effort,
     never blocks the actual reply" behavior all three callers already had
     when they saved messages client-side.
+
+    `thinking`: the accumulated raw reasoning-model output for this turn
+    (see chat_streaming.py's full_thinking_text) - stored in its own column,
+    never merged into `content`. Deliberately raw, not summarized: the user
+    already saw this exact text live during streaming, so persisting it
+    unchanged exposes nothing new, just keeps a reload consistent with what
+    was already shown (see the "thinking persistence" discussion).
     """
     if not _check_session_owned(db, session_id, user_id):
         return False
@@ -67,10 +75,10 @@ def persist_chat_turn(
     )
     db.execute(
         text("""
-            INSERT INTO chat_messages (session_id, role, content, model, mood, timestamp)
-            VALUES (:session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+            INSERT INTO chat_messages (session_id, role, content, model, mood, thinking, timestamp)
+            VALUES (:session_id, 'assistant', :content, :model, :mood, :thinking, CURRENT_TIMESTAMP)
         """),
-        {"session_id": session_id, "content": assistant_content, "model": model, "mood": mood},
+        {"session_id": session_id, "content": assistant_content, "model": model, "mood": mood, "thinking": thinking},
     )
     db.execute(
         text("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id"),
@@ -87,6 +95,7 @@ def persist_assistant_message(
     assistant_content: str,
     model: Optional[str] = None,
     mood: Optional[str] = None,
+    thinking: Optional[str] = None,
 ) -> bool:
     """
     Persists a single assistant message for a session whose user turn was
@@ -95,16 +104,19 @@ def persist_assistant_message(
     SSE generator runs, so a successful pre-LLM action shortcut only needs
     to add the assistant confirmation, not a full persist_chat_turn() pair
     (which would duplicate the user row).
+
+    `thinking`: see persist_chat_turn()'s docstring - same raw, own-column
+    persistence, no summarization.
     """
     if not _check_session_owned(db, session_id, user_id):
         return False
 
     db.execute(
         text("""
-            INSERT INTO chat_messages (session_id, role, content, model, mood, timestamp)
-            VALUES (:session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+            INSERT INTO chat_messages (session_id, role, content, model, mood, thinking, timestamp)
+            VALUES (:session_id, 'assistant', :content, :model, :mood, :thinking, CURRENT_TIMESTAMP)
         """),
-        {"session_id": session_id, "content": assistant_content, "model": model, "mood": mood},
+        {"session_id": session_id, "content": assistant_content, "model": model, "mood": mood, "thinking": thinking},
     )
     db.execute(
         text("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id"),

@@ -40,8 +40,9 @@ class ChatMessage(BaseModel):
     content: str
     model: Optional[str]
     mood: Optional[str]
+    thinking: Optional[str] = None
     timestamp: datetime
-    
+
     class Config:
         from_attributes = True
 
@@ -173,12 +174,12 @@ async def get_session_messages(
         raise HTTPException(status_code=404, detail="Session not found")
     
     result = db.execute(text("""
-        SELECT id, role, content, model, mood, timestamp
+        SELECT id, role, content, model, mood, thinking, timestamp
         FROM chat_messages
         WHERE session_id = :session_id
         ORDER BY timestamp ASC, id ASC
     """), {'session_id': session_id})
-    
+
     messages = []
     for row in result:
         messages.append({
@@ -187,6 +188,7 @@ async def get_session_messages(
             'content': row.content,
             'model': row.model,
             'mood': row.mood,
+            'thinking': row.thinking,
             'timestamp': row.timestamp
         })
     

@@ -583,6 +583,11 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
     # before it so both are always in scope for the finally block below,
     # regardless of where inside the try a disconnect/exception happens.
     full_response_text = ""
+    # Accumulated raw reasoning-model "thinking" text for this turn (see the
+    # feed sites below) - was only ever streamed live via SSE 'thinking'
+    # events, never kept anywhere, so a page reload had nothing to restore
+    # even though the user already saw it during generation.
+    full_thinking_text = ""
     persisted_attempted = False
 
     def persist_assistant_turn(interrupted: bool = False) -> bool:
@@ -591,9 +596,9 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         try:
             insert_result = db_final.execute(text("""
                 INSERT INTO chat_messages
-                    (user_id, session_id, role, content, model, mood, timestamp)
+                    (user_id, session_id, role, content, model, mood, thinking, timestamp)
                 VALUES
-                    (:user_id, :session_id, 'assistant', :content, :model, :mood, CURRENT_TIMESTAMP)
+                    (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, CURRENT_TIMESTAMP)
                 RETURNING id
             """), {
                 'user_id': user_id,
@@ -603,7 +608,11 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # "completed vs interrupted must be distinguishable") without
                 # a schema migration - greppable via the existing model column.
                 'model': f"{model} (interrupted)" if interrupted else model,
-                'mood': mood_snapshot["mood"]
+                'mood': mood_snapshot["mood"],
+                # Raw, not summarized (see full_thinking_text's own comment
+                # above) - None rather than "" when there was none, so an
+                # ordinary non-reasoning-model turn stores a real NULL.
+                'thinking': full_thinking_text or None
             })
             db_final.commit()
             assistant_message_id = insert_result.scalar()
@@ -817,6 +826,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # silently skip both.
                 async for event_kind, event_payload in get_linep_provider().generate_stream(prompt_text, model, num_predict):
                     if event_kind == "thinking":
+                        full_thinking_text += event_payload
                         yield f"data: {json.dumps({'type': 'thinking', 'text': event_payload})}\n\n"
                         continue
 
@@ -836,6 +846,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     content = event_payload
                     thinking_part, content_part = thinking_splitter.feed(content)
                     if thinking_part:
+                        full_thinking_text += thinking_part
                         yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
 
                     if content_part:
@@ -876,6 +887,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # into the other), extended with toolcall_extractor.
                 leftover_thinking, leftover_content = thinking_splitter.flush()
                 if leftover_thinking:
+                    full_thinking_text += leftover_thinking
                     yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
                 if leftover_content:
                     leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
@@ -1021,6 +1033,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                         # the tags in content instead.
                                         native_thinking = chunk["message"].get("thinking", "")
                                         if native_thinking:
+                                            full_thinking_text += native_thinking
                                             yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
 
                                         content = chunk["message"].get("content", "")
@@ -1028,6 +1041,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                             thinking_part, content_part = thinking_splitter.feed(content)
 
                                             if thinking_part:
+                                                full_thinking_text += thinking_part
                                                 yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
 
                                             if content_part:
@@ -1081,6 +1095,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                         # (e.g. a <think> block that never closed).
                                         leftover_thinking, leftover_content = thinking_splitter.flush()
                                         if leftover_thinking:
+                                            full_thinking_text += leftover_thinking
                                             yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
                                         if leftover_content:
                                             leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
