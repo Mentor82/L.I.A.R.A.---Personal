@@ -42,7 +42,8 @@ from services.session_workspace import build_workspace_manifest, get_context_sel
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
 from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck_items
-from services.ollama_capabilities import model_supports_tools
+from services.ollama_capabilities import model_supports_tools, get_model_num_predict
+from services.config_service import get_config_service
 from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
 from services.tool_parser import ToolCall, get_tool_parser
@@ -715,6 +716,20 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         agent_tool_used = False
         agent_steps: List[Dict] = []
 
+        # Response-length budget for this turn's Ollama/LiNeP calls - was a
+        # flat hardcoded 2000 regardless of model, which also meant the
+        # admin "Max Tokens" setting (SystemConfig.jsx/config_service.py)
+        # was dead: ConfigService.get_max_tokens() existed but was never
+        # actually called anywhere. Computed once per request (not per
+        # iteration - the model doesn't change mid-turn).
+        from core.database import SessionLocal
+        db_config = SessionLocal()
+        try:
+            configured_max_tokens = get_config_service(db_config).get_max_tokens()
+        finally:
+            db_config.close()
+        num_predict = await get_model_num_predict(model, configured_max_tokens)
+
         # Experimental LiNeP transport switch (see the LiNeP-switch plan) -
         # determined once per request, not per iteration, so a mid-turn
         # tool-calling round-trip doesn't jump transports. Health-gated: a
@@ -769,7 +784,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 "stream": True,
                 "options": {
                     "temperature": temperature,
-                    "num_predict": 2000
+                    "num_predict": num_predict
                 }
             }
             if iteration_tools:
@@ -800,7 +815,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # emits a proper SSE error event AND releases the session
                 # lock in its finally - a local catch-and-return here would
                 # silently skip both.
-                async for event_kind, event_payload in get_linep_provider().generate_stream(prompt_text, model, 2000):
+                async for event_kind, event_payload in get_linep_provider().generate_stream(prompt_text, model, num_predict):
                     if event_kind == "thinking":
                         yield f"data: {json.dumps({'type': 'thinking', 'text': event_payload})}\n\n"
                         continue
