@@ -47,9 +47,8 @@ from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
 from services.tool_parser import ToolCall, get_tool_parser
 from services.toolcall_splitter import ToolCallBlockExtractor
-from services.linep_provider import get_linep_provider, LinepUnavailableError
+from services.linep_provider import get_linep_provider, linep_enabled, LinepUnavailableError
 from api.routers.chat import _get_tool_aware_system_prompt, _format_tool_result_for_llm
-from core.config import settings
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -693,9 +692,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # determined once per request, not per iteration, so a mid-turn
         # tool-calling round-trip doesn't jump transports. Health-gated: a
         # LiNeP outage falls back to the proven Ollama-HTTP path instead of
-        # breaking chat outright - this flag is off by default in Settings.
+        # breaking chat outright - this flag (LINEP_ENABLED env var) is off
+        # by default.
         transport = "ollama"
-        if settings.linep_enabled:
+        if linep_enabled():
             if await get_linep_provider().health():
                 transport = "linep"
             else:

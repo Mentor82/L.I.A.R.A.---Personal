@@ -21,11 +21,10 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import os
 import socket
 from functools import lru_cache
 from typing import AsyncIterator, Optional
-
-from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +145,19 @@ class LinepChatProvider:
             yield item
 
 
+def linep_enabled() -> bool:
+    """Read directly from the environment (same convention as the rest of
+    the codebase - app/core/config.py's Settings class is not otherwise
+    wired into the chat hot path, and its own undeclared-.env-key
+    validation once broke the whole app the moment anything did import it -
+    deliberately not depending on it here)."""
+    return os.environ.get("LINEP_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
 @lru_cache
 def get_linep_provider() -> LinepChatProvider:
     return LinepChatProvider(
-        host=settings.linep_host,
-        port=settings.linep_port,
-        timeout=settings.linep_timeout_seconds,
+        host=os.environ.get("LINEP_HOST", "127.0.0.1"),
+        port=int(os.environ.get("LINEP_PORT", "11435")),
+        timeout=float(os.environ.get("LINEP_TIMEOUT_SECONDS", "180.0")),
     )
