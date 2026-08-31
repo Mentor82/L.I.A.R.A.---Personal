@@ -1360,7 +1360,7 @@ function WorkspacePage() {
         </div>
       )}
 
-      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''}`}>
+      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''} ${agentDrawerOpen ? 'agent-drawer-open' : ''}`}>
         {!sidebarCollapsed && (
         <aside
           className={`workspace-sidebar ${dragOverTarget === 'root' ? 'workspace-drag-over' : ''}`}
