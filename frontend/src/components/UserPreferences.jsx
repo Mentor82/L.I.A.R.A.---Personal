@@ -126,11 +126,37 @@ function UserPreferences() {
     }
   }
 
-  const togglePreference = (key) => {
-    setPreferences(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }))
+  const togglePreference = async (key) => {
+    const newValue = !preferences[key]
+    setPreferences(prev => ({ ...prev, [key]: newValue }))
+
+    // Auto-saves immediately, unlike the free-text/select fields further
+    // down (custom_instructions, model, personality, ...) which still go
+    // through the explicit "Speichern" button - a switch reads as an
+    // instant on/off action, and requiring a separate save click after it
+    // was silently discarding the change whenever a user (reasonably)
+    // assumed the click itself was the save (confirmed live: workspace
+    // agent consent looked "on" right after toggling, then reverted to off
+    // since Speichern was never clicked).
+    try {
+      const token = localStorage.getItem('liara_token')
+      const response = await fetch('/api/user/preferences', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ [key]: newValue })
+      })
+
+      if (!response.ok) {
+        setPreferences(prev => ({ ...prev, [key]: !newValue }))
+        setMessage({ type: 'error', text: 'Fehler beim Speichern' })
+      }
+    } catch (error) {
+      setPreferences(prev => ({ ...prev, [key]: !newValue }))
+      setMessage({ type: 'error', text: 'Netzwerkfehler' })
+    }
   }
 
   const confirmDeleteMemories = async () => {
