@@ -11,6 +11,7 @@ import CodeRunResult from './CodeRunResult';
 import DiffView from './DiffView';
 import MarkdownMessage from './MarkdownMessage';
 import AgentDrawer from './AgentDrawer';
+import WorkspaceTerminal from './WorkspaceTerminal';
 import './WorkspacePage.css';
 
 const PROPOSAL_ACTION_LABELS = {
@@ -661,6 +662,32 @@ function WorkspacePage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
+  // Sandboxed interactive shell (WorkspaceTerminal) - shares the single
+  // right-hand panel slot with Agent-Chat/Agent Hub rather than adding a
+  // 4th grid column, so opening any one of the three closes the other two.
+  const [shellOpen, setShellOpen] = useState(false);
+
+  const toggleAgentPanel = () => {
+    setAgentPanelOpen((v) => {
+      const next = !v;
+      if (next) { setAgentDrawerOpen(false); setShellOpen(false); }
+      return next;
+    });
+  };
+  const toggleAgentDrawer = () => {
+    setAgentDrawerOpen((v) => {
+      const next = !v;
+      if (next) { setAgentPanelOpen(false); setShellOpen(false); }
+      return next;
+    });
+  };
+  const toggleShell = () => {
+    setShellOpen((v) => {
+      const next = !v;
+      if (next) { setAgentPanelOpen(false); setAgentDrawerOpen(false); }
+      return next;
+    });
+  };
 
   useEffect(() => {
     (async () => {
@@ -1238,9 +1265,16 @@ function WorkspacePage() {
           <button
             className={`workspace-icon-btn ${agentPanelOpen ? 'active' : ''}`}
             title={agentPanelOpen ? 'Agent-Chat ausblenden' : 'Agent-Chat einblenden'}
-            onClick={() => setAgentPanelOpen((v) => !v)}
+            onClick={toggleAgentPanel}
           >
             🤖
+          </button>
+          <button
+            className={`workspace-icon-btn ${shellOpen ? 'active' : ''}`}
+            title={shellOpen ? 'Terminal ausblenden' : 'Terminal einblenden'}
+            onClick={toggleShell}
+          >
+            💻
           </button>
           <div className="workspace-env-status">
             <button
@@ -1321,7 +1355,7 @@ function WorkspacePage() {
           <button
             className={`workspace-agent-hub-btn ${agentDrawerOpen ? 'active' : ''}`}
             title="Autonomous Agents & ACI Engine öffnen"
-            onClick={() => setAgentDrawerOpen((v) => !v)}
+            onClick={toggleAgentDrawer}
           >
             🤖 Agent Hub
           </button>
@@ -1382,7 +1416,7 @@ function WorkspacePage() {
         </div>
       )}
 
-      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''} ${agentDrawerOpen ? 'agent-drawer-open' : ''}`}>
+      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${(agentPanelOpen || shellOpen) ? 'agent-open' : ''} ${agentDrawerOpen ? 'agent-drawer-open' : ''}`}>
         {!sidebarCollapsed && (
         <aside
           className={`workspace-sidebar ${dragOverTarget === 'root' ? 'workspace-drag-over' : ''}`}
@@ -1561,6 +1595,10 @@ function WorkspacePage() {
             }}
             onOpenFile={openFile}
           />
+        )}
+
+        {shellOpen && sessionId && (
+          <WorkspaceTerminal sessionId={sessionId} onClose={() => setShellOpen(false)} />
         )}
       </div>
 

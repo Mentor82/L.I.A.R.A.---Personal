@@ -40,7 +40,7 @@ from services.session_workspace import (
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_SECONDS = 20
+TIMEOUT_SECONDS = 90
 OUTPUT_CAP = 20000  # bytes kept per stdout/stderr (tail)
 MAX_INLINE_IMAGE = 5 * 1024 * 1024  # 5 MiB
 
@@ -49,8 +49,11 @@ RUNNER_SCRIPT = str(Path(__file__).resolve().parent.parent / "scripts" / "run_sa
 REQUIRE_NETWORK_ISOLATION = os.getenv("CODE_EXEC_REQUIRE_NETWORK_ISOLATION", "true").lower() != "false"
 
 # CPU seconds / max child processes applied via preexec_fn, before sudo/exec -
-# an outer layer in addition to run_sandboxed.sh's own `ulimit` calls.
-CPU_LIMIT_SECONDS = 15
+# an outer layer in addition to run_sandboxed.sh's own `ulimit` calls. Raised
+# from 15s (confirmed live: a CAD-agent script using raw OCP/OpenCascade
+# bindings got SIGKILLed by this - compiled C++ geometry-kernel bindings have
+# real cold-start import/link overhead well beyond a typical script).
+CPU_LIMIT_SECONDS = 90
 NPROC_LIMIT = 32
 # Per-language virtual memory limits (bytes): Julia reserves large virtual
 # address space without using it proportionally, so a Python-sized limit

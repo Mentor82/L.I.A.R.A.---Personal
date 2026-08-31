@@ -48,7 +48,7 @@ ensure_session_venv "$SESSION_VENV" || true
 # processes (blocks fork-bombs), and per-language virtual memory: Julia
 # reserves large virtual address space without using it proportionally, so it
 # gets a much higher ulimit -v than Python.
-ulimit -t 15
+ulimit -t 90
 ulimit -u 32
 # Per-file size cap, mirrors code_sandbox.py's RLIMIT_FSIZE preexec_fn layer
 # and MAX_SESSION_FILE (100 MiB) - unit here is 512-byte blocks, not bytes:
