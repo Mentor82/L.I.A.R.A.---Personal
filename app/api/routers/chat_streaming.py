@@ -66,6 +66,20 @@ HISTORY_TURNS_LIMIT = 20
 # out from under it mid-generation.
 SESSION_GENERATION_LOCK_TTL = 1200  # seconds
 
+# Deliberately much shorter than SESSION_GENERATION_LOCK_TTL above: this is
+# how long a NEW request waits trying to acquire an already-held lock, not
+# how long a held lock lives. This wait happens before StreamingResponse
+# even exists, so the SSE keep-alive wrapper can't send anything during it -
+# every second here is a second of dead air Cloudflare's ~100s edge timeout
+# is counting down against. Blocking anywhere near the old value (which
+# reused SESSION_GENERATION_LOCK_TTL for both) guaranteed a 524 the moment a
+# previous turn's lock was still held for any reason (crash, a genuinely
+# slow generation, or a cleanup bug like the one this file's keep-alive
+# wrapper had). Proceeding lock-less after this timeout just reopens the
+# pre-fix race (see _acquire_session_lock's docstring) instead of blocking
+# past the point where the connection is doomed anyway.
+SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 15  # seconds
+
 
 def _acquire_session_lock(session_id: int):
     """
@@ -82,8 +96,10 @@ def _acquire_session_lock(session_id: int):
     happen to land on the same worker, not the two that actually race.
 
     Blocks (via the caller's asyncio.to_thread) for up to
-    SESSION_GENERATION_LOCK_TTL waiting for a concurrent turn on the same
-    session to finish, matching "serialize" rather than "reject" semantics.
+    SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT waiting for a concurrent turn on
+    the same session to finish, matching "serialize" rather than "reject"
+    semantics - but only briefly, since this wait happens before any bytes
+    can be sent to the client (see that constant's own comment).
 
     Returns None (never raises) if Redis is unavailable or the wait times
     out - matching this file's existing "storage/memory side-effects are
@@ -95,7 +111,7 @@ def _acquire_session_lock(session_id: int):
         lock = get_redis_service().client.lock(
             f"chat_stream_lock:{session_id}",
             timeout=SESSION_GENERATION_LOCK_TTL,
-            blocking_timeout=SESSION_GENERATION_LOCK_TTL,
+            blocking_timeout=SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
         )
         return lock if lock.acquire(blocking=True) else None
     except Exception as e:
@@ -115,7 +131,7 @@ def _release_session_lock(lock) -> None:
         logger.debug(f"Session generation lock release skipped: {e}")
 
 
-SSE_KEEPALIVE_INTERVAL = 20.0  # seconds
+SSE_KEEPALIVE_INTERVAL = 10.0  # seconds - extra margin under Cloudflare's ~100s edge timeout
 
 
 async def _with_sse_keepalive(source, interval: float = SSE_KEEPALIVE_INTERVAL):
