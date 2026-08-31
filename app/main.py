@@ -40,6 +40,7 @@ from api.routers.dashboard_activities import router as dashboard_activities_rout
 from api.routers.hailo_router import router as hailo_router
 from api.routers.validation_router import router as validation_router
 from api.routers.mcp_validation_router import router as mcp_validation_router
+from api.routers.agent_router import router as agent_router
 # REMOVED: from api.chat_session import router as chat_session_router (legacy - use api.routers.chat_sessions)
 # REMOVED: from api.chat_message import router as chat_message_router (legacy - use api.routers.chat_sessions)
 from datetime import datetime
@@ -224,6 +225,7 @@ app.include_router(ollama_router)
 app.include_router(hailo_router)  # Hailo-8L NPU inference and metrics
 app.include_router(validation_router)  # AI Validation - Remote code validation (AI-Validator)
 app.include_router(mcp_validation_router)  # MCP Validation - Semantic code analysis via Ollama MCP
+app.include_router(agent_router)  # Specialized Agents - Multi-Agent Engine & ACI Task Runner
 # REMOVED: Legacy chat_session_router and chat_message_router (use chat_sessions_router instead)
 
 @app.get("/")

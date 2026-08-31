@@ -1302,3 +1302,103 @@
     flex-direction: column;
   }
 }
+
+/* Agent Hub Toggle Button */
+.workspace-agent-hub-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  background: var(--bg-card);
+  border: 1px solid rgba(121, 40, 202, 0.4);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.workspace-agent-hub-btn:hover {
+  background: var(--bg-active);
+  border-color: #9f7aea;
+  box-shadow: 0 0 12px rgba(159, 122, 234, 0.3);
+  transform: translateY(-1px);
+}
+
+.workspace-agent-hub-btn.active {
+  background: var(--accent-gradient, linear-gradient(135deg, #7928ca 0%, #ff0080 100%));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 2px 10px rgba(121, 40, 202, 0.4);
+}
+
+/* IDE Status Bar */
+.workspace-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 1rem;
+  background: var(--bg-input);
+  border-top: 1px solid var(--color-border);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.status-bar-left,
+.status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.status-item.session-tag {
+  color: #a0aec0;
+  font-weight: 500;
+}
+
+.status-item.file-tag {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.status-item.proposals-tag {
+  color: #f6ad55;
+  font-weight: 600;
+}
+
+.status-item.env-tag {
+  color: #68d391;
+  font-family: monospace;
+}
+
+.status-item.agent-tag {
+  background: transparent;
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 4px;
+  color: #00e5ff;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.status-item.agent-tag:hover {
+  background: rgba(0, 229, 255, 0.1);
+}
+
+.status-item.agent-tag.active {
+  background: rgba(0, 229, 255, 0.2);
+  border-color: #00e5ff;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+}
+

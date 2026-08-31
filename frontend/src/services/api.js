@@ -757,3 +757,42 @@ export const systemAPI = {
     return apiFetch('/health/full');
   },
 };
+
+/**
+ * Specialized Multi-Agent API
+ */
+export const agentAPI = {
+  /**
+   * Verfügbare Agenten-Profile abrufen
+   */
+  async getTypes() {
+    return apiFetch('/agents/types');
+  },
+
+  /**
+   * Neuen asynchronen Agenten-Task starten
+   */
+  async runTask({ agent_id = 'code', task, session_id, model, max_steps = 12 }) {
+    return apiFetch('/agents/run', {
+      method: 'POST',
+      body: JSON.stringify({ agent_id, task, session_id, model, max_steps }),
+    });
+  },
+
+  /**
+   * Status und Historie eines Tasks abrufen
+   */
+  async getTaskStatus(taskId) {
+    return apiFetch(`/agents/tasks/${taskId}`);
+  },
+
+  /**
+   * Laufenden Task abbrechen
+   */
+  async cancelTask(taskId) {
+    return apiFetch(`/agents/tasks/${taskId}/cancel`, {
+      method: 'POST',
+    });
+  },
+};
+

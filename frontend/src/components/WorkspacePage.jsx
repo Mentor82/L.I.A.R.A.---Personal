@@ -9,6 +9,7 @@ import { getSessionMessages } from '../services/chatService';
 import CodeRunResult from './CodeRunResult';
 import DiffView from './DiffView';
 import MarkdownMessage from './MarkdownMessage';
+import AgentDrawer from './AgentDrawer';
 import './WorkspacePage.css';
 
 const PROPOSAL_ACTION_LABELS = {
@@ -651,6 +652,7 @@ function WorkspacePage() {
   // (tabs, files, search) lives here in WorkspacePage regardless.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1294,6 +1296,13 @@ function WorkspacePage() {
               <option key={s.id} value={s.id}>{s.title}</option>
             ))}
           </select>
+          <button
+            className={`workspace-agent-hub-btn ${agentDrawerOpen ? 'active' : ''}`}
+            title="Autonomous Agents & ACI Engine öffnen"
+            onClick={() => setAgentDrawerOpen((v) => !v)}
+          >
+            🤖 Agent Hub
+          </button>
         </div>
       </div>
 
@@ -1519,7 +1528,47 @@ function WorkspacePage() {
             onWorkspaceProposal={() => loadProposals(sessionId)}
           />
         )}
+
+        {agentDrawerOpen && (
+          <AgentDrawer
+            sessionId={sessionId}
+            onClose={() => setAgentDrawerOpen(false)}
+            onFilesChanged={() => {
+              loadFiles(sessionId);
+              loadProposals(sessionId);
+            }}
+          />
+        )}
       </div>
+
+      {/* IDE Status Bar */}
+      <footer className="workspace-status-bar">
+        <div className="status-bar-left">
+          <span className="status-item session-tag">🌿 Session #{sessionId || '–'}</span>
+          <span className="status-item file-tag">
+            {activeTab ? `📄 ${activeTab} (${activeLang?.toUpperCase() || 'PLAIN'})` : 'Keine Datei geöffnet'}
+          </span>
+          {proposals.length > 0 && (
+            <span className="status-item proposals-tag">
+              📝 {proposals.length} Vorschlag{proposals.length > 1 ? 'e' : ''}
+            </span>
+          )}
+        </div>
+        <div className="status-bar-right">
+          <span className="status-item">UTF-8</span>
+          <span className="status-item">Tab-Größe: 4</span>
+          <span className="status-item env-tag">
+            🐍 {envStatus?.venv_present ? `Python venv (${envStatus.package_count || 0} Pakete)` : 'System Python'}
+          </span>
+          <button
+            className={`status-item agent-tag ${agentDrawerOpen ? 'active' : ''}`}
+            onClick={() => setAgentDrawerOpen((v) => !v)}
+            title="Agent Hub öffnen/schließen"
+          >
+            🤖 Multi-Agent: {agentDrawerOpen ? 'Aktiv' : 'Bereit'}
+          </button>
+        </div>
+      </footer>
 
       {newFileOpen && (
         <div className="workspace-modal-overlay" onClick={() => setNewFileOpen(false)}>
