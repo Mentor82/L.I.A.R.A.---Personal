@@ -1546,7 +1546,7 @@ function WorkspacePage() {
         <div className="status-bar-left">
           <span className="status-item session-tag">🌿 Session #{sessionId || '–'}</span>
           <span className="status-item file-tag">
-            {activeTab ? `📄 ${activeTab} (${activeLang?.toUpperCase() || 'PLAIN'})` : 'Keine Datei geöffnet'}
+            {activeTab ? `📄 ${activeTab} (${activeLang?.runLanguage?.toUpperCase() || 'PLAIN'})` : 'Keine Datei geöffnet'}
           </span>
           {proposals.length > 0 && (
             <span className="status-item proposals-tag">
