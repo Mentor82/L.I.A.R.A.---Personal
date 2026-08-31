@@ -42,7 +42,7 @@ from services.session_workspace import build_workspace_manifest, get_context_sel
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
 from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck_items
-from services.ollama_capabilities import model_supports_tools, model_has_thinking_capability
+from services.ollama_capabilities import model_supports_tools
 from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
 from services.tool_parser import ToolCall, get_tool_parser
@@ -704,24 +704,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
         if linep_enabled():
             if await get_linep_provider().health():
-                # Re-restored after a second live test: Mentor82/LiNeP-Ollama
-                # commit 3bf5ee1 added a real-time <think>/</think> tag
-                # scanner (streamThinkingFilter), but that only helps models
-                # that actually wrap reasoning in literal tags. Verified live
-                # with both nemotron-3-nano:4b and deepseek-v4-pro:cloud
-                # (confirmed via the log line below - genuinely routed
-                # through LiNeP this time) that the reasoning trace still
-                # leaks as plain visible content ("Wir müssen antworten...",
-                # no tags at all) - these models just think out loud in
-                # freeform prose with no delimiter for any tag-based scanner
-                # to find. This is a model-behavior gap now, not a
-                # transport/protocol one, so back to unconditionally
-                # skipping thinking-capable models for this branch.
-                if await model_has_thinking_capability(model):
-                    print(f"[LiNeP-Switch] Modell {model} hat thinking-Capability - LiNeP übersprungen (Modell nutzt keine <think>-Tags, Tag-Scanner greift nicht)", flush=True)
-                else:
-                    transport = "linep"
-                    print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
+                # Third attempt: Mentor82/LiNeP-Ollama commit 2af68a6 made
+                # the CHAT profile use Ollama's own native model-family
+                # response parser (resp.Message.Thinking/.ToolCalls/.Content)
+                # instead of scanning raw text for <think> tags - the
+                # earlier tag-scanner (3bf5ee1) only ever helped models that
+                # literally emit such tags, which nemotron-3-nano:4b and
+                # deepseek-v4-pro:cloud don't (verified live - they just
+                # think out loud in untagged prose). linep_provider.py now
+                # uses RuntimeProfile.CHAT specifically so this native
+                # parsing path is actually reachable - re-enabling
+                # thinking-capable models here to test it live.
+                transport = "linep"
+                print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
             else:
                 print("[LiNeP-Switch] LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP", flush=True)
 

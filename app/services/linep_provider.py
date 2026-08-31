@@ -10,22 +10,30 @@ host/port - no NodeService/UDP-scheduler client here, since only one worker
 (this host itself) is in play. See the LiNeP-switch plan for the full
 design rationale.
 
-Uses RuntimeProfile.GENERATE, not CHAT: GENERATE forwards `payload` to
-Ollama verbatim (no chat-template reformatting), which matters here because
-the caller has already flattened the full system prompt + conversation +
-tool instructions into one string - CHAT's own reformatting would fight
-with that instead of helping.
+Uses RuntimeProfile.CHAT, not GENERATE (changed from an earlier version of
+this file): GENERATE forwards `payload` verbatim with no chat-template
+reformatting, which was originally chosen so the caller's own flattened
+system-prompt/conversation/tool-instructions string wouldn't be fought by
+Ollama's template - but it also meant reasoning never got natively
+classified at all (Ollama's raw /api/generate never populates a "thinking"
+field, confirmed live with multiple models). Mentor82/LiNeP-Ollama commit
+2af68a6 made CHAT use Ollama's own native model-family response parser
+(resp.Message.Thinking/.ToolCalls/.Content) instead of a text-level tag
+scanner, but that native parsing only exists on the CHAT code path - so
+this switches profiles despite CHAT wrapping the whole flattened payload
+into a single "user"-role api.Message before forwarding to Ollama's
+/api/chat (still no structured multi-message channel over the wire; the
+caller still has to flatten everything into one string either way).
 
 generate_stream() yields (kind, payload) tuples - "content"/"thinking"/
 "tool_call" - instead of plain content strings: the deployed linep-server
-(Mentor82/LiNeP-Ollama, commit b1d4236+) natively emits EventType.
-REASONING_DELTA for reasoning-model thinking tokens and EventType.TOOL_CALL
-(payload is Ollama's own api.ToolCall JSON: {"id":.., "function":
-{"name":..,"arguments":..}}) for tool calls, on BOTH GENERATE and CHAT
-profiles - so the model's own text stream never has to be scraped for
-<think>/<tool_call> tags the way it did before this server-side fix
-(task/factcheck/toolcall-tag extraction in chat_streaming.py is kept as a
-defensive fallback for a server that predates this, not the primary path).
+natively emits EventType.REASONING_DELTA for reasoning-model thinking
+tokens and EventType.TOOL_CALL (payload is Ollama's own api.ToolCall JSON:
+{"id":.., "function": {"name":..,"arguments":..}}) for tool calls, so the
+model's own text stream never has to be scraped for <think>/<tool_call>
+tags (task/factcheck/toolcall-tag extraction in chat_streaming.py is kept
+as a defensive fallback for a server that predates this, not the primary
+path).
 """
 from __future__ import annotations
 
@@ -144,7 +152,7 @@ class LinepChatProvider:
             stream=StreamIdentity(
                 request_id=next(_request_ids), execution_id=next(_request_ids), output_id=0
             ),
-            profile=RuntimeProfile.GENERATE,
+            profile=RuntimeProfile.CHAT,
             model_id=model,
             payload=prompt,
             max_tokens=num_predict,
