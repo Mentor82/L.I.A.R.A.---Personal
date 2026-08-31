@@ -21,10 +21,11 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import os
 import socket
 from functools import lru_cache
 from typing import AsyncIterator, Optional
+
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -146,18 +147,21 @@ class LinepChatProvider:
 
 
 def linep_enabled() -> bool:
-    """Read directly from the environment (same convention as the rest of
-    the codebase - app/core/config.py's Settings class is not otherwise
-    wired into the chat hot path, and its own undeclared-.env-key
-    validation once broke the whole app the moment anything did import it -
-    deliberately not depending on it here)."""
-    return os.environ.get("LINEP_ENABLED", "").strip().lower() in ("1", "true", "yes")
+    """Via core.config.settings, not plain os.environ.get(): main.py's own
+    load_dotenv() call uses a path relative to CWD ("../.env") that doesn't
+    actually resolve to this app's real .env under its systemd
+    WorkingDirectory, so .env values never reach real process environment
+    variables here - confirmed live, this is why an os.environ-based
+    version of this function silently always returned False. Settings'
+    own env_file loading (pydantic-settings, resolved relative to CWD
+    at instantiation) reads the real file correctly regardless."""
+    return settings.linep_enabled
 
 
 @lru_cache
 def get_linep_provider() -> LinepChatProvider:
     return LinepChatProvider(
-        host=os.environ.get("LINEP_HOST", "127.0.0.1"),
-        port=int(os.environ.get("LINEP_PORT", "11435")),
-        timeout=float(os.environ.get("LINEP_TIMEOUT_SECONDS", "180.0")),
+        host=settings.linep_host,
+        port=settings.linep_port,
+        timeout=settings.linep_timeout_seconds,
     )
