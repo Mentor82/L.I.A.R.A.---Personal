@@ -74,7 +74,12 @@ case "$LANGUAGE" in
     # to test_stack.py in the Explorer. Adding $WORKSPACE_DIR to PYTHONPATH
     # lets same-workspace local imports resolve without changing where the
     # script itself is read from.
-    export PYTHONPATH="$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    # sandbox_sitecustomize/ is a sibling of this script - its sitecustomize.py
+    # is auto-imported by Python's `site` module before the script itself runs
+    # (see that file's docstring for why: it makes plt.show() actually produce
+    # a visible file on this headless server instead of silently no-op'ing).
+    SANDBOX_SITECUSTOMIZE_DIR="$(cd "$(dirname "$0")/sandbox_sitecustomize" && pwd)"
+    export PYTHONPATH="$SANDBOX_SITECUSTOMIZE_DIR:$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
     # This session's own venv (see above) if it exists, else the shared
     # runner-venv as a fallback - never the bare system python3 or the LIARA
     # backend's own venv, keeps sandboxed deps isolated from both.
