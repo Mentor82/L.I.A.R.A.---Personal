@@ -846,6 +846,22 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     full_response_text += final_toolcall_content
                     yield f"data: {json.dumps({'type': 'content', 'text': final_toolcall_content})}\n\n"
 
+                # Fallback for a model that emits the JSON but skips the
+                # literal <tool_call> tag (observed live: nemotron-3-nano:4b
+                # closed with </tool_call> but never opened it, so the tag
+                # extractor above never entered "in_block" and the raw JSON
+                # streamed through as visible content). tool_parser's own
+                # JSON_TOOL_PATTERN already handles bare "{tool, parameters}"
+                # JSON without tags - reused here as a last resort over the
+                # full turn so the tool still gets executed even though the
+                # raw JSON already reached the client this one time.
+                if not turn_tool_calls and iteration_tools:
+                    fallback_call = get_tool_parser().extract_tool_call(turn_content)
+                    if fallback_call:
+                        turn_tool_calls.append({
+                            "function": {"name": fallback_call.tool_name, "arguments": fallback_call.parameters}
+                        })
+
             else:
 
                 # Streaming Request zu Ollama via httpx (NO buffering).
