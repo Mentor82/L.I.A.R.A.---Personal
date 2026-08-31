@@ -42,7 +42,7 @@ from services.session_workspace import build_workspace_manifest, get_context_sel
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
 from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck_items
-from services.ollama_capabilities import model_supports_tools, model_has_thinking_capability
+from services.ollama_capabilities import model_supports_tools
 from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
 from services.tool_parser import ToolCall, get_tool_parser
@@ -704,29 +704,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
         if linep_enabled():
             if await get_linep_provider().health():
-                # Still unconditionally skipping thinking-capable models,
-                # DESPITE the connected server reporting
-                # supports_reasoning_deltas=True (verified live, confirmed
-                # not a fluke): that capability flag is server-wide, not
-                # per-profile, and this branch uses RuntimeProfile.GENERATE
-                # specifically - confirmed live with BOTH a small local
-                # model (nemotron-3-nano:4b) AND a large cloud model
-                # (deepseek-v4-pro:cloud) that reasoning still leaks as
-                # plain visible content over GENERATE regardless of the
-                # server-side REASONING_DELTA fix. Likely because Ollama's
-                # raw /api/generate never classifies any output as
-                # "thinking" the way /api/chat does, so the Go adapter's
-                # EventKindThinking case for GENERATE has nothing to relay
-                # even though the wiring exists. Would need switching this
-                # branch to RuntimeProfile.CHAT to actually get native
-                # separation - out of scope for now (CHAT reformats the
-                # payload instead of forwarding it verbatim, which the
-                # flattened-prompt/tool-instruction approach here relies on).
-                if await model_has_thinking_capability(model):
-                    print(f"[LiNeP-Switch] Modell {model} hat thinking-Capability - LiNeP übersprungen (REASONING_DELTA feuert nicht bei GENERATE, verifiziert mit lokalem und Cloud-Modell)", flush=True)
-                else:
-                    transport = "linep"
-                    print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
+                # The thinking-capability skip-guard that used to live here
+                # is gone: the previous fix (b1d4236) only wired up
+                # REASONING_DELTA via Ollama's own message.thinking field,
+                # which /api/generate never populates (confirmed live with
+                # both a local and a cloud model - the reasoning trace still
+                # leaked as plain content). Mentor82/LiNeP-Ollama commit
+                # 3bf5ee1 replaced that with a real-time <think>/</think>
+                # tag scanner (streamThinkingFilter) operating directly on
+                # the raw token stream, independent of Ollama's own
+                # classification and of profile (GENERATE or CHAT) - so this
+                # now works for any thinking-capable model regardless.
+                transport = "linep"
+                print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
             else:
                 print("[LiNeP-Switch] LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP", flush=True)
 
