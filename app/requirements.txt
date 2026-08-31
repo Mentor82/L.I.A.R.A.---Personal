@@ -30,3 +30,11 @@ spacy==3.7.5
 
 # Sandboxed Code Execution (chat "Run" button) - plotting in Python
 matplotlib==3.9.2
+
+# Experimental LiNeP transport switch (LINEP_ENABLED, see linep_provider.py)
+# - not on public PyPI, this is the custom Mentor82/LiNeP protocol package
+# (pure-Python linep.v0_2 client only, no liblinep/cffi needed). Install
+# from a wheel built out of the LiNeP repo's python/ dir (same package
+# already installed in www.mw-dresden.de's backend venv) rather than
+# `pip install linep` - this line documents the pinned version expected.
+# linep==0.2.0

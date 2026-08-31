@@ -45,7 +45,11 @@ from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck
 from services.ollama_capabilities import model_supports_tools
 from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
-from services.tool_parser import ToolCall
+from services.tool_parser import ToolCall, get_tool_parser
+from services.toolcall_splitter import ToolCallBlockExtractor
+from services.linep_provider import get_linep_provider, LinepUnavailableError
+from api.routers.chat import _get_tool_aware_system_prompt, _format_tool_result_for_llm
+from core.config import settings
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -377,6 +381,52 @@ class ChatError(BaseModel):
     suggestion: Optional[str] = None
 
 
+def _flatten_messages_for_linep(messages: List[Dict], include_tools: bool) -> str:
+    """Turns the OpenAI-style messages list into a single prompt string for
+    LiNeP's GENERATE profile - the wire protocol has no structured
+    messages/tools channel, only a plain payload string (see
+    linep_provider.py). Tool instructions/results reuse chat.py's existing
+    prompt-based tool-calling convention
+    (_get_tool_aware_system_prompt/_format_tool_result_for_llm) instead of
+    inventing a second one for this transport - see the LiNeP-switch plan.
+    """
+    parts = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content") or ""
+        if role == "system":
+            if include_tools:
+                content = f"{content}\n\n{_get_tool_aware_system_prompt()}"
+            parts.append(content)
+        elif role == "tool":
+            try:
+                tool_result = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                tool_result = {"result": content}
+            parts.append(f"Tool-Ergebnis:\n{_format_tool_result_for_llm(tool_result)}")
+        elif role == "assistant":
+            if content:
+                parts.append(f"Assistant: {content}")
+        else:  # user
+            parts.append(f"User: {content}")
+    parts.append("Assistant:")
+    return "\n\n".join(parts)
+
+
+def _append_linep_tool_call(turn_tool_calls: List[Dict], raw_block: str) -> None:
+    """Parses a completed <tool_call> block (from ToolCallBlockExtractor,
+    tags already stripped) via the existing tool_parser and, if valid,
+    appends it to turn_tool_calls in the SAME shape Ollama's native
+    tool_calls use ({"function": {"name", "arguments"}}) - so the
+    tool-execution loop below needs no transport-specific branching at all.
+    Re-wrapping in tags to reuse ToolCallParser.extract_tool_call()'s full
+    match/fallback chain rather than duplicating its JSON parsing here.
+    """
+    parsed = get_tool_parser().extract_tool_call(f"<tool_call>{raw_block}</tool_call>")
+    if parsed:
+        turn_tool_calls.append({"function": {"name": parsed.tool_name, "arguments": parsed.parameters}})
+
+
 async def stream_ollama_response(
     message: str,
     model: str = "llama3.2:3b",
@@ -639,6 +689,18 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         agent_tool_used = False
         agent_steps: List[Dict] = []
 
+        # Experimental LiNeP transport switch (see the LiNeP-switch plan) -
+        # determined once per request, not per iteration, so a mid-turn
+        # tool-calling round-trip doesn't jump transports. Health-gated: a
+        # LiNeP outage falls back to the proven Ollama-HTTP path instead of
+        # breaking chat outright - this flag is off by default in Settings.
+        transport = "ollama"
+        if settings.linep_enabled:
+            if await get_linep_provider().health():
+                transport = "linep"
+            else:
+                logger.warning("LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP")
+
         for iteration in range(MAX_AGENT_ITERATIONS + 1):
             iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
 
@@ -670,148 +732,253 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             thinking_splitter = ThinkingSplitter()
             task_extractor = TaskBlockExtractor()
             factcheck_extractor = FactCheckBlockExtractor()
+            toolcall_extractor = ToolCallBlockExtractor() if transport == "linep" else None
             turn_content = ""
             turn_tool_calls = []
 
-            # Streaming Request zu Ollama via httpx (NO buffering).
-            # A flat 90s timeout here used to apply to EVERY read (the gap
-            # between successive streamed chunks), not just the initial
-            # connect - on CPU-only inference, a long/detailed answer can
-            # legitimately have a quiet stretch (large context processing,
-            # slow token generation under load) exceeding 90s well before
-            # nginx's own 300s proxy_read_timeout on /api/chat/stream would
-            # ever be the limiting factor, so long responses were cut off by
-            # our own client, not by anything downstream. Connect stays
-            # short (Ollama not even accepting a connection should fail
-            # fast); read is raised to just under nginx's ceiling.
-            ollama_timeout = httpx.Timeout(connect=10.0, read=280.0, write=10.0, pool=10.0)
-            async with httpx.AsyncClient(timeout=ollama_timeout) as client:
-                async with client.stream(
-                    "POST",
-                    "http://localhost:11434/api/chat",
-                    json=payload
-                ) as response:
-                    response.raise_for_status()
+            if transport == "linep":
+                # Experimental: LiNeP's wire protocol has no structured
+                # messages/tools channel (see linep_provider.py), so the full
+                # conversation + tool instructions are flattened into one
+                # prompt string, and a <tool_call> block is parsed back out
+                # via the same prompt-based convention chat.py's sync path
+                # already teaches models (ToolRegistry.get_tool_descriptions_for_llm
+                # + tool_parser.py) - see the LiNeP-switch plan for why no new
+                # tool-calling mechanism was invented here.
+                prompt_text = _flatten_messages_for_linep(messages, bool(iteration_tools))
+                # No try/except here for LinepUnavailableError - it's left
+                # to propagate to this function's own outer try/except
+                # (below, near the httpx.ConnectError handler), which already
+                # emits a proper SSE error event AND releases the session
+                # lock in its finally - a local catch-and-return here would
+                # silently skip both.
+                async for content in get_linep_provider().generate_stream(prompt_text, model, 2000):
+                    thinking_part, content_part = thinking_splitter.feed(content)
+                    if thinking_part:
+                        yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
 
-                    # Stream Response Chunks - line by line
-                    async for line in response.aiter_lines():
-                        if line:
-                            try:
-                                chunk = json.loads(line)
+                    if content_part:
+                        content_part, completed_task_blocks = task_extractor.feed(content_part)
+                        for raw_block in completed_task_blocks:
+                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
 
-                                if "message" in chunk:
-                                    # Native tool_calls can arrive on a chunk
-                                    # with done:false (confirmed live) -
-                                    # accumulate across the whole turn, act
-                                    # once done:true arrives below.
-                                    if chunk["message"].get("tool_calls"):
-                                        turn_tool_calls.extend(chunk["message"]["tool_calls"])
+                    if content_part:
+                        content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
+                        for raw_block in completed_factcheck_blocks:
+                            yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
 
-                                    # Ollama separates reasoning-model output into
-                                    # its own `message.thinking` field natively
-                                    # (confirmed live: deepseek-r1 chunks arrive
-                                    # as {"content": "", "thinking": "..."} while
-                                    # reasoning, then plain {"content": "..."}
-                                    # once it's done - no <think> tags in content
-                                    # at all here). thinking_splitter below is a
-                                    # fallback for setups where a model inlines
-                                    # the tags in content instead.
-                                    native_thinking = chunk["message"].get("thinking", "")
-                                    if native_thinking:
-                                        yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
+                    if content_part:
+                        content_part, completed_toolcall_blocks = toolcall_extractor.feed(content_part)
+                        for raw_block in completed_toolcall_blocks:
+                            _append_linep_tool_call(turn_tool_calls, raw_block)
 
-                                    content = chunk["message"].get("content", "")
-                                    if content:
-                                        thinking_part, content_part = thinking_splitter.feed(content)
+                    if content_part:
+                        turn_content += content_part
+                        full_response_text += content_part
+                        try:
+                            if username and should_log_for_user(username):
+                                mlogger.log_sse_chunk("content", content=content_part)
+                        except:
+                            pass  # Logging-Fehler ignorieren
+                        yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
 
-                                        if thinking_part:
-                                            yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
+                # LiNeP has no explicit 'done' chunk - the generator ending
+                # above IS done. Same flush/leftover-routing chain as the
+                # Ollama branch below (kept separate rather than shared, to
+                # avoid touching that already-verified path for this
+                # experimental transport - mirror any future change to one
+                # into the other), extended with toolcall_extractor.
+                leftover_thinking, leftover_content = thinking_splitter.flush()
+                if leftover_thinking:
+                    yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
+                if leftover_content:
+                    leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
+                    for raw_block in leftover_task_blocks:
+                        yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                    if leftover_content:
+                        leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
+                        for raw_block in leftover_factcheck_blocks:
+                            yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                        if leftover_content:
+                            leftover_content, leftover_toolcall_blocks = toolcall_extractor.feed(leftover_content)
+                            for raw_block in leftover_toolcall_blocks:
+                                _append_linep_tool_call(turn_tool_calls, raw_block)
+                            if leftover_content:
+                                turn_content += leftover_content
+                                full_response_text += leftover_content
+                                yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
 
-                                        if content_part:
-                                            # <tasks> blocks (see build_task_list_instructions) are
-                                            # stripped out of content_part here and re-emitted as
-                                            # their own 'tasks' event instead - a model-authored plan
-                                            # display, not a verified execution record (see
-                                            # task_splitter.py's module docstring).
-                                            content_part, completed_task_blocks = task_extractor.feed(content_part)
-                                            for raw_block in completed_task_blocks:
-                                                yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                final_task_content = task_extractor.flush()
+                if final_task_content:
+                    final_task_content, final_task_factcheck_blocks = factcheck_extractor.feed(final_task_content)
+                    for raw_block in final_task_factcheck_blocks:
+                        yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                    if final_task_content:
+                        final_task_content, final_task_toolcall_blocks = toolcall_extractor.feed(final_task_content)
+                        for raw_block in final_task_toolcall_blocks:
+                            _append_linep_tool_call(turn_tool_calls, raw_block)
+                        if final_task_content:
+                            turn_content += final_task_content
+                            full_response_text += final_task_content
+                            yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
 
-                                        if content_part:
-                                            # <factcheck> blocks (see build_factcheck_instructions)
-                                            # get the same treatment - stripped out and re-emitted
-                                            # as their own 'factcheck' event.
-                                            content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
-                                            for raw_block in completed_factcheck_blocks:
-                                                yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                final_factcheck_content = factcheck_extractor.flush()
+                if final_factcheck_content:
+                    final_factcheck_content, final_fc_toolcall_blocks = toolcall_extractor.feed(final_factcheck_content)
+                    for raw_block in final_fc_toolcall_blocks:
+                        _append_linep_tool_call(turn_tool_calls, raw_block)
+                    if final_factcheck_content:
+                        turn_content += final_factcheck_content
+                        full_response_text += final_factcheck_content
+                        yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
 
-                                        if content_part:
-                                            turn_content += content_part
-                                            # Updated here, not just once at the end of the
-                                            # iteration (issue #7 item 3): a disconnect/exception
-                                            # mid-stream would otherwise see full_response_text
-                                            # still empty even though several 'content' events
-                                            # (this one included) already reached the browser.
-                                            full_response_text += content_part
-                                            # Mirko Debug Logging
-                                            try:
-                                                if username and should_log_for_user(username):
-                                                    mlogger.log_sse_chunk("content", content=content_part)
-                                            except:
-                                                pass  # Logging-Fehler ignorieren
+                final_toolcall_content = toolcall_extractor.flush()
+                if final_toolcall_content:
+                    turn_content += final_toolcall_content
+                    full_response_text += final_toolcall_content
+                    yield f"data: {json.dumps({'type': 'content', 'text': final_toolcall_content})}\n\n"
 
-                                            # SSE Format: data: {json}\n\n
-                                            yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
+            else:
 
-                                # Check if done
-                                if chunk.get("done", False):
-                                    # Flush anything the splitter is still holding
-                                    # (e.g. a <think> block that never closed).
-                                    leftover_thinking, leftover_content = thinking_splitter.flush()
-                                    if leftover_thinking:
-                                        yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
-                                    if leftover_content:
-                                        leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
-                                        for raw_block in leftover_task_blocks:
-                                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                # Streaming Request zu Ollama via httpx (NO buffering).
+                # A flat 90s timeout here used to apply to EVERY read (the gap
+                # between successive streamed chunks), not just the initial
+                # connect - on CPU-only inference, a long/detailed answer can
+                # legitimately have a quiet stretch (large context processing,
+                # slow token generation under load) exceeding 90s well before
+                # nginx's own 300s proxy_read_timeout on /api/chat/stream would
+                # ever be the limiting factor, so long responses were cut off by
+                # our own client, not by anything downstream. Connect stays
+                # short (Ollama not even accepting a connection should fail
+                # fast); read is raised to just under nginx's ceiling.
+                ollama_timeout = httpx.Timeout(connect=10.0, read=280.0, write=10.0, pool=10.0)
+                async with httpx.AsyncClient(timeout=ollama_timeout) as client:
+                    async with client.stream(
+                        "POST",
+                        "http://localhost:11434/api/chat",
+                        json=payload
+                    ) as response:
+                        response.raise_for_status()
+
+                        # Stream Response Chunks - line by line
+                        async for line in response.aiter_lines():
+                            if line:
+                                try:
+                                    chunk = json.loads(line)
+
+                                    if "message" in chunk:
+                                        # Native tool_calls can arrive on a chunk
+                                        # with done:false (confirmed live) -
+                                        # accumulate across the whole turn, act
+                                        # once done:true arrives below.
+                                        if chunk["message"].get("tool_calls"):
+                                            turn_tool_calls.extend(chunk["message"]["tool_calls"])
+
+                                        # Ollama separates reasoning-model output into
+                                        # its own `message.thinking` field natively
+                                        # (confirmed live: deepseek-r1 chunks arrive
+                                        # as {"content": "", "thinking": "..."} while
+                                        # reasoning, then plain {"content": "..."}
+                                        # once it's done - no <think> tags in content
+                                        # at all here). thinking_splitter below is a
+                                        # fallback for setups where a model inlines
+                                        # the tags in content instead.
+                                        native_thinking = chunk["message"].get("thinking", "")
+                                        if native_thinking:
+                                            yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
+
+                                        content = chunk["message"].get("content", "")
+                                        if content:
+                                            thinking_part, content_part = thinking_splitter.feed(content)
+
+                                            if thinking_part:
+                                                yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
+
+                                            if content_part:
+                                                # <tasks> blocks (see build_task_list_instructions) are
+                                                # stripped out of content_part here and re-emitted as
+                                                # their own 'tasks' event instead - a model-authored plan
+                                                # display, not a verified execution record (see
+                                                # task_splitter.py's module docstring).
+                                                content_part, completed_task_blocks = task_extractor.feed(content_part)
+                                                for raw_block in completed_task_blocks:
+                                                    yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+
+                                            if content_part:
+                                                # <factcheck> blocks (see build_factcheck_instructions)
+                                                # get the same treatment - stripped out and re-emitted
+                                                # as their own 'factcheck' event.
+                                                content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
+                                                for raw_block in completed_factcheck_blocks:
+                                                    yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+
+                                            if content_part:
+                                                turn_content += content_part
+                                                # Updated here, not just once at the end of the
+                                                # iteration (issue #7 item 3): a disconnect/exception
+                                                # mid-stream would otherwise see full_response_text
+                                                # still empty even though several 'content' events
+                                                # (this one included) already reached the browser.
+                                                full_response_text += content_part
+                                                # Mirko Debug Logging
+                                                try:
+                                                    if username and should_log_for_user(username):
+                                                        mlogger.log_sse_chunk("content", content=content_part)
+                                                except:
+                                                    pass  # Logging-Fehler ignorieren
+
+                                                # SSE Format: data: {json}\n\n
+                                                yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
+
+                                    # Check if done
+                                    if chunk.get("done", False):
+                                        # Flush anything the splitter is still holding
+                                        # (e.g. a <think> block that never closed).
+                                        leftover_thinking, leftover_content = thinking_splitter.flush()
+                                        if leftover_thinking:
+                                            yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
                                         if leftover_content:
-                                            leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
-                                            for raw_block in leftover_factcheck_blocks:
-                                                yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                                            leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
+                                            for raw_block in leftover_task_blocks:
+                                                yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
                                             if leftover_content:
-                                                turn_content += leftover_content
-                                                full_response_text += leftover_content
-                                                yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
-                                    # Anything the extractor itself still had buffered (plain
-                                    # trailing content, or an incomplete <tasks>/<factcheck> block
-                                    # - the latter discarded per each extractor's flush() contract).
-                                    #
-                                    # task_extractor's own held-back "safe tail" bytes (its
-                                    # defense against a <tasks> tag split across chunks) can
-                                    # themselves be the START of a <factcheck> tag - e.g. "<fact"
-                                    # held back by task_extractor while "check>...</factcheck>"
-                                    # already went out the door separately. Observed live: without
-                                    # routing final_task_content through factcheck_extractor too,
-                                    # that fragment ("check>") leaked as literal visible text
-                                    # instead of ever being recognized as the tag it was part of.
-                                    final_task_content = task_extractor.flush()
-                                    if final_task_content:
-                                        final_task_content, final_task_factcheck_blocks = factcheck_extractor.feed(final_task_content)
-                                        for raw_block in final_task_factcheck_blocks:
-                                            yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                                                leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
+                                                for raw_block in leftover_factcheck_blocks:
+                                                    yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                                                if leftover_content:
+                                                    turn_content += leftover_content
+                                                    full_response_text += leftover_content
+                                                    yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
+                                        # Anything the extractor itself still had buffered (plain
+                                        # trailing content, or an incomplete <tasks>/<factcheck> block
+                                        # - the latter discarded per each extractor's flush() contract).
+                                        #
+                                        # task_extractor's own held-back "safe tail" bytes (its
+                                        # defense against a <tasks> tag split across chunks) can
+                                        # themselves be the START of a <factcheck> tag - e.g. "<fact"
+                                        # held back by task_extractor while "check>...</factcheck>"
+                                        # already went out the door separately. Observed live: without
+                                        # routing final_task_content through factcheck_extractor too,
+                                        # that fragment ("check>") leaked as literal visible text
+                                        # instead of ever being recognized as the tag it was part of.
+                                        final_task_content = task_extractor.flush()
                                         if final_task_content:
-                                            turn_content += final_task_content
-                                            full_response_text += final_task_content
-                                            yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
-                                    final_factcheck_content = factcheck_extractor.flush()
-                                    if final_factcheck_content:
-                                        turn_content += final_factcheck_content
-                                        full_response_text += final_factcheck_content
-                                        yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
-                                    break
+                                            final_task_content, final_task_factcheck_blocks = factcheck_extractor.feed(final_task_content)
+                                            for raw_block in final_task_factcheck_blocks:
+                                                yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
+                                            if final_task_content:
+                                                turn_content += final_task_content
+                                                full_response_text += final_task_content
+                                                yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
+                                        final_factcheck_content = factcheck_extractor.flush()
+                                        if final_factcheck_content:
+                                            turn_content += final_factcheck_content
+                                            full_response_text += final_factcheck_content
+                                            yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
+                                        break
 
-                            except json.JSONDecodeError:
-                                continue
+                                except json.JSONDecodeError:
+                                    continue
 
             if turn_tool_calls and iteration < MAX_AGENT_ITERATIONS:
                 agent_tool_used = True
@@ -957,6 +1124,21 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             timestamp=datetime.now().isoformat(),
             recoverable=True,
             suggestion="Prüfe ob Ollama läuft: systemctl status ollama"
+        )
+        yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
+
+    except LinepUnavailableError as e:
+        # Experimental LiNeP transport (LINEP_ENABLED) failed mid-stream -
+        # the pre-iteration health check passed but the runtime broke
+        # during generation. Surfaced like any other transport failure;
+        # session_lock is still released via the finally below either way.
+        logger.error(f"LiNeP transport failed mid-stream: {e}")
+        error = ChatError(
+            error_type="linep_error",
+            message="LiNeP-Transport nicht erreichbar (experimentell)",
+            timestamp=datetime.now().isoformat(),
+            recoverable=True,
+            suggestion="Erneut versuchen - fällt bei Bedarf auf Ollama-HTTP zurück"
         )
         yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
 
