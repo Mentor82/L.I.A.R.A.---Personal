@@ -219,6 +219,18 @@ function Chat() {
   });
   const [historySidebarOpen, setHistorySidebarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Separate from `loading`: `loading` only covers the gap before the FIRST
+  // SSE event of any kind arrives and disappears the moment one does. Once
+  // that happens, whether anything visibly updates again depends entirely
+  // on which event types the model happens to emit - a reasoning model that
+  // shows its "decide to search" thinking but then composes the final
+  // answer with no further thinking/content tokens for a stretch left the
+  // whole bubble looking frozen with no sign it was still working. This
+  // stays true for the entire request (set with `loading`, cleared with it
+  // in the same finally block) so a persistent indicator can be shown on
+  // whichever message is currently being generated, independent of which
+  // specific sub-block last updated.
+  const [generating, setGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false); // Mehrfachklick-Schutz
   const [errorMessage, setErrorMessage] = useState('');
   const [chatToDelete, setChatToDelete] = useState(null);
@@ -531,6 +543,7 @@ function Chat() {
     ));
 
     setLoading(true);
+    setGenerating(true);
     setSearching(false);
     setSearchIntent(null);
     setMemoryContext(null);  // Reset memory context
@@ -887,6 +900,7 @@ function Chat() {
     } finally {
       console.log(`[FRONTEND_LOG] ${timestamp} - REQUEST_COMPLETE - Cleanup started`);
       setLoading(false);
+      setGenerating(false);
       setSearching(false);
       setIsSending(false); // Gebe Sende-Flag frei
       isSendingRef.current = false; // 🚨 ATOMARER Reset (kein Race Condition)
@@ -1471,6 +1485,19 @@ function Chat() {
               {!msg.actionResult?.success && (
                 <div className="bubble-text">
                   <MarkdownMessage content={msg.content} sessionId={activeSessionId} />
+                </div>
+              )}
+              {/* Persistent "still working" cue for whichever message is
+                  currently being generated - independent of ThinkingBlock/
+                  AgentStepsBlock, which only update when the model actually
+                  emits that specific event type. A reasoning model that
+                  shows its "decide to search" thinking but then composes
+                  the final answer with no further thinking/content tokens
+                  for a stretch otherwise leaves the bubble looking frozen
+                  with no sign anything is still happening. */}
+              {generating && index === messages.length - 1 && msg.role === 'assistant' && (
+                <div className="still-generating-indicator" aria-label="Liara arbeitet noch">
+                  <span></span><span></span><span></span>
                 </div>
               )}
               {msg.model && (
