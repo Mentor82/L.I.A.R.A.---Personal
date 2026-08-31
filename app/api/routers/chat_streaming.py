@@ -704,17 +704,26 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
         if linep_enabled():
             if await get_linep_provider().health():
-                # Reasoning models only get routed to LiNeP if the CONNECTED
-                # server confirms native REASONING_DELTA support (queried,
-                # not assumed) - an older linep-server that doesn't split
-                # thinking out of GENERATE's content stream would otherwise
-                # leak the whole reasoning trace as visible text (confirmed
-                # live with nemotron-3-nano:4b before the server-side fix,
-                # commit b1d4236 in Mentor82/LiNeP-Ollama).
-                needs_reasoning_split = await model_has_thinking_capability(model)
-                server_has_reasoning_split = await get_linep_provider().supports_reasoning_deltas()
-                if needs_reasoning_split and not server_has_reasoning_split:
-                    print(f"[LiNeP-Switch] Modell {model} braucht Denkprozess-Trennung, aber Server meldet kein REASONING_DELTA - LiNeP übersprungen", flush=True)
+                # Still unconditionally skipping thinking-capable models,
+                # DESPITE the connected server reporting
+                # supports_reasoning_deltas=True (verified live, confirmed
+                # not a fluke): that capability flag is server-wide, not
+                # per-profile, and this branch uses RuntimeProfile.GENERATE
+                # specifically - confirmed live with BOTH a small local
+                # model (nemotron-3-nano:4b) AND a large cloud model
+                # (deepseek-v4-pro:cloud) that reasoning still leaks as
+                # plain visible content over GENERATE regardless of the
+                # server-side REASONING_DELTA fix. Likely because Ollama's
+                # raw /api/generate never classifies any output as
+                # "thinking" the way /api/chat does, so the Go adapter's
+                # EventKindThinking case for GENERATE has nothing to relay
+                # even though the wiring exists. Would need switching this
+                # branch to RuntimeProfile.CHAT to actually get native
+                # separation - out of scope for now (CHAT reformats the
+                # payload instead of forwarding it verbatim, which the
+                # flattened-prompt/tool-instruction approach here relies on).
+                if await model_has_thinking_capability(model):
+                    print(f"[LiNeP-Switch] Modell {model} hat thinking-Capability - LiNeP übersprungen (REASONING_DELTA feuert nicht bei GENERATE, verifiziert mit lokalem und Cloud-Modell)", flush=True)
                 else:
                     transport = "linep"
                     print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
