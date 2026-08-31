@@ -698,6 +698,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         if linep_enabled():
             if await get_linep_provider().health():
                 transport = "linep"
+                logger.info(f"Chat-Turn (session={session_id}) läuft über LiNeP-Transport")
             else:
                 logger.warning("LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP")
 
