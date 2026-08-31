@@ -15,6 +15,17 @@ Ollama verbatim (no chat-template reformatting), which matters here because
 the caller has already flattened the full system prompt + conversation +
 tool instructions into one string - CHAT's own reformatting would fight
 with that instead of helping.
+
+generate_stream() yields (kind, payload) tuples - "content"/"thinking"/
+"tool_call" - instead of plain content strings: the deployed linep-server
+(Mentor82/LiNeP-Ollama, commit b1d4236+) natively emits EventType.
+REASONING_DELTA for reasoning-model thinking tokens and EventType.TOOL_CALL
+(payload is Ollama's own api.ToolCall JSON: {"id":.., "function":
+{"name":..,"arguments":..}}) for tool calls, on BOTH GENERATE and CHAT
+profiles - so the model's own text stream never has to be scraped for
+<think>/<tool_call> tags the way it did before this server-side fix
+(task/factcheck/toolcall-tag extraction in chat_streaming.py is kept as a
+defensive fallback for a server that predates this, not the primary path).
 """
 from __future__ import annotations
 
@@ -61,6 +72,12 @@ class LinepChatProvider:
         self._host = host
         self._port = port
         self._timeout = timeout
+        # None = not yet queried this process; False = queried and failed
+        # (package missing, connection refused, or an old server that
+        # doesn't answer CAPABILITIES at all). Capabilities don't change at
+        # runtime for a given server, so one successful query is cached for
+        # the process lifetime - same pattern as ollama_capabilities.py.
+        self._capabilities_cache = None
 
     async def health(self) -> bool:
         """Best-effort TCP reachability check, not a protocol handshake -
@@ -84,10 +101,38 @@ class LinepChatProvider:
         except OSError:
             return False
 
+    async def supports_reasoning_deltas(self) -> bool:
+        """Whether the CONNECTED server (not the Ollama model) natively
+        splits reasoning into EventType.REASONING_DELTA - queried directly
+        rather than assumed, so a future rollback to an older linep-server
+        (which doesn't even answer a capabilities query, confirmed live)
+        safely falls back to false instead of silently leaking reasoning
+        text as visible content again."""
+        caps = await self._get_capabilities()
+        return bool(caps and caps.descriptor.supports_reasoning_deltas)
+
+    async def _get_capabilities(self):
+        if self._capabilities_cache is not None:
+            return self._capabilities_cache or None
+        try:
+            caps = await asyncio.to_thread(self._query_capabilities_sync)
+        except Exception:
+            caps = None
+        self._capabilities_cache = caps if caps is not None else False
+        return caps
+
+    def _query_capabilities_sync(self):
+        LiNePClient, *_rest = _import_linep()
+        client = LiNePClient(host=self._host, port=self._port, timeout=5.0)
+        with client:
+            return client.query_capabilities()
+
     async def generate_stream(
         self, prompt: str, model: str, num_predict: int = 2000
-    ) -> AsyncIterator[str]:
-        """Streams token deltas from a LiNeP-routed GENERATE call.
+    ) -> AsyncIterator[tuple[str, str]]:
+        """Streams (kind, payload) tuples from a LiNeP-routed GENERATE call,
+        kind being "content", "thinking", or "tool_call" (see module
+        docstring for the native REASONING_DELTA/TOOL_CALL event mapping).
 
         Sync LiNePClient socket calls run on a worker thread; results cross
         back to this coroutine via an asyncio.Queue fed through
@@ -107,7 +152,7 @@ class LinepChatProvider:
 
         host, port, timeout = self._host, self._port, self._timeout
         loop = asyncio.get_running_loop()
-        queue: "asyncio.Queue[tuple[Optional[str], Optional[Exception]]]" = asyncio.Queue()
+        queue: "asyncio.Queue[tuple[Optional[tuple[str, str]], Optional[Exception]]]" = asyncio.Queue()
 
         def _worker():
             try:
@@ -115,7 +160,11 @@ class LinepChatProvider:
                 with client:
                     for event in client.execute_stream(request):
                         if event.event_type == EventType.CONTENT_DELTA and event.payload:
-                            loop.call_soon_threadsafe(queue.put_nowait, (event.payload, None))
+                            loop.call_soon_threadsafe(queue.put_nowait, (("content", event.payload), None))
+                        elif event.event_type == EventType.REASONING_DELTA and event.payload:
+                            loop.call_soon_threadsafe(queue.put_nowait, (("thinking", event.payload), None))
+                        elif event.event_type == EventType.TOOL_CALL and event.payload:
+                            loop.call_soon_threadsafe(queue.put_nowait, (("tool_call", event.payload), None))
                         elif event.event_type == EventType.FAILED:
                             message = (
                                 event.error.message

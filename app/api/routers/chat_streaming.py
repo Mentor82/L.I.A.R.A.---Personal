@@ -703,19 +703,21 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # switch's transport selection.
         print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
         if linep_enabled():
-            # LiNeP uses Ollama's /api/generate (RuntimeProfile.GENERATE), not
-            # /api/chat - it never gets Ollama's native thinking/content split
-            # for reasoning models. Confirmed live: nemotron-3-nano:4b's whole
-            # reasoning trace streamed as plain visible content instead of a
-            # separate 'thinking' event. Excluding thinking-capable models
-            # from LiNeP entirely (falls back to the Ollama-HTTP branch,
-            # which handles them correctly) until GENERATE gets an equivalent
-            # split or the branch switches to a chat-style profile.
-            if await model_has_thinking_capability(model):
-                print(f"[LiNeP-Switch] Modell {model} hat thinking-Capability - LiNeP übersprungen (keine native Denkprozess-Trennung über GENERATE)", flush=True)
-            elif await get_linep_provider().health():
-                transport = "linep"
-                print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
+            if await get_linep_provider().health():
+                # Reasoning models only get routed to LiNeP if the CONNECTED
+                # server confirms native REASONING_DELTA support (queried,
+                # not assumed) - an older linep-server that doesn't split
+                # thinking out of GENERATE's content stream would otherwise
+                # leak the whole reasoning trace as visible text (confirmed
+                # live with nemotron-3-nano:4b before the server-side fix,
+                # commit b1d4236 in Mentor82/LiNeP-Ollama).
+                needs_reasoning_split = await model_has_thinking_capability(model)
+                server_has_reasoning_split = await get_linep_provider().supports_reasoning_deltas()
+                if needs_reasoning_split and not server_has_reasoning_split:
+                    print(f"[LiNeP-Switch] Modell {model} braucht Denkprozess-Trennung, aber Server meldet kein REASONING_DELTA - LiNeP übersprungen", flush=True)
+                else:
+                    transport = "linep"
+                    print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
             else:
                 print("[LiNeP-Switch] LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP", flush=True)
 
@@ -755,14 +757,15 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             turn_tool_calls = []
 
             if transport == "linep":
-                # Experimental: LiNeP's wire protocol has no structured
-                # messages/tools channel (see linep_provider.py), so the full
-                # conversation + tool instructions are flattened into one
-                # prompt string, and a <tool_call> block is parsed back out
-                # via the same prompt-based convention chat.py's sync path
-                # already teaches models (ToolRegistry.get_tool_descriptions_for_llm
-                # + tool_parser.py) - see the LiNeP-switch plan for why no new
-                # tool-calling mechanism was invented here.
+                # LiNeP's wire protocol carries no structured messages/tools
+                # channel of its own (see linep_provider.py), so the full
+                # conversation + tool instructions are still flattened into
+                # one prompt string here - but a connected server that
+                # supports it (Mentor82/LiNeP-Ollama b1d4236+) emits
+                # REASONING_DELTA/TOOL_CALL as their own native event kinds
+                # instead of mixing them into the content text, so the
+                # tag/JSON-based extraction below is a defensive fallback for
+                # an older server, not the primary path anymore.
                 prompt_text = _flatten_messages_for_linep(messages, bool(iteration_tools))
                 # No try/except here for LinepUnavailableError - it's left
                 # to propagate to this function's own outer try/except
@@ -770,7 +773,25 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # emits a proper SSE error event AND releases the session
                 # lock in its finally - a local catch-and-return here would
                 # silently skip both.
-                async for content in get_linep_provider().generate_stream(prompt_text, model, 2000):
+                async for event_kind, event_payload in get_linep_provider().generate_stream(prompt_text, model, 2000):
+                    if event_kind == "thinking":
+                        yield f"data: {json.dumps({'type': 'thinking', 'text': event_payload})}\n\n"
+                        continue
+
+                    if event_kind == "tool_call":
+                        try:
+                            native_call = json.loads(event_payload)
+                        except json.JSONDecodeError:
+                            native_call = None
+                        # Ollama's own api.ToolCall shape ({"id","function":
+                        # {"name","arguments"}}) - identical to what the
+                        # Ollama-HTTP branch's native tool_calls already use,
+                        # so it needs no normalization before appending.
+                        if isinstance(native_call, dict) and native_call.get("function"):
+                            turn_tool_calls.append(native_call)
+                        continue
+
+                    content = event_payload
                     thinking_part, content_part = thinking_splitter.feed(content)
                     if thinking_part:
                         yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
