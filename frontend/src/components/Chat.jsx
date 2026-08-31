@@ -231,6 +231,17 @@ function Chat() {
   // whichever message is currently being generated, independent of which
   // specific sub-block last updated.
   const [generating, setGenerating] = useState(false);
+  // How long since the last SSE event of any kind before the UI tells the
+  // user this is taking unusually long - distinct from `generating`, which
+  // only says "still open," not "still open and quiet for a suspicious
+  // while." Observed live: a request can sit with zero events for minutes
+  // under heavy server load (CPU-bound local inference contending with
+  // other concurrent requests) with no error and no content - from the
+  // user's seat that's indistinguishable from "broken" unless something
+  // says otherwise.
+  const STALL_THRESHOLD_MS = 45000;
+  const [stalled, setStalled] = useState(false);
+  const lastActivityRef = useRef(Date.now());
   const [isSending, setIsSending] = useState(false); // Mehrfachklick-Schutz
   const [errorMessage, setErrorMessage] = useState('');
   const [chatToDelete, setChatToDelete] = useState(null);
@@ -281,6 +292,19 @@ function Chat() {
       console.error('Error saving chat sessions:', error);
     }
   }, [chatSessions, activeSessionId]);
+
+  // Polls (not a single timeout) so a late-arriving event within the
+  // request's own lifetime clears `stalled` again via the touch in the SSE
+  // loop above - the request isn't given up on, this is purely informational.
+  useEffect(() => {
+    if (!generating) return undefined;
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > STALL_THRESHOLD_MS) {
+        setStalled(true);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [generating]);
 
   // Speichere Model-Auswahl
   useEffect(() => {
@@ -544,6 +568,8 @@ function Chat() {
 
     setLoading(true);
     setGenerating(true);
+    lastActivityRef.current = Date.now();
+    setStalled(false);
     setSearching(false);
     setSearchIntent(null);
     setMemoryContext(null);  // Reset memory context
@@ -674,6 +700,8 @@ function Chat() {
 
             try {
               const parsed = JSON.parse(data);
+              lastActivityRef.current = Date.now();
+              setStalled(false);
 
               if (parsed.type === 'metadata') {
                 // Update model info
@@ -901,6 +929,7 @@ function Chat() {
       console.log(`[FRONTEND_LOG] ${timestamp} - REQUEST_COMPLETE - Cleanup started`);
       setLoading(false);
       setGenerating(false);
+      setStalled(false);
       setSearching(false);
       setIsSending(false); // Gebe Sende-Flag frei
       isSendingRef.current = false; // 🚨 ATOMARER Reset (kein Race Condition)
@@ -1500,6 +1529,12 @@ function Chat() {
                   <span></span><span></span><span></span>
                 </div>
               )}
+              {stalled && generating && index === messages.length - 1 && msg.role === 'assistant' && (
+                <div className="stall-notice">
+                  ⏳ Das dauert ungewöhnlich lange - möglicherweise hohe Serverlast oder ein Limit beim Modell.
+                  Ich warte noch, du kannst aber auch abbrechen und es später erneut versuchen.
+                </div>
+              )}
               {msg.model && (
                 <div className="bubble-footer">
                   <span className="bubble-model">🤖 {msg.model}</span>
@@ -1530,6 +1565,12 @@ function Chat() {
                 <span></span>
                 <span></span>
               </div>
+              {stalled && (
+                <div className="stall-notice">
+                  ⏳ Das dauert ungewöhnlich lange - möglicherweise hohe Serverlast oder ein Limit beim Modell.
+                  Ich warte noch, du kannst aber auch abbrechen und es später erneut versuchen.
+                </div>
+              )}
             </div>
           </div>
         )}
