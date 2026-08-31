@@ -695,12 +695,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # breaking chat outright - this flag (LINEP_ENABLED env var) is off
         # by default.
         transport = "ollama"
+        # print(), not logger.info()/warning(): confirmed live that this
+        # app's stdlib logging never reaches journalctl at all (no
+        # logging.basicConfig anywhere in main.py, root logger has no
+        # handler) - print() is unconditionally captured by systemd's
+        # journal regardless, needed while diagnosing this experimental
+        # switch's transport selection.
+        print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
         if linep_enabled():
             if await get_linep_provider().health():
                 transport = "linep"
-                logger.info(f"Chat-Turn (session={session_id}) läuft über LiNeP-Transport")
+                print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
             else:
-                logger.warning("LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP")
+                print("[LiNeP-Switch] LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP", flush=True)
 
         for iteration in range(MAX_AGENT_ITERATIONS + 1):
             iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
