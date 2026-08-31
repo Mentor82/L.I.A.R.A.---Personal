@@ -593,11 +593,17 @@ function Chat() {
         ));
         
         setLoading(false);
-        
-        // Update mood
-        const moodData = await moodAPI.getStatus();
-        setCurrentMood(moodData.current_mood);
-        
+
+        // Update mood - eigener try/catch, siehe Begründung beim SSE-Zweig
+        // weiter unten: die Antwort ist bereits angezeigt, ein Fehler hier
+        // darf sie nicht nachträglich als gescheitert erscheinen lassen.
+        try {
+          const moodData = await moodAPI.getStatus();
+          setCurrentMood(moodData.current_mood);
+        } catch (moodError) {
+          console.error('[Chat] Mood-Status-Refresh fehlgeschlagen (nicht kritisch):', moodError);
+        }
+
         return;
       }
       
@@ -845,9 +851,17 @@ function Chat() {
         }
       }
 
-      // Mood könnte sich geändert haben
-      const moodData = await moodAPI.getStatus();
-      setCurrentMood(moodData.current_mood);
+      // Mood könnte sich geändert haben. Eigener try/catch: die eigentliche
+      // Antwort ist zu diesem Zeitpunkt bereits vollständig gestreamt und
+      // angezeigt - ein Fehler bei diesem rein informativen Folge-Call darf
+      // nicht als "Fehler bei der Kommunikation mit Liara" über eine bereits
+      // erfolgreiche Antwort gelegt werden.
+      try {
+        const moodData = await moodAPI.getStatus();
+        setCurrentMood(moodData.current_mood);
+      } catch (moodError) {
+        console.error('[Chat] Mood-Status-Refresh fehlgeschlagen (nicht kritisch):', moodError);
+      }
 
     } catch (error) {
       if (error.name === 'AbortError') {
