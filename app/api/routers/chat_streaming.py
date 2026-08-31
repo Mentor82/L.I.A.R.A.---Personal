@@ -154,11 +154,29 @@ async def _with_sse_keepalive(source, interval: float = SSE_KEEPALIVE_INTERVAL):
             else:
                 yield ": keep-alive\n\n"
     finally:
+        # `pending.cancel()` only *requests* cancellation - without awaiting
+        # it, `source`'s own `__anext__()` hasn't actually unwound yet, so
+        # calling `source.aclose()` right after (as this used to) could hit
+        # "aclose(): asynchronous generator is already running" and abort
+        # before `source`'s own finally block (which releases the per-session
+        # Redis lock, see _release_session_lock above) has run - leaving that
+        # lock orphaned for up to SESSION_GENERATION_LOCK_TTL on every client
+        # disconnect / Cloudflare 524, observed live as stuck
+        # chat_stream_lock:* keys blocking a session's next message. Awaiting
+        # the cancellation first lets `source`'s finally complete before we
+        # touch it again.
         if pending is not None:
             pending.cancel()
+            try:
+                await pending
+            except (asyncio.CancelledError, StopAsyncIteration, Exception):
+                pass
         aclose = getattr(source, "aclose", None)
         if aclose is not None:
-            await aclose()
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 
 def get_location_context(db: Session, user_id: int) -> Optional[str]:
