@@ -42,7 +42,7 @@ from services.session_workspace import build_workspace_manifest, get_context_sel
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
 from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck_items
-from services.ollama_capabilities import model_supports_tools
+from services.ollama_capabilities import model_supports_tools, model_has_thinking_capability
 from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
 from services.tool_parser import ToolCall, get_tool_parser
@@ -703,7 +703,17 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # switch's transport selection.
         print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
         if linep_enabled():
-            if await get_linep_provider().health():
+            # LiNeP uses Ollama's /api/generate (RuntimeProfile.GENERATE), not
+            # /api/chat - it never gets Ollama's native thinking/content split
+            # for reasoning models. Confirmed live: nemotron-3-nano:4b's whole
+            # reasoning trace streamed as plain visible content instead of a
+            # separate 'thinking' event. Excluding thinking-capable models
+            # from LiNeP entirely (falls back to the Ollama-HTTP branch,
+            # which handles them correctly) until GENERATE gets an equivalent
+            # split or the branch switches to a chat-style profile.
+            if await model_has_thinking_capability(model):
+                print(f"[LiNeP-Switch] Modell {model} hat thinking-Capability - LiNeP übersprungen (keine native Denkprozess-Trennung über GENERATE)", flush=True)
+            elif await get_linep_provider().health():
                 transport = "linep"
                 print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
             else:
