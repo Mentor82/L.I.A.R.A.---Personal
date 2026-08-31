@@ -23,6 +23,29 @@ from services.redis_service import get_redis_service
 logger = logging.getLogger(__name__)
 
 
+# Nouns that are grammatically real concepts (spaCy correctly tags them
+# NOUN/PROPN) but carry almost no topic-specific signal - they show up in
+# nearly every conversation regardless of subject ("im Jahr...", "diese
+# Sache...", "im Moment..."), so their embeddings sit in a generically
+# "temporal/generic" region of embedding space that scores misleadingly
+# high cosine similarity against almost any other short phrase. Observed
+# live: the concept "jahr" (from an old, unrelated space-travel message)
+# came back at 0.68 similarity for a completely unrelated "guten Morgen,
+# Tagesüberblick" message and got injected into the model's context as if
+# it were a relevant memory. Excluded at BOTH extraction (stop creating new
+# noise going forward) and retrieval (existing Concept nodes already in the
+# graph stay unmatched too) rather than deleting the existing nodes - they
+# might still be harmless for other, non-injection purposes (mention
+# counts, graph stats).
+GENERIC_LOW_SIGNAL_CONCEPTS = {
+    'jahr', 'jahre', 'jahren', 'monat', 'monate', 'monaten', 'woche', 'wochen',
+    'tag', 'tage', 'tagen', 'zeit', 'zeiten', 'moment', 'momente', 'mal',
+    'sache', 'sachen', 'ding', 'dinge', 'teil', 'teile', 'seite', 'seiten',
+    'punkt', 'punkte', 'frage', 'fragen', 'antwort', 'antworten', 'art',
+    'weise', 'mensch', 'menschen', 'leben', 'welt', 'weg', 'wege',
+}
+
+
 # ============================================================================
 # CONCEPT EXTRACTION
 # ============================================================================
@@ -79,6 +102,7 @@ def extract_concepts(text: str, min_length: int = 4) -> List[str]:
         if token.pos_ in ("NOUN", "PROPN")
         and token.is_alpha
         and len(token.lemma_) >= min_length
+        and token.lemma_.lower() not in GENERIC_LOW_SIGNAL_CONCEPTS
     ]
 
     concept_freq = Counter(concepts)
@@ -120,7 +144,9 @@ def _extract_concepts_naive(text: str, min_length: int = 4) -> List[str]:
 
     concepts = [
         word for word in words
-        if len(word) >= min_length and word not in stopwords
+        if len(word) >= min_length
+        and word not in stopwords
+        and word not in GENERIC_LOW_SIGNAL_CONCEPTS
     ]
 
     concept_freq = Counter(concepts)
@@ -640,39 +666,45 @@ def get_relevant_context(
     user_id: int,
     query_text: str,
     limit: int = 5,
-    min_similarity: float = 0.6
+    min_similarity: float = 0.78
 ) -> List[Dict]:
     """
     Findet semantisch ähnliche Concepts für Context-Injection
-    
+
     Args:
         user_id: User ID
         query_text: Query-Text (neue Message)
         limit: Max Anzahl Ergebnisse
-        min_similarity: Min Cosine-Similarity
-        
+        min_similarity: Min Cosine-Similarity - raised from 0.6 to 0.78
+            (see GENERIC_LOW_SIGNAL_CONCEPTS above for why 0.6 let noise
+            through). Still advisory, not a hard guarantee against every
+            spurious match, just a much tighter bar.
+
     Returns:
         Liste von relevanten Concepts mit Messages
     """
     neo4j = get_neo4j_service()
     embedding_service = get_embedding_service()
-    
+
     # 1. Query Embedding generieren
     query_embedding = embedding_service.generate_embedding(query_text)
-    
+
     # 2. Alle Concepts des Users abrufen
     with neo4j.driver.session() as session:
         result = session.run("""
             MATCH (c:Concept {user_id: $user_id})
             WHERE c.embedding IS NOT NULL
-            RETURN c.text as concept, c.embedding as embedding, 
+            RETURN c.text as concept, c.embedding as embedding,
                    c.mention_count as mentions, c.created_at as created_at
             LIMIT 1000
         """, user_id=user_id)
-        
+
         concepts = []
         for record in result:
-            if record['embedding']:
+            # Second line of defense (see GENERIC_LOW_SIGNAL_CONCEPTS): the
+            # extraction-time filter only stops NEW noise, existing Concept
+            # nodes created before this fix are still sitting in the graph.
+            if record['embedding'] and record['concept'] not in GENERIC_LOW_SIGNAL_CONCEPTS:
                 concepts.append({
                     'concept': record['concept'],
                     'embedding': record['embedding'],

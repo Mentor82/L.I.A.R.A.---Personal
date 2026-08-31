@@ -105,6 +105,29 @@ in diesem Fall lieber allgemeine Prinzipien/Normklassen ohne konkrete Zahlenempf
 Dimensionierung zu erfinden, die im Ernstfall falsch und gefährlich sein könnte."""
 
 
+def build_no_fabrication_instructions() -> str:
+    """
+    Narrowly scoped guardrail, same pattern as
+    build_safety_dimensioning_instructions() above: observed failure mode
+    was the model inventing plausible-looking Spotify playlist links (three
+    different "playlists" all pointing at the same fabricated ID) with no
+    tool call behind them at all, plus outputting raw HTML entities
+    (e.g. "&#x20;") and redundant markdown emphasis (e.g. "****text****")
+    that render as literal garbage since the frontend's markdown renderer
+    doesn't interpret HTML entities. Advisory only - a prompt instruction
+    can be ignored, it doesn't make fabrication or malformed output
+    impossible, just measurably rarer.
+    """
+    return """WICHTIG - Keine erfundenen Links und keine kaputte Formatierung:
+Erfinde keine konkreten externen Links, IDs oder URLs (z.B. Spotify-Playlist-Links, YouTube-Video-IDs,
+Produktseiten), die du nicht tatsächlich über ein Tool abgerufen/verifiziert hast - auch nicht als
+plausibel klingenden Vorschlag. Beschreibe stattdessen die Art des Inhalts in Worten (z.B. "eine
+entspannte Klavier-Playlist" statt eines erfundenen Links) oder sag klar, dass du keinen echten Link dafür hast.
+Nutze außerdem ausschließlich normale Markdown-Syntax mit echten Zeichen - keine rohen HTML-Entities wie
+"&#x20;" oder "&nbsp;" (schreib ein normales Leerzeichen) und keine verdoppelten/vervierfachten
+Formatierungszeichen wie "****Text****" (nutze **Text** für Fett, nicht mehr)."""
+
+
 def build_task_list_instructions() -> str:
     """
     Tells the model it may open a multi-step answer with a <tasks>
