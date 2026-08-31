@@ -229,3 +229,34 @@ selbst in seinen eigenen Einstellungen ändern kann (z.B. für Workspace-Tools: 
 Abschnitt "Workspace" → "LIARA darf im Workspace arbeiten"). Erkläre stattdessen kurz und freundlich,
 dass diese Funktion aktuell deaktiviert ist und wo genau sie eingeschaltet werden kann - wiederhole
 nicht einfach dieselbe Bitte um Erlaubnis."""
+
+
+def build_workspace_artifact_instructions() -> str:
+    """
+    Lets a long-form plan/document get saved as a real Workspace file
+    instead of filling up the chat scrollback - same tag-extraction
+    mechanism as build_task_list_instructions()/build_factcheck_instructions()
+    above (see workspace_artifact_splitter.py). The Agent Hub already does
+    this automatically for its own final answer (base_agent.py); this gives
+    plain chat the same behavior for content the model itself judges to be
+    plan/document-length, gated behind an explicit tag rather than a length
+    heuristic so short answers are never mistakenly hidden behind a link.
+
+    Plain "Titel:"/"Inhalt:" labels instead of JSON inside the tag -
+    deliberately less structure than the <tool_call> convention: a malformed
+    tool-call gets a retry prompt (see chat.py's tool loop), but a malformed
+    artifact block here has nowhere to retry, so the format asks for as
+    little as possible from the model.
+    """
+    return """WICHTIG - Lange Pläne/Dokumente:
+Wenn du einen längeren, in sich geschlossenen Plan oder ein Dokument erstellst (z.B. auf explizite
+Bitte "erstelle einen Plan für..." oder wenn deine Antwort mehrere Abschnitte/Schritte umfasst und
+eher ein Nachschlage-Dokument als eine Chat-Antwort ist), schreibe ihn NICHT direkt in den Chat.
+Nutze stattdessen GENAU dieses Format:
+<workspace_artifact>
+Titel: <kurzer, prägnanter Titel>
+Inhalt:
+<vollständiger Markdown-Inhalt des Plans/Dokuments>
+</workspace_artifact>
+Für normale, kurze Antworten (auch mehrere Sätze) gilt das NICHT - nur für eigenständige, längere
+Pläne/Dokumente. Du kannst davor/danach ganz normal im Chat kommentieren."""

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { python } from '@codemirror/lang-python';
@@ -549,6 +550,13 @@ function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
 
 
 function WorkspacePage() {
+  // Set by Chat.jsx's WorkspaceArtifactsBlock ("<filename> im Workspace
+  // öffnen" link, via <Link state={{openWorkspaceFile}}>) - captured once in
+  // a ref (not read from `location` again later) so it fires exactly once
+  // per navigation into this page, not on every re-render.
+  const location = useLocation();
+  const pendingOpenFileRef = useRef(location.state?.openWorkspaceFile || null);
+
   const [sessions, setSessions] = useState([]);
   const [sessionId, setSessionId] = useState(null);
   const [files, setFiles] = useState([]);
@@ -879,6 +887,20 @@ function WorkspacePage() {
   const openFile = async (filename) => {
     if (await ensureTabLoaded(filename)) setActiveTab(filename);
   };
+
+  // Runs once sessionId first resolves (either the saved/most-recent one, or
+  // whichever session the artifact-producing chat turn itself was in - both
+  // already the same value by the time this fires, since Chat.jsx keeps
+  // liara_active_session in sync before ever rendering the link that got us
+  // here). ensureTabLoaded fetches by filename directly from the API, so
+  // this doesn't need to wait for the Explorer's own file list to load.
+  useEffect(() => {
+    if (sessionId && pendingOpenFileRef.current) {
+      const filename = pendingOpenFileRef.current;
+      pendingOpenFileRef.current = null;
+      openFile(filename);
+    }
+  }, [sessionId]);
 
   // Opens (or switches to) a file in the second, split pane - via the tab
   // strip there, or the primary pane's "🗗 Teilen" button duplicating its
@@ -1537,6 +1559,7 @@ function WorkspacePage() {
               loadFiles(sessionId);
               loadProposals(sessionId);
             }}
+            onOpenFile={openFile}
           />
         )}
       </div>

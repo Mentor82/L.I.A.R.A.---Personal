@@ -37,7 +37,7 @@ from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
-from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_task_list_instructions, build_factcheck_instructions, build_consent_required_instructions
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_task_list_instructions, build_factcheck_instructions, build_consent_required_instructions, build_workspace_artifact_instructions
 from services.session_workspace import build_workspace_manifest, get_context_selected_files, read_session_file
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
@@ -47,6 +47,8 @@ from services.tool_registry import get_tool_registry
 from services.tool_executor import get_tool_executor
 from services.tool_parser import ToolCall, get_tool_parser
 from services.toolcall_splitter import ToolCallBlockExtractor
+from services.workspace_artifact_splitter import WorkspaceArtifactBlockExtractor, parse_workspace_artifact
+from services.workspace_artifacts import save_artifact
 from services.linep_provider import get_linep_provider, linep_enabled, LinepUnavailableError
 from api.routers.chat import _get_tool_aware_system_prompt, _format_tool_result_for_llm
 from sqlalchemy.orm import Session
@@ -426,6 +428,27 @@ def _append_linep_tool_call(turn_tool_calls: List[Dict], raw_block: str) -> None
         turn_tool_calls.append({"function": {"name": parsed.tool_name, "arguments": parsed.parameters}})
 
 
+async def _handle_workspace_artifact_blocks(raw_blocks: List[str], user_id: Optional[int], session_id: Optional[int]):
+    """
+    Saves each completed <workspace_artifact> block (from
+    WorkspaceArtifactBlockExtractor) as a file in the session's Workspace and
+    yields the SSE line referencing it - shared by every artifact_extractor
+    call site in both transport branches below. Falls back to shipping the
+    raw content in the event itself if there's no session to save into, or
+    the save failed, so the frontend can still render it inline rather than
+    silently losing the content.
+    """
+    for raw_block in raw_blocks:
+        title, content = parse_workspace_artifact(raw_block)
+        filename = None
+        if user_id is not None and session_id is not None:
+            filename = await asyncio.to_thread(save_artifact, user_id, session_id, title, content, "Plan")
+        payload = {"type": "workspace_artifact", "title": title, "filename": filename}
+        if filename is None:
+            payload["content"] = content
+        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 async def stream_ollama_response(
     message: str,
     model: str = "llama3.2:3b",
@@ -516,6 +539,8 @@ Formatiere deine Antworten automatisch je nach Inhalt:
 {build_factcheck_instructions()}
 
 {build_consent_required_instructions()}
+
+{build_workspace_artifact_instructions()}
 
 Wähle die Formatierung automatisch basierend auf dem Inhalt:
 - Code → Code-Block mit korrekter Sprache
@@ -753,6 +778,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             thinking_splitter = ThinkingSplitter()
             task_extractor = TaskBlockExtractor()
             factcheck_extractor = FactCheckBlockExtractor()
+            artifact_extractor = WorkspaceArtifactBlockExtractor()
             toolcall_extractor = ToolCallBlockExtractor() if transport == "linep" else None
             turn_content = ""
             turn_tool_calls = []
@@ -808,6 +834,11 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
 
                     if content_part:
+                        content_part, completed_artifact_blocks = artifact_extractor.feed(content_part)
+                        async for sse_line in _handle_workspace_artifact_blocks(completed_artifact_blocks, user_id, session_id):
+                            yield sse_line
+
+                    if content_part:
                         content_part, completed_toolcall_blocks = toolcall_extractor.feed(content_part)
                         for raw_block in completed_toolcall_blocks:
                             _append_linep_tool_call(turn_tool_calls, raw_block)
@@ -840,6 +871,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                         for raw_block in leftover_factcheck_blocks:
                             yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
                         if leftover_content:
+                            leftover_content, leftover_artifact_blocks = artifact_extractor.feed(leftover_content)
+                            async for sse_line in _handle_workspace_artifact_blocks(leftover_artifact_blocks, user_id, session_id):
+                                yield sse_line
+                        if leftover_content:
                             leftover_content, leftover_toolcall_blocks = toolcall_extractor.feed(leftover_content)
                             for raw_block in leftover_toolcall_blocks:
                                 _append_linep_tool_call(turn_tool_calls, raw_block)
@@ -854,6 +889,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     for raw_block in final_task_factcheck_blocks:
                         yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
                     if final_task_content:
+                        final_task_content, final_task_artifact_blocks = artifact_extractor.feed(final_task_content)
+                        async for sse_line in _handle_workspace_artifact_blocks(final_task_artifact_blocks, user_id, session_id):
+                            yield sse_line
+                    if final_task_content:
                         final_task_content, final_task_toolcall_blocks = toolcall_extractor.feed(final_task_content)
                         for raw_block in final_task_toolcall_blocks:
                             _append_linep_tool_call(turn_tool_calls, raw_block)
@@ -863,6 +902,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                             yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
 
                 final_factcheck_content = factcheck_extractor.flush()
+                if final_factcheck_content:
+                    final_factcheck_content, final_fc_artifact_blocks = artifact_extractor.feed(final_factcheck_content)
+                    async for sse_line in _handle_workspace_artifact_blocks(final_fc_artifact_blocks, user_id, session_id):
+                        yield sse_line
                 if final_factcheck_content:
                     final_factcheck_content, final_fc_toolcall_blocks = toolcall_extractor.feed(final_factcheck_content)
                     for raw_block in final_fc_toolcall_blocks:
@@ -877,6 +920,19 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     turn_content += final_toolcall_content
                     full_response_text += final_toolcall_content
                     yield f"data: {json.dumps({'type': 'content', 'text': final_toolcall_content})}\n\n"
+
+                # artifact_extractor sits BEFORE toolcall_extractor in the
+                # per-chunk feed order above, so - unlike task/factcheck's
+                # flush() above, which route their leftover through the
+                # extractors still downstream of them - there's nothing left
+                # for toolcall's own leftover to pass through here. This is
+                # just artifact_extractor's own final flush, same as any
+                # other extractor's.
+                final_artifact_content = artifact_extractor.flush()
+                if final_artifact_content:
+                    turn_content += final_artifact_content
+                    full_response_text += final_artifact_content
+                    yield f"data: {json.dumps({'type': 'content', 'text': final_artifact_content})}\n\n"
 
                 # Fallback for a model that emits the JSON but skips the
                 # literal <tool_call> tag (observed live: nemotron-3-nano:4b
@@ -969,6 +1025,15 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                                     yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
 
                                             if content_part:
+                                                # <workspace_artifact> blocks (see
+                                                # build_workspace_artifact_instructions) get saved as a
+                                                # Workspace file and re-emitted as a short reference
+                                                # instead of streaming the full content into the chat.
+                                                content_part, completed_artifact_blocks = artifact_extractor.feed(content_part)
+                                                async for sse_line in _handle_workspace_artifact_blocks(completed_artifact_blocks, user_id, session_id):
+                                                    yield sse_line
+
+                                            if content_part:
                                                 turn_content += content_part
                                                 # Updated here, not just once at the end of the
                                                 # iteration (issue #7 item 3): a disconnect/exception
@@ -1002,6 +1067,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                                 for raw_block in leftover_factcheck_blocks:
                                                     yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
                                                 if leftover_content:
+                                                    leftover_content, leftover_artifact_blocks = artifact_extractor.feed(leftover_content)
+                                                    async for sse_line in _handle_workspace_artifact_blocks(leftover_artifact_blocks, user_id, session_id):
+                                                        yield sse_line
+                                                if leftover_content:
                                                     turn_content += leftover_content
                                                     full_response_text += leftover_content
                                                     yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
@@ -1023,14 +1092,27 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                                             for raw_block in final_task_factcheck_blocks:
                                                 yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
                                             if final_task_content:
+                                                final_task_content, final_task_artifact_blocks = artifact_extractor.feed(final_task_content)
+                                                async for sse_line in _handle_workspace_artifact_blocks(final_task_artifact_blocks, user_id, session_id):
+                                                    yield sse_line
+                                            if final_task_content:
                                                 turn_content += final_task_content
                                                 full_response_text += final_task_content
                                                 yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
                                         final_factcheck_content = factcheck_extractor.flush()
                                         if final_factcheck_content:
+                                            final_factcheck_content, final_fc_artifact_blocks = artifact_extractor.feed(final_factcheck_content)
+                                            async for sse_line in _handle_workspace_artifact_blocks(final_fc_artifact_blocks, user_id, session_id):
+                                                yield sse_line
+                                        if final_factcheck_content:
                                             turn_content += final_factcheck_content
                                             full_response_text += final_factcheck_content
                                             yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
+                                        final_artifact_content = artifact_extractor.flush()
+                                        if final_artifact_content:
+                                            turn_content += final_artifact_content
+                                            full_response_text += final_artifact_content
+                                            yield f"data: {json.dumps({'type': 'content', 'text': final_artifact_content})}\n\n"
                                         break
 
                                 except json.JSONDecodeError:

@@ -3,7 +3,7 @@ import { agentAPI, chatAPI } from '../services/api';
 import MarkdownMessage from './MarkdownMessage';
 import './AgentDrawer.css';
 
-export default function AgentDrawer({ sessionId, onClose, onFilesChanged }) {
+export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpenFile }) {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState('code');
   const [models, setModels] = useState([]);
@@ -13,6 +13,7 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged }) {
   const [currentTaskId, setCurrentTaskId] = useState(null);
   const [stepEvents, setStepEvents] = useState([]);
   const [finalAnswer, setFinalAnswer] = useState(null);
+  const [finalAnswerFile, setFinalAnswerFile] = useState(null);
   const [error, setError] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
   const eventsEndRef = useRef(null);
@@ -55,6 +56,7 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged }) {
 
     setError(null);
     setFinalAnswer(null);
+    setFinalAnswerFile(null);
     setStepEvents([]);
     setCurrentStep(0);
     setIsRunning(true);
@@ -143,6 +145,7 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged }) {
       ]);
     } else if (type === 'done') {
       setFinalAnswer(data.answer);
+      setFinalAnswerFile(data.answer_file || null);
       setIsRunning(false);
     } else if (type === 'error') {
       setError(data.error);
@@ -314,16 +317,34 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged }) {
             </div>
           ))}
 
-          {/* Final Answer */}
+          {/* Final Answer - saved as a Workspace file (see base_agent.py's
+              _save_answer_artifact) so this only needs to show a short
+              preview + a link, not the full text inline. Falls back to the
+              full markdown if the save failed or there's no session to
+              save into (finalAnswerFile stays null either way). */}
           {finalAnswer && (
             <div className="trace-final-answer">
               <div className="trace-event-title success">
                 <span className="trace-icon">🎯</span>
                 <strong>Endergebnis:</strong>
               </div>
-              <div className="trace-final-content">
-                <MarkdownMessage content={finalAnswer} />
-              </div>
+              {finalAnswerFile ? (
+                <div className="trace-final-artifact">
+                  <p className="trace-final-preview">
+                    {finalAnswer.slice(0, 180)}{finalAnswer.length > 180 ? '…' : ''}
+                  </p>
+                  <button
+                    className="agent-btn primary trace-open-file-btn"
+                    onClick={() => onOpenFile?.(finalAnswerFile)}
+                  >
+                    📄 {finalAnswerFile} im Workspace öffnen
+                  </button>
+                </div>
+              ) : (
+                <div className="trace-final-content">
+                  <MarkdownMessage content={finalAnswer} />
+                </div>
+              )}
             </div>
           )}
 

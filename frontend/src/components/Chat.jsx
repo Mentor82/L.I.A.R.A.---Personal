@@ -245,6 +245,40 @@ function WorkspaceProposalsBlock({ proposals }) {
   );
 }
 
+// A long-form plan/document (see build_workspace_artifact_instructions in
+// prompt_builder.py) got saved as a Workspace file instead of streamed into
+// the chat bubble - same collapsible-card shape as WorkspaceProposalsBlock
+// above. `filename` is only null if the save failed or there was no active
+// session to save into, in which case the full content renders inline here
+// as a fallback rather than being silently lost.
+function WorkspaceArtifactsBlock({ artifacts }) {
+  if (!artifacts || artifacts.length === 0) return null;
+
+  return (
+    <div className="web-sources-block">
+      <div className="web-sources-toggle" style={{ cursor: 'default' }}>
+        <span>📄 Erstellte Dokumente ({artifacts.length})</span>
+      </div>
+      <ul className="web-sources-content">
+        {artifacts.map((a, i) => (
+          <li key={i} className="web-sources-item">
+            <span className="web-sources-title">{a.title}</span>
+            <div className="web-sources-meta">
+              {a.filename ? (
+                <Link to="/workspace" state={{ openWorkspaceFile: a.filename }} className="web-sources-domain">
+                  {a.filename} im Workspace öffnen →
+                </Link>
+              ) : (
+                <MarkdownMessage content={a.content} />
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Chat() {
   const [message, setMessage] = useState('');
   const [chatSessions, setChatSessions] = useState(() => {
@@ -881,6 +915,30 @@ function Chat() {
                 // just tells the user where to go review/approve it. Each event is
                 // one proposal, so accumulate rather than replace-wholesale.
                 liaraMessage.workspaceProposals = [...(liaraMessage.workspaceProposals || []), parsed];
+
+                if (!messageAdded) {
+                  messageAdded = true;
+                  setLoading(false);
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages, liaraMessage] }
+                      : session
+                  ));
+                } else {
+                  setChatSessions(prev => prev.map(session =>
+                    session.id === activeSessionId
+                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
+                      : session
+                  ));
+                }
+              } else if (parsed.type === 'workspace_artifact') {
+                // A long-form plan/document (see build_workspace_artifact_instructions
+                // in prompt_builder.py) got saved as a Workspace file instead of
+                // streamed as chat content - one card per artifact, so accumulate
+                // rather than replace-wholesale, same as workspace_proposal above.
+                // `content` is only present when the save failed/there was no
+                // session (WorkspaceArtifactCard falls back to rendering it inline).
+                liaraMessage.workspaceArtifacts = [...(liaraMessage.workspaceArtifacts || []), parsed];
 
                 if (!messageAdded) {
                   messageAdded = true;
@@ -1623,6 +1681,9 @@ function Chat() {
               )}
               {msg.role === 'assistant' && (
                 <WorkspaceProposalsBlock proposals={msg.workspaceProposals} />
+              )}
+              {msg.role === 'assistant' && (
+                <WorkspaceArtifactsBlock artifacts={msg.workspaceArtifacts} />
               )}
               {msg.role === 'assistant' && (
                 <TaskListBlock tasks={msg.tasks} />

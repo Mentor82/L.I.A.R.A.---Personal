@@ -11,6 +11,7 @@ import requests
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 
 from services.ollama_capabilities import model_supports_tools
+from services.workspace_artifacts import save_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +189,21 @@ class BaseAgent:
             logger.error(f"Ollama API Fehler: {e}")
             raise RuntimeError(f"Ollama Verbindung fehlgeschlagen ({self.model}): {str(e)}")
 
+    async def _save_answer_artifact(
+        self, task: str, answer: str, user_id: Optional[int], session_id: Optional[int]
+    ) -> Optional[str]:
+        """
+        Saves a finished task's answer as a file in the session's Workspace
+        instead of leaving the Agent Hub trace panel to display the full
+        text inline - user_id/session_id are only absent for a caller
+        without a real Workspace to save into, in which case this is a
+        no-op and the trace panel falls back to showing the answer text
+        directly (see AgentDrawer.jsx).
+        """
+        if user_id is None or session_id is None:
+            return None
+        return await asyncio.to_thread(save_artifact, user_id, session_id, task, answer, "Ergebnis")
+
     async def run(
         self,
         task: str,
@@ -292,10 +308,12 @@ class BaseAgent:
 
                 # No tool call this turn - the model's content is its answer.
                 history_log.append({"type": "final_answer", "step": step, "answer": content})
-                await emit("done", {"answer": content, "steps": step})
+                answer_file = await self._save_answer_artifact(task, content, user_id, session_id)
+                await emit("done", {"answer": content, "answer_file": answer_file, "steps": step})
                 return {
                     "success": True,
                     "answer": content,
+                    "answer_file": answer_file,
                     "steps": step,
                     "history": history_log
                 }
@@ -311,10 +329,12 @@ class BaseAgent:
 
             # Wenn Final Answer erreicht
             if parsed["type"] == "final_answer":
-                await emit("done", {"answer": parsed["answer"], "steps": step})
+                answer_file = await self._save_answer_artifact(task, parsed["answer"], user_id, session_id)
+                await emit("done", {"answer": parsed["answer"], "answer_file": answer_file, "steps": step})
                 return {
                     "success": True,
                     "answer": parsed["answer"],
+                    "answer_file": answer_file,
                     "steps": step,
                     "history": history_log
                 }
