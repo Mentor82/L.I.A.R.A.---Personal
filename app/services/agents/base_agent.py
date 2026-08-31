@@ -10,6 +10,8 @@ import asyncio
 import requests
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 
+from services.ollama_capabilities import model_supports_tools
+
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -84,6 +86,22 @@ class BaseAgent:
         )
         return "\n".join(lines)
 
+    def _build_native_tools_schema(self) -> List[Dict[str, Any]]:
+        """Same tool definitions as _build_tools_prompt(), but as Ollama's
+        native tool-calling schema instead of prompt text - register_tool()'s
+        `parameters` are already plain JSON Schema, so no conversion needed."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["parameters"],
+                },
+            }
+            for t in self.tools.values()
+        ]
+
     def _parse_llm_response(self, text: str) -> Dict[str, Any]:
         """Extrahiert Gedanke, Tool-Aufruf oder finale Antwort aus der Modell-Ausgabe."""
         thought_match = re.search(r"Gedanke:\s*(.*?)(?=<tool_call>|<final_answer>|$)", text, re.DOTALL | re.IGNORECASE)
@@ -141,8 +159,12 @@ class BaseAgent:
             logger.exception(f"Fehler bei Ausführung von {tool_name}")
             return {"error": f"Fehler bei Tool-Ausführung ({tool_name}): {str(e)}"}
 
-    async def call_llm(self, messages: List[Dict[str, str]]) -> str:
-        """Sendet Chat-Nachrichten an Ollama."""
+    async def call_llm(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Sendet Chat-Nachrichten an Ollama. Gibt das komplette message-Objekt
+        zurück (nicht nur .content) - der native Tool-Pfad in run() braucht
+        auch .tool_calls, die reine Text-Konvention liest nur .content.
+        """
         payload = {
             "model": self.model,
             "messages": messages,
@@ -151,12 +173,14 @@ class BaseAgent:
                 "temperature": 0.2,  # Niedrige Temperatur für präzise Tool-Nutzung
             }
         }
-        
+        if tools:
+            payload["tools"] = tools
+
         def _request():
             res = requests.post(f"{self.ollama_url}/api/chat", json=payload, timeout=90)
             res.raise_for_status()
             data = res.json()
-            return data.get("message", {}).get("content", "")
+            return data.get("message", {})
 
         try:
             return await asyncio.to_thread(_request)
@@ -182,13 +206,24 @@ class BaseAgent:
                 except Exception as e:
                     logger.warning(f"Callback Fehler: {e}")
 
-        full_system = f"{self.system_prompt}\n\n{self._build_tools_prompt()}"
+        # Prefer Ollama's native tool-calling for models that support it
+        # (checked once via /api/show, see ollama_capabilities.py) - a
+        # thinking/"harmony"-style model like gpt-oss doesn't reliably follow
+        # a freeform "emit a literal <tool_call> tag" prompt convention (its
+        # `content` can come back as just a restated thought with no tags at
+        # all, which the text parser below has no choice but to treat as a
+        # final answer - confirmed live with gpt-oss:120b-cloud). Models
+        # without native tool support keep the existing text convention.
+        use_native_tools = bool(self.tools) and await model_supports_tools(self.model)
+        native_tools_schema = self._build_native_tools_schema() if use_native_tools else None
+
+        full_system = self.system_prompt if use_native_tools else f"{self.system_prompt}\n\n{self._build_tools_prompt()}"
         messages = [
             {"role": "system", "content": full_system},
             {"role": "user", "content": f"Aufgabe:\n{task}"}
         ]
 
-        await emit("start", {"task": task, "model": self.model, "max_steps": self.max_steps})
+        await emit("start", {"task": task, "model": self.model, "max_steps": self.max_steps, "native_tools": use_native_tools})
 
         step = 0
         history_log = []
@@ -214,7 +249,7 @@ class BaseAgent:
 
             # LLM anfragen
             try:
-                raw_response = await self.call_llm(messages)
+                message = await self.call_llm(messages, tools=native_tools_schema)
             except Exception as e:
                 await emit("error", {"error": str(e), "step": step})
                 return {
@@ -224,6 +259,49 @@ class BaseAgent:
                     "history": history_log
                 }
 
+            if use_native_tools:
+                content = (message.get("content") or "").strip()
+                native_tool_calls = message.get("tool_calls") or []
+
+                if content:
+                    await emit("thought", {"thought": content, "step": step})
+
+                if native_tool_calls:
+                    history_log.append({"type": "tool_call", "step": step, "tool_calls": native_tool_calls})
+                    messages.append({"role": "assistant", "content": content, "tool_calls": native_tool_calls})
+
+                    # Ollama can return more than one tool call in a single
+                    # turn - execute all of them before the next LLM call,
+                    # same as chat_streaming.py's native-tool loop.
+                    for tc in native_tool_calls:
+                        fn = tc.get("function", {})
+                        t_name = fn.get("name")
+                        t_args = fn.get("arguments") or {}
+
+                        await emit("tool_call", {"tool": t_name, "arguments": t_args, "step": step})
+                        observation = await self.execute_tool(t_name, t_args)
+                        await emit("tool_result", {"tool": t_name, "result": observation, "step": step})
+
+                        obs_str = json.dumps(observation, ensure_ascii=False) if not isinstance(observation, str) else observation
+                        tool_message = {"role": "tool", "content": obs_str}
+                        if tc.get("id"):
+                            tool_message["tool_call_id"] = tc["id"]
+                        messages.append(tool_message)
+
+                    continue
+
+                # No tool call this turn - the model's content is its answer.
+                history_log.append({"type": "final_answer", "step": step, "answer": content})
+                await emit("done", {"answer": content, "steps": step})
+                return {
+                    "success": True,
+                    "answer": content,
+                    "steps": step,
+                    "history": history_log
+                }
+
+            # --- Prompt-based <tool_call>/<final_answer> convention (models without native tool support) ---
+            raw_response = message.get("content", "")
             parsed = self._parse_llm_response(raw_response)
             parsed["step"] = step
             history_log.append(parsed)
@@ -247,10 +325,10 @@ class BaseAgent:
                 t_args = parsed["arguments"]
 
                 await emit("tool_call", {"tool": t_name, "arguments": t_args, "step": step})
-                
+
                 # Tool ausführen
                 observation = await self.execute_tool(t_name, t_args)
-                
+
                 await emit("tool_result", {"tool": t_name, "result": observation, "step": step})
 
                 # Observation zurück in Konversationshistorie einspeisen
