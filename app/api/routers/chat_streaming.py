@@ -915,24 +915,33 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                         full_response_text += final_factcheck_content
                         yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
 
+                # artifact_extractor sits BEFORE toolcall_extractor in the
+                # per-chunk feed order above (thinking -> task -> factcheck ->
+                # artifact -> toolcall), so its leftover here must still be
+                # routed through toolcall_extractor too - same reasoning as
+                # task/factcheck's flush() above. Getting this order backwards
+                # (artifact flushed AFTER toolcall, straight to content) was a
+                # live bug: artifact_extractor's safe-tail hold-back is blind
+                # to WHICH tag it might be guarding against, so it could eat
+                # the tail end of an actual <tool_call>...</tool_call> block
+                # with no toolcall_extractor left to catch it - confirmed
+                # live as a literal `"..."d" } }\n</tool_call>` fragment
+                # leaking into the visible chat.
+                final_artifact_content = artifact_extractor.flush()
+                if final_artifact_content:
+                    final_artifact_content, final_artifact_toolcall_blocks = toolcall_extractor.feed(final_artifact_content)
+                    for raw_block in final_artifact_toolcall_blocks:
+                        _append_linep_tool_call(turn_tool_calls, raw_block)
+                    if final_artifact_content:
+                        turn_content += final_artifact_content
+                        full_response_text += final_artifact_content
+                        yield f"data: {json.dumps({'type': 'content', 'text': final_artifact_content})}\n\n"
+
                 final_toolcall_content = toolcall_extractor.flush()
                 if final_toolcall_content:
                     turn_content += final_toolcall_content
                     full_response_text += final_toolcall_content
                     yield f"data: {json.dumps({'type': 'content', 'text': final_toolcall_content})}\n\n"
-
-                # artifact_extractor sits BEFORE toolcall_extractor in the
-                # per-chunk feed order above, so - unlike task/factcheck's
-                # flush() above, which route their leftover through the
-                # extractors still downstream of them - there's nothing left
-                # for toolcall's own leftover to pass through here. This is
-                # just artifact_extractor's own final flush, same as any
-                # other extractor's.
-                final_artifact_content = artifact_extractor.flush()
-                if final_artifact_content:
-                    turn_content += final_artifact_content
-                    full_response_text += final_artifact_content
-                    yield f"data: {json.dumps({'type': 'content', 'text': final_artifact_content})}\n\n"
 
                 # Fallback for a model that emits the JSON but skips the
                 # literal <tool_call> tag (observed live: nemotron-3-nano:4b
