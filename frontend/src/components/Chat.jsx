@@ -1078,6 +1078,56 @@ function Chat() {
     }
   };
 
+  // Plain-text rendering of everything a message bubble can show, not just
+  // msg.content - the copy button used to silently drop Denkprozess/Agent/
+  // Quellen/Faktencheck/Aufgaben, which only ever lived in the bubble's own
+  // separate collapsible blocks. Mirrors the bubble's own render order
+  // (ThinkingBlock -> AgentStepsBlock -> WebSourcesBlock -> FactCheckBlock ->
+  // WorkspaceProposalsBlock -> TaskListBlock -> content -> footer) so the
+  // copied text reads the same top-to-bottom as the bubble itself.
+  const buildFullMessageText = (msg) => {
+    const parts = [];
+
+    if (msg.thinking) {
+      parts.push(`🧠 Denkprozess:\n${msg.thinking}`);
+    }
+    if (msg.agentSteps && msg.agentSteps.length > 0) {
+      const lines = msg.agentSteps.map((s) => `${AGENT_STEP_ICON[s.status] || '•'} ${s.label}`);
+      parts.push(`⚙️ Agent:\n${lines.join('\n')}`);
+    }
+    if (msg.webSources && msg.webSources.length > 0) {
+      const lines = msg.webSources.map((s, i) => {
+        const date = s.dated ? formatSourceDate(s.published_at) : 'kein Datum';
+        return `${i + 1}. ${s.title || s.url} (${s.domain}, ${date})\n   ${s.url}`;
+      });
+      parts.push(`📚 Quellen:\n${lines.join('\n')}`);
+    }
+    if (msg.factcheck && msg.factcheck.length > 0) {
+      const lines = msg.factcheck.map((item) => {
+        const icon = FACTCHECK_ICON[item.confidence] || '•';
+        const source = item.source ? ` — ${item.source}` : '';
+        return `${icon} [${item.confidence}] ${item.label}${source}`;
+      });
+      parts.push(`🔎 Faktencheck:\n${lines.join('\n')}`);
+    }
+    if (msg.workspaceProposals && msg.workspaceProposals.length > 0) {
+      const lines = msg.workspaceProposals.map((p) => `- ${p.filename} (${PROPOSAL_ACTION_LABELS[p.action] || p.action})`);
+      parts.push(`📝 Workspace-Vorschläge:\n${lines.join('\n')}`);
+    }
+    if (msg.tasks && msg.tasks.length > 0) {
+      const lines = msg.tasks.map((t) => `[${t.done ? 'x' : ' '}] ${t.label}`);
+      parts.push(`📋 Aufgaben:\n${lines.join('\n')}`);
+    }
+    if (msg.content) {
+      parts.push(msg.content);
+    }
+    if (msg.model) {
+      parts.push(`— ${msg.model}${msg.mood ? ` · ${msg.mood}` : ''}`);
+    }
+
+    return parts.join('\n\n');
+  };
+
   const handleCopyMessage = async (content, index) => {
     try {
       await navigator.clipboard.writeText(content);
@@ -1495,7 +1545,7 @@ function Chat() {
                   <button
                     type="button"
                     className="bubble-copy-btn"
-                    onClick={() => handleCopyMessage(msg.content, index)}
+                    onClick={() => handleCopyMessage(buildFullMessageText(msg), index)}
                     title="Nachricht kopieren"
                   >
                     {copiedMessageIndex === index ? '✅' : '📋'}
