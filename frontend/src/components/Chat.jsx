@@ -171,48 +171,6 @@ function WebSourcesBlock({ sources }) {
   );
 }
 
-const FACTCHECK_ICON = { 'bestätigt': '✓', 'teilweise': '△', 'unbestätigt': '✗' };
-const FACTCHECK_CLASS = { 'bestätigt': 'confirmed', 'teilweise': 'partial', 'unbestätigt': 'unverified' };
-
-// Per-claim confidence rating from the model's <factcheck> block(s) - see
-// factcheck_splitter.py. Distinct from WebSourcesBlock (WHAT was found):
-// this rates specific claims in the prose AGAINST what was found. Shown
-// alongside, not instead of, normal in-prose citation.
-function FactCheckBlock({ items }) {
-  // `null` = no manual override yet, so `expanded` is derived fresh from
-  // `items` every render (open whenever at least one claim isn't fully
-  // confirmed - nothing to flag in an all-'bestätigt' result, so it starts
-  // collapsed rather than stacking a mostly-reassuring card under Quellen
-  // on every web-search answer). Once the user clicks, their explicit
-  // choice sticks regardless of what `items` does afterward.
-  const [userToggled, setUserToggled] = useState(null);
-
-  if (!items || items.length === 0) return null;
-
-  const hasLowerConfidence = items.some((item) => item.confidence !== 'bestätigt');
-  const expanded = userToggled !== null ? userToggled : hasLowerConfidence;
-
-  return (
-    <div className="factcheck-block">
-      <button type="button" className="factcheck-toggle" onClick={() => setUserToggled(!expanded)}>
-        <span>🔎 Faktencheck ({items.length})</span>
-        <span className="factcheck-caret">{expanded ? '▾' : '▸'}</span>
-      </button>
-      {expanded && (
-        <ul className="factcheck-content">
-          {items.map((item) => (
-            <li key={item.id} className={`factcheck-item ${FACTCHECK_CLASS[item.confidence] || ''}`}>
-              <span className="factcheck-icon">{FACTCHECK_ICON[item.confidence] || '•'}</span>
-              <span className="factcheck-label">{renderInlineMarkdown(item.label)}</span>
-              {item.source && <span className="factcheck-source">{item.source}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 const PROPOSAL_ACTION_LABELS = {
   create: 'anlegen', update: 'überschreiben', delete: 'löschen',
   install: 'installieren', remove: 'entfernen', // package-kind proposals (issue #5)
@@ -810,27 +768,6 @@ function Chat() {
                 // state each time, same replace-wholesale contract as
                 // 'agent_steps'/'tasks'.
                 liaraMessage.webSources = parsed.items;
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'factcheck') {
-                // Per-claim confidence ratings (see factcheck_splitter.py) -
-                // full current state each time, same replace-wholesale
-                // contract as 'tasks'/'agent_steps'/'web_sources'.
-                liaraMessage.factcheck = parsed.items;
 
                 if (!messageAdded) {
                   messageAdded = true;
@@ -1538,9 +1475,6 @@ function Chat() {
               )}
               {msg.role === 'assistant' && (
                 <WebSourcesBlock sources={msg.webSources} />
-              )}
-              {msg.role === 'assistant' && (
-                <FactCheckBlock items={msg.factcheck} />
               )}
               {msg.role === 'assistant' && (
                 <WorkspaceProposalsBlock proposals={msg.workspaceProposals} />
