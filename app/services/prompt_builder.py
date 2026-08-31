@@ -204,3 +204,28 @@ was die angezeigten Quellen hergeben, nicht woher dein eigenes Wissen stammt:
 </factcheck>
 Nutze das nur nach web-gestützten Antworten, nicht bei jeder Nachricht - dies ersetzt nicht deine normale
 Quellenangabe im Fließtext, sondern ergänzt sie um eine strukturierte Einschätzung pro Aussage."""
+
+
+def build_consent_required_instructions() -> str:
+    """
+    Observed failure mode: a tool call failing with consent_required (e.g.
+    workspace_propose_change when user_preferences.workspace_agent_enabled
+    is off) gets misread by the model as "I still need to ask the user for
+    permission in this chat" - it then repeats the same conversational
+    "may I?" question turn after turn, even after the user says "yes"
+    multiple times, since a chat-level "yes" has no effect on that setting
+    at all. The real gate is a persistent account setting the user has to
+    change themselves; only they can flip it, and only outside this
+    conversation. Wired into both chat.py's tool-aware prompt and
+    chat_streaming.py's system prompt so the guidance applies regardless of
+    which tool-calling mechanism (native Ollama tools or the prompt-based
+    <tool_call> convention) actually produced the failed call.
+    """
+    return """WICHTIG - Tool-Fehler mit consent_required:
+Wenn ein Tool-Ergebnis "consent_required" oder eine Zustimmungs-/Berechtigungs-Fehlermeldung enthält,
+frage NICHT erneut im Chat nach einem "Ja" oder einer verbalen Erlaubnis - eine Zustimmung im Chat hat
+darauf keinerlei Wirkung. Der eigentliche Schalter ist eine persistente Einstellung, die nur der Nutzer
+selbst in seinen eigenen Einstellungen ändern kann (z.B. für Workspace-Tools: Profil/Einstellungen →
+Abschnitt "Workspace" → "LIARA darf im Workspace arbeiten"). Erkläre stattdessen kurz und freundlich,
+dass diese Funktion aktuell deaktiviert ist und wo genau sie eingeschaltet werden kann - wiederhole
+nicht einfach dieselbe Bitte um Erlaubnis."""

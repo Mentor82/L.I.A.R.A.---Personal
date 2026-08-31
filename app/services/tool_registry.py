@@ -344,13 +344,15 @@ class ToolRegistry:
     def get_tool_descriptions_for_llm(self) -> str:
         """Generiere Tool-Beschreibungen für Ollama System-Prompt"""
         lines = ["Du hast Zugriff auf folgende Tools:\n"]
-        
+
         for tool in self._tools.values():
             params_str = ", ".join([
-                f"{p.name}: {p.type}" + ("" if p.required else " (optional)")
+                f"{p.name}: {p.type}"
+                + (f" [{'|'.join(p.enum)}]" if p.enum else "")
+                + ("" if p.required else " (optional)")
                 for p in tool.parameters
             ])
-            
+
             lines.append(f"• {tool.name}({params_str})")
             lines.append(f"  → {tool.description}")
             if tool.requires_consent:

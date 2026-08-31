@@ -27,7 +27,7 @@ from services.tool_parser import get_tool_parser
 from services.tool_executor import get_tool_executor
 from services.image_generation import get_image_generation_service
 from services.user_preferences_service import get_user_preferences
-from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_consent_required_instructions
 from services.chat_persistence import persist_chat_turn
 from services.hailo_rpi5_client import get_rpi5_client, RPi5Status
 
@@ -184,6 +184,8 @@ WICHTIG:
 - Bei allgemeinen Fragen → OHNE Tool antworten
 - Wenn Tool verwendet: Antworte ERST mit <tool_call>, dann warte auf Result
 - Nach Tool-Result: Beantworte die Frage mit den erhaltenen Daten
+
+{build_consent_required_instructions()}
 """
 
 

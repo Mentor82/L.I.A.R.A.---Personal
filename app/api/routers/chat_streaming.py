@@ -37,7 +37,7 @@ from services.web_search_service import get_web_search_service
 from services.location_service import get_location_service
 from services.web_safety import get_risk_analyzer, get_content_filter
 from services.user_preferences_service import get_user_preferences
-from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_task_list_instructions, build_factcheck_instructions
+from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_task_list_instructions, build_factcheck_instructions, build_consent_required_instructions
 from services.session_workspace import build_workspace_manifest, get_context_selected_files, read_session_file
 from services.thinking_splitter import ThinkingSplitter
 from services.task_splitter import TaskBlockExtractor, parse_task_items
@@ -514,6 +514,8 @@ Formatiere deine Antworten automatisch je nach Inhalt:
 {build_task_list_instructions()}
 
 {build_factcheck_instructions()}
+
+{build_consent_required_instructions()}
 
 Wähle die Formatierung automatisch basierend auf dem Inhalt:
 - Code → Code-Block mit korrekter Sprache
