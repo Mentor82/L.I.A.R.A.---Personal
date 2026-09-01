@@ -1,42 +1,35 @@
-fastapi>=0.104.1
-uvicorn[standard]>=0.24.0
-psutil>=5.9.6
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-sqlalchemy>=2.0.23
-apscheduler>=3.10.4
-python-multipart>=0.0.6
-requests>=2.31.0
-passlib>=1.7.4
-argon2-cffi>=23.1.0
-python-dotenv>=1.0.0
-beautifulsoup4>=4.12.0
-psycopg2-binary>=2.9.9
+fastapi>=0.104.1,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+psutil>=5.9.6,<8.0.0
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+sqlalchemy>=2.0.23,<3.0.0
+apscheduler>=3.10.4,<4.0.0
+python-multipart>=0.0.6,<1.0.0
+requests>=2.31.0,<3.0.0
+passlib>=1.7.4,<2.0.0
+argon2-cffi>=23.1.0,<27.0.0
+python-dotenv>=1.0.0,<2.0.0
+beautifulsoup4>=4.12.0,<5.0.0
+psycopg2-binary>=2.9.9,<3.0.0
 
 # 4D Memory Architecture Dependencies
-redis>=5.0.1
-neo4j>=5.14.1
-sentence-transformers>=2.2.2
-pgvector>=0.2.4
-python-jose[cryptography]>=3.3.0
-httpx>=0.28.0
+redis>=5.0.1,<9.0.0
+neo4j>=5.14.1,<7.0.0
+sentence-transformers>=2.2.2,<7.0.0
+pgvector>=0.2.4,<1.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0
+httpx>=0.28.0,<1.0.0
 
-# Concept extraction (POS-based noun/proper-noun extraction, replacing the
-# old length+stopword heuristic) - needs `python -m spacy download de_core_news_sm`
-# after installing, see deploy notes.
-spacy>=3.7.5
+# Concept extraction (POS-based noun/proper-noun extraction)
+spacy>=3.7.5,<4.0.0
 
 # Image Generation (Stable Diffusion via Replicate)
 # Optional: Nur wenn Bild-Generierung gewünscht
 # Keine zusätzlichen Pakete nötig (httpx schon vorhanden)
 
 # Sandboxed Code Execution (chat "Run" button) - plotting in Python
-matplotlib>=3.9.2
+matplotlib>=3.9.2,<4.0.0
 
 # Experimental LiNeP transport switch (LINEP_ENABLED, see linep_provider.py)
-# - not on public PyPI, this is the custom Mentor82/LiNeP protocol package
-# (pure-Python linep.v0_2 client only, no liblinep/cffi needed). Install
-# from a wheel built out of the LiNeP repo's python/ dir (same package
-# already installed in www.mw-dresden.de's backend venv) rather than
-# `pip install linep` - this line documents the pinned version expected.
 # linep==0.2.0
