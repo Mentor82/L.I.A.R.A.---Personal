@@ -26,9 +26,11 @@ WORKSPACE_AGENT_TOOLS = (
 )
 
 # How many top SearXNG results get a real fetch-and-extract enrichment pass
-# via the (SSRF-hardened) ProxySandbox - kept small since each one is a real
-# HTTP request with its own timeout, not just a cheap snippet lookup.
-WEB_SEARCH_ENRICH_TOP_N = 3
+# via the (SSRF-hardened) ProxySandbox - each one is a real HTTP request with
+# its own timeout, not just a cheap snippet lookup, but they run concurrently
+# (see asyncio.gather below) so this costs ~one fetch's wall-clock time
+# regardless of N.
+WEB_SEARCH_ENRICH_TOP_N = 10
 WEB_SEARCH_SOURCE_TEXT_CAP = 2000
 
 logger = logging.getLogger(__name__)
