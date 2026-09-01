@@ -38,3 +38,13 @@ def test_build_temporal_context():
         "Januar", "Februar", "März", "April", "Mai", "Juni",
         "Juli", "August", "September", "Oktober", "November", "Dezember"
     ])
+
+
+def test_build_memory_contract_instructions():
+    from services.prompt_builder import build_memory_contract_instructions
+    instructions = build_memory_contract_instructions()
+    assert "Plattformvertrag" in instructions
+    assert "ECHTE SPEICHERUNG ERFORDERLICH" in instructions
+    assert "store_memory" in instructions
+    assert "KEINE VORGETÄUSCHTE SPEICHERUNG" in instructions
+

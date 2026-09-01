@@ -27,7 +27,7 @@ PRODUCTIVITY_TOOL_NAMES = (
     "create_note", "list_notes",
     "create_task", "list_tasks", "update_task_status",
     "create_calendar_event", "list_calendar_events",
-    "search_memory"
+    "search_memory", "store_memory"
 )
 
 
@@ -157,6 +157,20 @@ def register_productivity_tools(registry) -> None:
         privacy_level="low"
     ))
 
+    registry.register_tool(ToolDefinition(
+        name="store_memory",
+        description="Speichert ein wichtiges Faktum, eine Vorliebe oder eine persönliche Information des Nutzers dauerhaft im 4D-Gedächtnis.",
+        category=ToolCategory.MEMORY,
+        parameters=[
+            ToolParameter(name="content", type="string", description="Der zu merkende Inhalt / Fakt", required=True),
+            ToolParameter(name="category", type="string", description="Kategorie (z.B. 'preference', 'fact', 'contact', 'general')", required=False, default="fact"),
+            ToolParameter(name="tags", type="array", description="Tags (optional)", required=False)
+        ],
+        function=_stub_fn,
+        requires_consent=False,
+        privacy_level="low"
+    ))
+
 
 async def _stub_fn(**kwargs):
     return {"error": "Not implemented"}
@@ -186,6 +200,8 @@ def execute_productivity_tool(
         return _execute_list_calendar_events(user_id, params, sf)
     elif tool_name == "search_memory":
         return _execute_search_memory(user_id, params)
+    elif tool_name == "store_memory":
+        return _execute_store_memory(user_id, params, sf)
     return None
 
 
@@ -553,3 +569,48 @@ def _execute_search_memory(user_id: int, params: Dict[str, Any]) -> Dict[str, An
             "memories": [],
             "message": f"Suche im 4D Memory nicht verfügbar: {str(e)}"
         }
+
+
+def _execute_store_memory(user_id: int, params: Dict[str, Any], session_factory) -> Dict[str, Any]:
+    content = (params.get("content") or "").strip()
+    if not content:
+        return {"error": "Inhalt der Erinnerung darf nicht leer sein"}
+    category = params.get("category", "fact")
+    tags = params.get("tags") or []
+    
+    with session_factory() as db:
+        short_title = content[:40] + ("..." if len(content) > 40 else "")
+        note = Note(
+            user_id=user_id,
+            title=f"Erinnerung ({category}): {short_title}",
+            content=content,
+            category=category,
+            tags=list(set(tags + ["memory", "fact"])),
+            is_pinned=False,
+            is_archived=False
+        )
+        db.add(note)
+        db.commit()
+        db.refresh(note)
+        note_id = note.id
+        
+        try:
+            store_in_4d_memory(
+                db=db,
+                user_id=user_id,
+                content_type="memory",
+                content_id=note_id,
+                content_text=content,
+                additional_context={"category": category, "tags": tags}
+            )
+        except Exception as e:
+            logger.warning(f"4D Memory indexing failed for store_memory: {e}")
+
+    return {
+        "success": True,
+        "note_id": note_id,
+        "content": content,
+        "category": category,
+        "message": f"✅ Erinnerung / Fakt erfolgreich im 4D-Gedächtnis gespeichert: \"{content}\""
+    }
+

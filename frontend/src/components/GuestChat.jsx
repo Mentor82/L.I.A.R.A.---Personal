@@ -3,6 +3,7 @@ import { guestAPI } from '../services/guestApi';
 import SearchingIndicator from './SearchingIndicator';
 import WebSearchResults from './WebSearchResults';
 import MarkdownMessage from './MarkdownMessage';
+import liaraLogo from '../assets/LIARA-LOGO.png';
 import './Chat.css';
 
 // Collapsible display for reasoning-model output, kept separate from the
@@ -255,7 +256,7 @@ function GuestChat() {
     <div className="chat-container">
       <div className="chat-header">
         <div className="chat-title">
-          <h2>🌙 Chat mit Liara (Gast-Modus)</h2>
+          <h2><img src={liaraLogo} alt="LIARA" className="chat-title-logo" /> Chat mit Liara (Gast-Modus)</h2>
           {welcomeData && (
             <span className="guest-mode-badge">
               👋 Gast • {messageCount}/{welcomeData.limitations.max_messages_per_session} Nachrichten
@@ -274,7 +275,9 @@ function GuestChat() {
         {messages.map((msg, idx) => (
           <div key={idx} className={`message-bubble message-${msg.role}`}>
             <div className="bubble-avatar">
-              {msg.role === 'user' ? '👤' : msg.role === 'assistant' ? '🌙' : '⚠️'}
+              {msg.role === 'user' ? '👤' : msg.role === 'assistant' ? (
+                <img src={liaraLogo} alt="LIARA" className="bubble-avatar-logo" />
+              ) : '⚠️'}
             </div>
             <div className="bubble-content">
               <div className="bubble-header">
@@ -336,7 +339,9 @@ function GuestChat() {
 
         {loading && (
           <div className="message-bubble message-assistant loading-bubble">
-            <div className="bubble-avatar">🌙</div>
+            <div className="bubble-avatar thinking">
+              <img src={liaraLogo} alt="LIARA" className="bubble-avatar-logo" />
+            </div>
             <div className="bubble-content">
               <div className="bubble-header">
                 <span className="bubble-sender">Liara</span>

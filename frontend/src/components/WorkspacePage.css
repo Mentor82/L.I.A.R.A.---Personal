@@ -1413,50 +1413,23 @@
   gap: 0.85rem;
 }
 
-.status-item {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
+.status-item { display: flex; align-items: center; gap: 0.35rem; }
+.status-item.session-tag { color: #a0aec0; font-weight: 500; }
+.status-item.file-tag { color: var(--color-text); font-weight: 500; }
+.status-item.proposals-tag { color: #f6ad55; font-weight: 600; }
+.status-item.env-tag { color: #68d391; font-family: monospace; }
+.status-item.terminal-tag {
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 4px;
+  color: var(--color-text); font-size: 0.72rem; padding: 0.15rem 0.45rem; cursor: pointer; transition: all 0.2s ease;
 }
-
-.status-item.session-tag {
-  color: #a0aec0;
-  font-weight: 500;
-}
-
-.status-item.file-tag {
-  color: var(--color-text);
-  font-weight: 500;
-}
-
-.status-item.proposals-tag {
-  color: #f6ad55;
-  font-weight: 600;
-}
-
-.status-item.env-tag {
-  color: #68d391;
-  font-family: monospace;
-}
-
+.status-item.terminal-tag:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(0, 229, 255, 0.4); }
+.status-item.terminal-tag.active { background: rgba(0, 229, 255, 0.15); border-color: #00e5ff; color: #00e5ff; }
 .status-item.agent-tag {
-  background: transparent;
-  border: 1px solid rgba(0, 229, 255, 0.3);
-  border-radius: 4px;
-  color: #00e5ff;
-  font-size: 0.72rem;
-  padding: 0.15rem 0.45rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  background: transparent; border: 1px solid rgba(0, 229, 255, 0.3); border-radius: 4px;
+  color: #00e5ff; font-size: 0.72rem; padding: 0.15rem 0.45rem; cursor: pointer; transition: all 0.2s ease;
 }
+.status-item.agent-tag:hover { background: rgba(0, 229, 255, 0.1); }
+.status-item.agent-tag.active { background: rgba(0, 229, 255, 0.2); border-color: #00e5ff; box-shadow: 0 0 8px rgba(0, 229, 255, 0.3); }
+.workspace-file-icon { margin-right: 0.4rem; font-size: 0.85rem; opacity: 0.85; }
 
-.status-item.agent-tag:hover {
-  background: rgba(0, 229, 255, 0.1);
-}
-
-.status-item.agent-tag.active {
-  background: rgba(0, 229, 255, 0.2);
-  border-color: #00e5ff;
-  box-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
-}
 

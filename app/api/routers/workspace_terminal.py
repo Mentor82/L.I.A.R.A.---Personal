@@ -25,11 +25,16 @@ import struct
 import termios
 from pathlib import Path
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import signal
+import subprocess
+import time
+import psutil
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy import text
 
-from core.database import SessionLocal
-from core.dependencies import get_current_user_ws
+from core.database import SessionLocal, get_db
+from core.dependencies import get_current_user_ws, require_active_user
+from api.models.base_models import User
 from services.session_workspace import (
     SESSION_FILES_DIR,
     ensure_session_venv_dir,
@@ -42,6 +47,149 @@ logger = logging.getLogger(__name__)
 
 RUNNER_USER = "liara-runner"
 RUNNER_SHELL_SCRIPT = str(Path(__file__).resolve().parent.parent.parent / "scripts" / "run_sandboxed_shell.sh")
+
+
+@router.get("/sessions/{session_id}/processes")
+async def list_session_processes(
+    session_id: int,
+    current_user: User = Depends(require_active_user),
+    db: SessionLocal = Depends(get_db),
+):
+    """Listet alle aktiven Sandbox-Prozesse für die gegebene Workspace-Session."""
+    if not _session_owned(db, session_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+
+    session_marker = f"/session_files/{current_user.id}/{session_id}"
+    now = time.time()
+    processes = []
+
+    for p in psutil.process_iter(['pid', 'name', 'username', 'cmdline', 'create_time', 'memory_info']):
+        try:
+            info = p.info
+            if info.get('username') == RUNNER_USER:
+                cmd_list = info.get('cmdline') or []
+                cmd_str = " ".join(cmd_list)
+                is_this_session = session_marker in cmd_str
+                try:
+                    cwd = p.cwd()
+                    if session_marker in cwd:
+                        is_this_session = True
+                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                    pass
+
+                # Also match if cmdline is a workspace python / bash runner
+                if is_this_session:
+                    create_t = info.get('create_time') or now
+                    age_s = max(0, int(now - create_t))
+                    mem_mb = round((info['memory_info'].rss if info.get('memory_info') else 0) / (1024 * 1024), 1)
+
+                    # Extract concise display command
+                    display_cmd = cmd_str
+                    if "python" in info['name'] or "script.py" in cmd_str:
+                        # find target script
+                        parts = cmd_str.split()
+                        for part in reversed(parts):
+                            if part.endswith(('.py', '.jl', '.sh')):
+                                display_cmd = f"{info['name']} {Path(part).name}"
+                                break
+
+                    processes.append({
+                        "pid": info['pid'],
+                        "name": info['name'],
+                        "cmdline": display_cmd[:100],
+                        "full_cmdline": cmd_str[:250],
+                        "created_at": create_t,
+                        "running_seconds": age_s,
+                        "memory_mb": mem_mb,
+                    })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    return {"processes": processes, "count": len(processes)}
+
+
+def _kill_runner_process(workspace_dir: Path, pid: int) -> bool:
+    try:
+        proc = psutil.Process(pid)
+        if proc.username() != RUNNER_USER:
+            return False
+    except psutil.NoSuchProcess:
+        return True
+
+    # 1. Direct kill attempt
+    try:
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except (PermissionError, ProcessLookupError):
+        pass
+
+    # 2. Invoke manage_venv.sh kill via sudo
+    manage_script = str(Path(__file__).resolve().parent.parent.parent / "scripts" / "manage_venv.sh")
+    try:
+        res = subprocess.run(
+            ["sudo", "-n", "-u", RUNNER_USER, "--", manage_script, str(workspace_dir), "kill", str(pid)],
+            capture_output=True,
+            timeout=5,
+        )
+        return res.returncode == 0
+    except Exception as e:
+        logger.error(f"Failed to kill runner process {pid}: {e}")
+        return False
+
+
+@router.post("/sessions/{session_id}/processes/{pid}/kill")
+async def kill_session_process(
+    session_id: int,
+    pid: int,
+    current_user: User = Depends(require_active_user),
+    db: SessionLocal = Depends(get_db),
+):
+    """Beendet einen aktiven Sandbox-Prozess."""
+    if not _session_owned(db, session_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+
+    session_dir = SESSION_FILES_DIR / str(current_user.id) / str(session_id)
+    workspace_dir = session_dir / "workspace"
+
+    success = _kill_runner_process(workspace_dir, pid)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Prozess {pid} konnte nicht beendet werden")
+    return {"ok": True, "message": f"Prozess {pid} erfolgreich beendet"}
+
+
+@router.post("/sessions/{session_id}/processes/kill-all")
+async def kill_all_session_processes(
+    session_id: int,
+    current_user: User = Depends(require_active_user),
+    db: SessionLocal = Depends(get_db),
+):
+    """Beendet alle aktiven Sandbox-Prozesse dieser Session."""
+    if not _session_owned(db, session_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+
+    session_dir = SESSION_FILES_DIR / str(current_user.id) / str(session_id)
+    workspace_dir = session_dir / "workspace"
+    session_marker = f"/session_files/{current_user.id}/{session_id}"
+    killed_count = 0
+
+    for p in psutil.process_iter(['pid', 'username', 'cmdline']):
+        try:
+            if p.info.get('username') == RUNNER_USER:
+                cmd_str = " ".join(p.info.get('cmdline') or [])
+                is_this_session = session_marker in cmd_str
+                try:
+                    if session_marker in p.cwd():
+                        is_this_session = True
+                except Exception:
+                    pass
+
+                if is_this_session:
+                    if _kill_runner_process(workspace_dir, p.info['pid']):
+                        killed_count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    return {"ok": True, "killed_count": killed_count}
 
 
 def _session_owned(db, session_id: int, user_id: int) -> bool:

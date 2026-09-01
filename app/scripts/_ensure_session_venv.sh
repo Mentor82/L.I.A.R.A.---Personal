@@ -7,7 +7,17 @@
 ensure_session_venv() {
   local session_venv="$1"
   local py_ver="${2:-3.14}"
+  local parent_dir
+  parent_dir="$(dirname "$session_venv")"
+
   if [ -x "$session_venv/bin/python3" ]; then
+    if [ "$py_ver" = "3.14" ]; then
+      if [ "$session_venv" = "$parent_dir/.venv" ] && [ ! -e "$parent_dir/.venv_3.14" ]; then
+        ln -sf .venv "$parent_dir/.venv_3.14" 2>/dev/null || true
+      elif [ "$session_venv" = "$parent_dir/.venv_3.14" ] && [ ! -e "$parent_dir/.venv" ]; then
+        ln -sf .venv_3.14 "$parent_dir/.venv" 2>/dev/null || true
+      fi
+    fi
     return 0
   fi
 
@@ -30,4 +40,12 @@ ensure_session_venv() {
     echo "$runner_site" > "$session_site/_runner_venv.pth"
   fi
   chmod -R 777 "$session_venv" 2>/dev/null || true
+
+  if [ "$py_ver" = "3.14" ]; then
+    if [ "$session_venv" = "$parent_dir/.venv" ] && [ ! -e "$parent_dir/.venv_3.14" ]; then
+      ln -sf .venv "$parent_dir/.venv_3.14" 2>/dev/null || true
+    elif [ "$session_venv" = "$parent_dir/.venv_3.14" ] && [ ! -e "$parent_dir/.venv" ]; then
+      ln -sf .venv_3.14 "$parent_dir/.venv" 2>/dev/null || true
+    fi
+  fi
 }

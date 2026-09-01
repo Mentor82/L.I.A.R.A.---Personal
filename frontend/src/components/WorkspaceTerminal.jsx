@@ -1,22 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { workspaceAPI } from '../services/api';
 import './WorkspaceTerminal.css';
 
-// Sandboxed interactive shell for one Workspace session - the same xterm.js +
-// WebSocket-PTY pattern as the admin panel's TerminalTabs.jsx, but a single
-// always-on session (no multi-tab management, no SSH mode) scoped to
-// api/routers/workspace_terminal.py's per-session endpoint, which runs the
-// shell as the unprivileged liara-runner OS user (see run_sandboxed_shell.sh)
-// instead of the admin terminal's own unrestricted local shell.
-export default function WorkspaceTerminal({ sessionId, onClose }) {
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return '0s';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m === 0) return `${s}s`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  if (h === 0) return `${m}m ${s}s`;
+  return `${h}h ${remM}m`;
+}
+
+function SingleTerminalInstance({ sessionId, active, onStatusChange }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
   const fitAddonRef = useRef(null);
   const wsRef = useRef(null);
-  const [status, setStatus] = useState('connecting'); // 'connecting' | 'connected' | 'disconnected'
 
   useEffect(() => {
     if (!sessionId || !containerRef.current) return;
@@ -24,11 +29,8 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
     const term = new XTerm({
       cursorBlink: true,
       cursorStyle: 'block',
-      // Matches this project's other monospace UI (workspace file search
-      // etc.) - JetBrains Mono reads noticeably crisper than Fira Code at
-      // small sizes for lookalike characters (l/1/I, 0/O).
       fontFamily: '"JetBrains Mono", "Fira Code", "Courier New", monospace',
-      fontSize: 10,
+      fontSize: 11,
       lineHeight: 1.3,
       scrollback: 2000,
       convertEol: true,
@@ -55,6 +57,7 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
         brightWhite: '#8a8a8a',
       },
     });
+
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
@@ -69,10 +72,11 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
       const token = localStorage.getItem('liara_token');
       if (!token) {
         term.writeln('\x1b[1;31m❌ Keine Authentifizierung gefunden\x1b[0m');
-        setStatus('disconnected');
+        onStatusChange?.('disconnected');
         return;
       }
 
+      onStatusChange?.('connecting');
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/workspace/sessions/${sessionId}/terminal/ws`;
       ws = new WebSocket(wsUrl, [token]);
@@ -80,14 +84,12 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
 
       ws.onopen = () => {
         if (disposed) return;
-        setStatus('connected');
+        onStatusChange?.('connected');
         setTimeout(() => {
           try {
             fitAddon.fit();
             ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-          } catch {
-            // pane not visible yet - next resize/fit pass will catch up
-          }
+          } catch {}
         }, 150);
       };
 
@@ -104,11 +106,11 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
         }
       };
 
-      ws.onerror = () => setStatus('disconnected');
+      ws.onerror = () => onStatusChange?.('disconnected');
 
       ws.onclose = () => {
         if (disposed) return;
-        setStatus('disconnected');
+        onStatusChange?.('disconnected');
         term.writeln('');
         term.writeln('\x1b[1;31m🔌 Verbindung getrennt\x1b[0m');
       };
@@ -128,9 +130,7 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }
-      } catch {
-        // container might still be mid-layout - next observed resize retries
-      }
+      } catch {}
     });
     resizeObserver.observe(containerRef.current);
 
@@ -142,15 +142,214 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    if (active && fitAddonRef.current) {
+      setTimeout(() => {
+        try {
+          fitAddonRef.current.fit();
+          if (wsRef.current?.readyState === WebSocket.OPEN && termRef.current) {
+            wsRef.current.send(JSON.stringify({
+              type: 'resize',
+              cols: termRef.current.cols,
+              rows: termRef.current.rows,
+            }));
+          }
+        } catch {}
+      }, 50);
+    }
+  }, [active]);
+
+  return (
+    <div
+      className="workspace-shell-body"
+      ref={containerRef}
+      style={{ display: active ? 'block' : 'none' }}
+    />
+  );
+}
+
+export default function WorkspaceTerminal({ sessionId, onClose }) {
+  const [terminalTabs, setTerminalTabs] = useState([{ id: 1, name: 'Shell 1', status: 'connecting' }]);
+  const [activeTabId, setActiveTabId] = useState(1);
+  const [processes, setProcesses] = useState([]);
+  const [processesOpen, setProcessesOpen] = useState(false);
+  const [killingPid, setKillingPid] = useState(null);
+  const nextTabIdRef = useRef(2);
+  const popoverRef = useRef(null);
+
+  const loadProcesses = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const data = await workspaceAPI.listProcesses(sessionId);
+      setProcesses(data.processes || []);
+    } catch {
+      setProcesses([]);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    loadProcesses();
+    const interval = setInterval(loadProcesses, 3000);
+    return () => clearInterval(interval);
+  }, [loadProcesses]);
+
+  // Click outside closes popover
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setProcessesOpen(false);
+      }
+    };
+    if (processesOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [processesOpen]);
+
+  const handleKill = async (pid) => {
+    setKillingPid(pid);
+    try {
+      await workspaceAPI.killProcess(sessionId, pid);
+      await loadProcesses();
+    } catch (err) {
+      console.error('Kill failed:', err);
+    } finally {
+      setKillingPid(null);
+    }
+  };
+
+  const handleKillAll = async () => {
+    try {
+      await workspaceAPI.killAllProcesses(sessionId);
+      await loadProcesses();
+    } catch (err) {
+      console.error('Kill all failed:', err);
+    }
+  };
+
+  const addTab = () => {
+    const newId = nextTabIdRef.current++;
+    const newTab = { id: newId, name: `Shell ${newId}`, status: 'connecting' };
+    setTerminalTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newId);
+  };
+
+  const closeTab = (tabId, e) => {
+    e.stopPropagation();
+    setTerminalTabs((prev) => {
+      const filtered = prev.filter((t) => t.id !== tabId);
+      if (filtered.length === 0) {
+        onClose?.();
+        return prev;
+      }
+      if (activeTabId === tabId) {
+        setActiveTabId(filtered[filtered.length - 1].id);
+      }
+      return filtered;
+    });
+  };
+
+  const handleStatusChange = (tabId, newStatus) => {
+    setTerminalTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, status: newStatus } : t))
+    );
+  };
+
   return (
     <div className="workspace-shell-panel">
       <div className="workspace-shell-header">
-        <span>
-          💻 Terminal <span className={`workspace-shell-status ${status}`}>●</span>
-        </span>
-        <button className="workspace-icon-btn" onClick={onClose} title="Schließen">✕</button>
+        <div className="workspace-shell-tabs">
+          {terminalTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`workspace-shell-tab ${activeTabId === tab.id ? 'active' : ''}`}
+              onClick={() => setActiveTabId(tab.id)}
+            >
+              <span>💻 {tab.name}</span>
+              <span className={`workspace-shell-status ${tab.status || 'connecting'}`}>●</span>
+              {terminalTabs.length > 1 && (
+                <span className="workspace-tab-close" onClick={(e) => closeTab(tab.id, e)} title="Terminal schließen">✕</span>
+              )}
+            </button>
+          ))}
+          <button className="workspace-icon-btn workspace-add-shell-btn" onClick={addTab} title="Neues Terminal öffnen">➕</button>
+        </div>
+
+        <div className="workspace-shell-actions" ref={popoverRef}>
+          <button
+            className={`workspace-processes-toggle ${processes.length > 0 ? 'has-processes' : ''} ${processesOpen ? 'active' : ''}`}
+            onClick={() => {
+              setProcessesOpen((v) => !v);
+              if (!processesOpen) loadProcesses();
+            }}
+            title="Laufende Sandbox-Prozesse anzeigen & verwalten"
+          >
+            ⚡ {processes.length} {processes.length === 1 ? 'Prozess' : 'Prozesse'}
+            {processes.length > 0 && <span className="workspace-proc-pulse" />}
+          </button>
+
+          {processesOpen && (
+            <div className="workspace-processes-popover">
+              <div className="workspace-processes-header">
+                <span>Laufende Prozesse ({processes.length})</span>
+                {processes.length > 0 && (
+                  <button className="workspace-btn-danger-sm" onClick={handleKillAll} title="Alle Prozesse beenden">
+                    🧹 Alle beenden
+                  </button>
+                )}
+              </div>
+              {processes.length === 0 ? (
+                <p className="workspace-hint">Keine Hintergrund-Prozesse aktiv.</p>
+              ) : (
+                <ul className="workspace-proc-list">
+                  {processes.map((proc) => {
+                    const isPy = proc.name.includes('python');
+                    const isJl = proc.name.includes('julia');
+                    const icon = isPy ? '🐍' : isJl ? '🟣' : '⚙️';
+
+                    return (
+                      <li key={proc.pid} className="workspace-proc-item">
+                        <div className="workspace-proc-main">
+                          <span className="workspace-proc-icon">{icon}</span>
+                          <div className="workspace-proc-details">
+                            <span className="workspace-proc-cmd" title={proc.full_cmdline || proc.cmdline}>
+                              {proc.cmdline || proc.name}
+                            </span>
+                            <span className="workspace-proc-meta">
+                              PID: {proc.pid} • Laufzeit: {formatDuration(proc.running_seconds)} • {proc.memory_mb} MB RAM
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          className="workspace-proc-kill-btn"
+                          disabled={killingPid === proc.pid}
+                          onClick={() => handleKill(proc.pid)}
+                          title="Prozess beenden"
+                        >
+                          {killingPid === proc.pid ? '…' : '❌ Kill'}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <button className="workspace-icon-btn" onClick={onClose} title="Terminal ausblenden">✕</button>
+        </div>
       </div>
-      <div className="workspace-shell-body" ref={containerRef} />
+
+      <div className="workspace-shell-bodies">
+        {terminalTabs.map((tab) => (
+          <SingleTerminalInstance
+            key={tab.id}
+            sessionId={sessionId}
+            active={activeTabId === tab.id}
+            onStatusChange={(status) => handleStatusChange(tab.id, status)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

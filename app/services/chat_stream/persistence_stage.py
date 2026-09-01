@@ -61,7 +61,7 @@ def persist_user_turn_under_lock(
 
         logger.info(f"Persisted user message {user_message_id} in session {session_id}")
 
-        if memory_enabled and not used_tools and user_message_id:
+        if memory_enabled and user_message_id:
             try:
                 store_message_with_concepts(
                     user_id=user_id,

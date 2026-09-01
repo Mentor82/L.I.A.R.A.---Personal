@@ -20,14 +20,24 @@ set -euo pipefail
 WORKSPACE_DIR="$1"
 ACTION="$2"
 PACKAGE_SPEC="${3:-}"
+PY_VER="${4:-3.14}"
 
 # Same sibling-of-workspace/ location run_sandboxed.sh uses and creates -
 # reused here (created on first package install/remove for a session that
 # has never run any code yet), not a second, separate venv concept.
 # shellcheck source=_ensure_session_venv.sh
 source "$(dirname "$0")/_ensure_session_venv.sh"
-SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
-ensure_session_venv "$SESSION_VENV"
+
+if [ "$PY_VER" = "3.14" ]; then
+  if [ -d "$(dirname "$WORKSPACE_DIR")/.venv" ]; then
+    SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
+  else
+    SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv_3.14"
+  fi
+else
+  SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv_$PY_VER"
+fi
+ensure_session_venv "$SESSION_VENV" "$PY_VER"
 
 # Modest resource limits - this only ever runs pip, not arbitrary user code,
 # but still shouldn't be able to fork-bomb or hang forever on a bad network.
@@ -59,6 +69,18 @@ case "$ACTION" in
   version)
     "$SESSION_VENV/bin/python3" --version
     CODE=$?
+    ;;
+  kill)
+    TARGET_PID="$PACKAGE_SPEC"
+    if [[ "$TARGET_PID" =~ ^[0-9]+$ ]]; then
+      kill -TERM "$TARGET_PID" 2>/dev/null || true
+      sleep 0.1
+      kill -KILL "$TARGET_PID" 2>/dev/null || true
+      CODE=0
+    else
+      echo "Invalid PID: $TARGET_PID" >&2
+      CODE=1
+    fi
     ;;
   *)
     echo "Unknown action: $ACTION" >&2

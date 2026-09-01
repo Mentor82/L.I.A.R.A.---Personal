@@ -79,6 +79,7 @@ class StreamChatRequest(BaseModel):
     context: Optional[str] = None
     max_tokens: Optional[int] = 2000
     session_id: Optional[int] = None
+    images: Optional[List[str]] = None
 
 
 class GuestStreamRequest(BaseModel):
@@ -129,9 +130,17 @@ async def stream_chat(
     search_keywords = ['wetter', 'weather', 'temperatur', 'news', 'nachrichten', 'wikipedia', 'was ist', 'google', 'suche']
     needs_web_search = any(kw in message_lower for kw in search_keywords)
 
-    action_keywords = ['erstell', 'create', 'neue task', 'neue notiz', 'neuer termin']
-    list_keywords = ['zeig mir meine', 'zeig meine', 'liste meine', 'welche aufgaben', 'welche termine',
-                     'welche notizen', 'meine aufgaben', 'meine tasks', 'meine termine', 'meine notizen']
+    action_keywords = [
+        'erstell', 'create', 'neue task', 'neue aufgabe', 'neue notiz', 'neuer termin', 'neues event',
+        'erinner', 'reminder', 'merk dir', 'merke dir', 'merk es', 'speicher', 'schreib auf', 'trag ein',
+        'trage ein', 'notier', 'plan', 'setz', 'to-do', 'todo'
+    ]
+    list_keywords = [
+        'zeig mir meine', 'zeig meine', 'liste meine', 'welche aufgaben', 'welche termine',
+        'welche notizen', 'meine aufgaben', 'meine tasks', 'meine termine', 'meine notizen',
+        'meine erinnerungen', 'welche erinnerungen', 'was steht an', 'was habe ich vor',
+        'was ist zu tun', 'was muss ich', 'heute an', 'morgen an'
+    ]
     needs_action_check = any(kw in message_lower for kw in action_keywords) or any(kw in message_lower for kw in list_keywords)
 
     search_intent = None
@@ -241,7 +250,8 @@ async def stream_chat(
             user_message_id=None,
             memory_enabled=user_prefs['memory_enabled'],
             used_tools=used_tools,
-            session_lock=None
+            session_lock=None,
+            images=request.images
         )),
         media_type="text/event-stream",
         headers={

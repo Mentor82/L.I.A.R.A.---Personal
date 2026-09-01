@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
+import { ViewModeProvider, useViewMode } from './contexts/ViewModeContext'
 import { preferencesAPI, workspaceAPI } from './services/api'
 import liaraLogo from './assets/LIARA-LOGO.png'
 
@@ -14,6 +15,9 @@ import LanguageSwitcher from './components/LanguageSwitcher'
 
 // Lazy loaded components (loaded on demand)
 const Chat = lazy(() => import('./components/Chat'))
+const MobileChat = lazy(() => import('./components/mobile/MobileChat'))
+const MobileWorkspace = lazy(() => import('./components/mobile/MobileWorkspace'))
+const MobileSettings = lazy(() => import('./components/mobile/MobileSettings'))
 const GuestChat = lazy(() => import('./components/GuestChat'))
 const FeaturesPage = lazy(() => import('./components/FeaturesPage'))
 const IdentityPage = lazy(() => import('./components/IdentityPage'))
@@ -277,154 +281,164 @@ function App() {
 
   return (
     <Router>
-      <TerminalDockProvider>
-      <div className="app">
-        {/* Keeps terminal sessions alive across the whole app, not just within /admin */}
-        {isAdmin && <PersistentTerminal />}
+      <ViewModeProvider>
+        <TerminalDockProvider>
+          <AuthenticatedApp
+            user={user}
+            isGuest={isGuest}
+            isAdmin={isAdmin}
+            initials={initials}
+            handleLogout={handleLogout}
+            showLocationConsent={showLocationConsent}
+            handleLocationConsentComplete={handleLocationConsentComplete}
+            workspaceEnabled={workspaceEnabled}
+            pendingProposalsCount={pendingProposalsCount}
+          />
+        </TerminalDockProvider>
+      </ViewModeProvider>
+    </Router>
+  )
+}
 
-        {/* Location Consent Modal */}
-        {showLocationConsent && (
-          <LocationConsent onComplete={handleLocationConsentComplete} />
-        )}
+function AuthenticatedApp({
+  user, isGuest, isAdmin, initials, handleLogout,
+  showLocationConsent, handleLocationConsentComplete,
+  workspaceEnabled, pendingProposalsCount
+}) {
+  const { t } = useTranslation()
+  const { isMobile, setViewMode } = useViewMode()
 
-        {/* Header */}
-        <header className="app-header">
-          <div className="app-header-content">
-            <NavLink to="/chat" className="app-logo">
-              <img src={liaraLogo} alt="LIARA" className="app-logo-icon" />
-              <span className="app-logo-text">LIARA</span>
-            </NavLink>
-            
-            <div className="user-menu">
-              {isGuest && (
-                <span className="guest-badge">
-                  <span>👋</span>
-                  <span>Gast-Modus</span>
-                </span>
-              )}
-              <div className="user-avatar">
-                {initials}
-              </div>
-              <div className="hide-mobile">
-                <div className="user-name">{user.full_name || user.username}</div>
-                <div className="user-role">{user.role}</div>
-              </div>
-              <div className="user-actions">
-                <NavLink to="/architecture" className="btn btn-ghost btn-sm" title="Architektur-Übersicht">
-                  🧭
-                </NavLink>
-                <LanguageSwitcher />
-                <ThemeToggle />
-                <button onClick={handleLogout} className="btn btn-ghost btn-sm logout-btn">
-                  <span className="hide-mobile">🚪</span>
-                  <span className="show-desktop">{t('nav.logout')}</span>
-                </button>
-              </div>
+  // In Mobile View, render the focused ChatGPT/Copilot style UI
+  if (isMobile) {
+    return (
+      <div className="app mobile-mode">
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/chat" element={isGuest ? <GuestChat /> : <MobileChat user={user} onLogout={handleLogout} />} />
+            <Route path="/workspace" element={<MobileWorkspace />} />
+            <Route path="/settings" element={<MobileSettings user={user} onLogout={handleLogout} />} />
+            <Route path="/config" element={<MobileSettings user={user} onLogout={handleLogout} />} />
+            <Route path="/health" element={<SystemHealth />} />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
+        </Suspense>
+      </div>
+    )
+  }
+
+  // Full Desktop View
+  return (
+    <div className="app">
+      {isAdmin && <PersistentTerminal />}
+      {showLocationConsent && <LocationConsent onComplete={handleLocationConsentComplete} />}
+
+      <header className="app-header">
+        <div className="app-header-content">
+          <NavLink to="/chat" className="app-logo">
+            <img src={liaraLogo} alt="LIARA" className="app-logo-icon" />
+            <span className="app-logo-text">LIARA</span>
+          </NavLink>
+          
+          <div className="user-menu">
+            {isGuest && (
+              <span className="guest-badge"><span>👋</span><span>Gast-Modus</span></span>
+            )}
+            <div className="user-avatar">{initials}</div>
+            <div className="hide-mobile">
+              <div className="user-name">{user.full_name || user.username}</div>
+              <div className="user-role">{user.role}</div>
+            </div>
+            <div className="user-actions">
+              <button
+                onClick={() => setViewMode('mobile')}
+                className="btn btn-ghost btn-sm"
+                title={t('mobile.switchMobile')}
+              >
+                📱
+              </button>
+              <NavLink to="/architecture" className="btn btn-ghost btn-sm" title="Architektur-Übersicht">
+                🧭
+              </NavLink>
+              <LanguageSwitcher />
+              <ThemeToggle />
+              <button onClick={handleLogout} className="btn btn-ghost btn-sm logout-btn">
+                <span className="hide-mobile">🚪</span>
+                <span className="show-desktop">{t('nav.logout')}</span>
+              </button>
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Navigation */}
-        <nav className="app-nav">
-          <NavLink to="/chat" className="nav-link">
-            <span>💬</span> <span>{t('nav.chat')}</span>
-          </NavLink>
-          {!isGuest && (
-            <>
-              <NavLink to="/tasks" className="nav-link">
-                <span>✓</span> <span>{t('nav.tasks')}</span>
+      {/* Navigation */}
+      <nav className="app-nav">
+        <NavLink to="/chat" className="nav-link"><span>💬</span> <span>{t('nav.chat')}</span></NavLink>
+        {!isGuest && (
+          <>
+            <NavLink to="/tasks" className="nav-link"><span>✓</span> <span>{t('nav.tasks')}</span></NavLink>
+            <NavLink to="/calendar" className="nav-link"><span>📅</span> <span>Kalender</span></NavLink>
+            <NavLink to="/notes" className="nav-link"><span>📝</span> <span>Notizen</span></NavLink>
+            {workspaceEnabled && (
+              <NavLink to="/workspace" className="nav-link">
+                <span>🗂️</span> <span>Workspace</span>
+                {pendingProposalsCount > 0 && <span className="nav-badge">{pendingProposalsCount}</span>}
               </NavLink>
-              <NavLink to="/calendar" className="nav-link">
-                <span>📅</span> <span>Kalender</span>
-              </NavLink>
-              <NavLink to="/notes" className="nav-link">
-                <span>📝</span> <span>Notizen</span>
-              </NavLink>
-              {workspaceEnabled && (
-                <NavLink to="/workspace" className="nav-link">
-                  <span>🗂️</span> <span>Workspace</span>
-                  {pendingProposalsCount > 0 && (
-                    <span className="nav-badge" title={`${pendingProposalsCount} Vorschlag/Vorschläge von LIARA wartet/warten auf Prüfung`}>
-                      {pendingProposalsCount}
-                    </span>
-                  )}
-                </NavLink>
-              )}
-              <NavLink to="/mood" className="nav-link">
-                <span>😊</span> <span>Stimmung</span>
-              </NavLink>
-              <NavLink to="/vision" className="nav-link">
-                <span>👁️</span> <span>Vision</span>
-              </NavLink>
-              <NavLink to="/settings" className="nav-link">
-                <span>👤</span> <span>{t('nav.profile')}</span>
-              </NavLink>
-            </>
-          )}
-          {isAdmin && (
-            <NavLink to="/admin" className="nav-link">
-              <span>🛠️</span> <span>Admin</span>
-            </NavLink>
-          )}
-        </nav>
+            )}
+            <NavLink to="/mood" className="nav-link"><span>😊</span> <span>Stimmung</span></NavLink>
+            <NavLink to="/vision" className="nav-link"><span>👁️</span> <span>Vision</span></NavLink>
+            <NavLink to="/settings" className="nav-link"><span>👤</span> <span>{t('nav.profile')}</span></NavLink>
+          </>
+        )}
+        {isAdmin && <NavLink to="/admin" className="nav-link"><span>🛠️</span> <span>Admin</span></NavLink>}
+      </nav>
 
-        {/* Main Content */}
-        <main className="app-main">
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-              <Route path="/" element={<Navigate to="/chat" replace />} />
-              <Route path="/chat" element={isGuest ? <GuestChat /> : <Chat />} />
-              
-              {!isGuest && (
-                <>
-                  <Route path="/mood" element={<MoodDashboard />} />
-                  <Route path="/config" element={<Config />} />
-                  <Route path="/tasks" element={<Tasks />} />
-                  <Route path="/calendar" element={<CalendarView />} />
-                  <Route path="/notes" element={<NotesFileManager />} />
-                  {workspaceEnabled && <Route path="/workspace" element={<WorkspacePage />} />}
-                  <Route path="/profile" element={<ProfileEdit />} />
-                  <Route path="/vision" element={<VisionDetect />} />
-                  
-                  {/* User Settings with Sub-Routes */}
-                  <Route path="/settings" element={<UserSettings />}>
-                    <Route index element={<Navigate to="/settings/profile" replace />} />
-                    <Route path="profile" element={<UserProfile />} />
-                    <Route path="privacy" element={<PrivacySettings />} />
-                    <Route path="preferences" element={<UserPreferences />} />
-                  </Route>
-                </>
-              )}
-
-              {isAdmin && (
-                <>
-                  <Route path="/admin" element={<AdminLayout user={user} onLogout={handleLogout} />}>
-                    <Route index element={<AdminDashboard />} />
-                    <Route path="dashboard" element={<AdminDashboard />} />
-                    <Route path="users" element={<UserManagement />} />
-                    <Route path="system" element={<SystemConfig />} />
-                    <Route path="logs" element={<LogReader />} />
-                    <Route path="health" element={<SystemHealth />} />
-                    <Route path="updates" element={<UpdateChecker />} />
-                    {/* TerminalTabs lives in PersistentTerminal (app root) so sessions survive nav switches */}
-                    <Route path="terminal" element={null} />
-                  </Route>
-                </>
-              )}
-
-              <Route path="/architecture" element={<ArchitecturePage />} />
-
-              {/* Legal Pages */}
-              <Route path="/impressum" element={<Impressum />} />
-              <Route path="/datenschutz" element={<Datenschutz />} />
-              <Route path="/agb" element={<AGB />} />
-              <Route path="/cookies" element={<Cookies />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      </TerminalDockProvider>
-    </Router>
+      {/* Main Content */}
+      <main className="app-main">
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/chat" element={isGuest ? <GuestChat /> : <Chat />} />
+            {!isGuest && (
+              <>
+                <Route path="/mood" element={<MoodDashboard />} />
+                <Route path="/config" element={<Config />} />
+                <Route path="/tasks" element={<Tasks />} />
+                <Route path="/calendar" element={<CalendarView />} />
+                <Route path="/notes" element={<NotesFileManager />} />
+                {workspaceEnabled && <Route path="/workspace" element={<WorkspacePage />} />}
+                <Route path="/profile" element={<ProfileEdit />} />
+                <Route path="/vision" element={<VisionDetect />} />
+                <Route path="/settings" element={<UserSettings />}>
+                  <Route index element={<Navigate to="/settings/profile" replace />} />
+                  <Route path="profile" element={<UserProfile />} />
+                  <Route path="privacy" element={<PrivacySettings />} />
+                  <Route path="preferences" element={<UserPreferences />} />
+                </Route>
+              </>
+            )}
+            {isAdmin && (
+              <Route path="/admin" element={<AdminLayout user={user} onLogout={handleLogout} />}>
+                <Route index element={<AdminDashboard />} />
+                <Route path="dashboard" element={<AdminDashboard />} />
+                <Route path="users" element={<UserManagement />} />
+                <Route path="system" element={<SystemConfig />} />
+                <Route path="logs" element={<LogReader />} />
+                <Route path="health" element={<SystemHealth />} />
+                <Route path="updates" element={<UpdateChecker />} />
+                <Route path="terminal" element={null} />
+              </Route>
+            )}
+            <Route path="/architecture" element={<ArchitecturePage />} />
+            <Route path="/impressum" element={<Impressum />} />
+            <Route path="/datenschutz" element={<Datenschutz />} />
+            <Route path="/agb" element={<AGB />} />
+            <Route path="/cookies" element={<Cookies />} />
+          </Routes>
+        </Suspense>
+      </main>
+    </div>
   )
 }
 

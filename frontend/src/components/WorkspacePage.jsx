@@ -153,6 +153,20 @@ const SOURCE_BADGE_CLASS = {
   unknown: 'workspace-badge-unknown',
 };
 
+export function isImageFile(filename) {
+  if (!filename) return false;
+  return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(filename);
+}
+
+function getFileIcon(filename) {
+  if (isImageFile(filename)) return '🖼️';
+  if (filename.endsWith('.py')) return '🐍';
+  if (filename.endsWith('.jl')) return '🟣';
+  if (filename.endsWith('.json')) return '📋';
+  if (filename.endsWith('.md')) return '📝';
+  return '📄';
+}
+
 /**
  * One row of the Explorer tree - a folder (expandable, with "new file/folder
  * here"/rename/delete) or a file (existing open/context/download/rename/
@@ -214,6 +228,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
     <li className={activeTab === node.path ? 'active' : ''}>
       <div className="workspace-tree-row" style={indent}>
         <button className="workspace-file-open" onClick={() => handlers.onOpenFile(node.path)}>
+          <span className="workspace-file-icon">{getFileIcon(node.name)}</span>
           <span className="workspace-file-name">{node.name}</span>
           <span className="workspace-file-badges">
             <span className="workspace-file-size">{formatBytes(node.size)}</span>
@@ -768,8 +783,14 @@ function WorkspacePage() {
   const ensureTabLoaded = async (filename) => {
     if (tabs.some((t) => t.name === filename)) return true;
     try {
+      if (isImageFile(filename)) {
+        const blob = await workspaceAPI.getFileBlob(sessionId, filename);
+        const imageUrl = URL.createObjectURL(blob);
+        setTabs((prev) => [...prev, { name: filename, content: '', imageUrl, isImage: true, dirty: false, size: blob.size }]);
+        return true;
+      }
       const content = await workspaceAPI.getFileContent(sessionId, filename);
-      setTabs((prev) => [...prev, { name: filename, content, dirty: false }]);
+      setTabs((prev) => [...prev, { name: filename, content, isImage: false, dirty: false }]);
       return true;
     } catch (err) {
       setError(err.message || 'Datei konnte nicht geöffnet werden.');
@@ -815,6 +836,10 @@ function WorkspacePage() {
   };
 
   const closeTab = (filename) => {
+    const tabToClose = tabs.find((t) => t.name === filename);
+    if (tabToClose?.imageUrl) {
+      URL.revokeObjectURL(tabToClose.imageUrl);
+    }
     setTabs((prev) => prev.filter((t) => t.name !== filename));
     const remaining = tabs.filter((t) => t.name !== filename);
     if (activeTab === filename) {
@@ -1494,6 +1519,13 @@ function WorkspacePage() {
           <span className="status-item env-tag">
             🐍 {envStatus?.venv_present ? `Python venv (${envStatus.package_count || 0} Pakete)` : 'System Python'}
           </span>
+          <button
+            className={`status-item terminal-tag ${shellOpen ? 'active' : ''}`}
+            onClick={toggleShell}
+            title="Sandboxed Terminal & Prozesse ein-/ausblenden"
+          >
+            💻 Terminal {shellOpen ? '▾' : '▴'}
+          </button>
           <button
             className={`status-item agent-tag ${agentDrawerOpen ? 'active' : ''}`}
             onClick={() => setAgentDrawerOpen((v) => !v)}

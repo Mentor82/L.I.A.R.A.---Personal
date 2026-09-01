@@ -77,7 +77,7 @@ class TestProductivityToolsAndAgent(unittest.IsolatedAsyncioTestCase):
             "create_note", "list_notes",
             "create_task", "list_tasks", "update_task_status",
             "create_calendar_event", "list_calendar_events",
-            "search_memory"
+            "search_memory", "store_memory"
         ]
         for tool_name in expected_tools:
             tool_def = self.registry.get_tool(tool_name)
@@ -93,6 +93,7 @@ class TestProductivityToolsAndAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("create_task", names)
         self.assertIn("create_calendar_event", names)
         self.assertIn("search_memory", names)
+        self.assertIn("store_memory", names)
 
     @patch("services.productivity_tools.store_in_4d_memory")
     async def test_execute_create_and_list_note(self, mock_store_memory):
@@ -221,6 +222,28 @@ class TestProductivityToolsAndAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res["result"]["count"], 1)
         self.assertEqual(res["result"]["memories"][0]["concept"], "Socket Activation")
 
+    @patch("services.productivity_tools.store_in_4d_memory")
+    async def test_execute_store_memory(self, mock_store_memory):
+        """Test explicit memory storage via store_memory tool."""
+        call = ToolCall(
+            tool_name="store_memory",
+            parameters={
+                "content": "Lieblings-Programmiersprache ist Python",
+                "category": "preference",
+                "tags": ["coding", "python"]
+            },
+            raw_text='<tool_call>{"tool": "store_memory"}</tool_call>'
+        )
+        res = await self.executor.execute(call, user_id=self.user_id)
+        self.assertTrue(res.get("success"), f"Memory storage failed: {res}")
+        note_id = res["result"]["note_id"]
+        self.assertIsNotNone(note_id)
+
+        # Verify DB
+        db_note = self.db.query(Note).filter(Note.id == note_id).first()
+        self.assertIsNotNone(db_note)
+        self.assertIn("Python", db_note.content)
+
     def test_agent_registry_productivity_profile(self):
         """Test that ProductivityAgent is registered and instantiable."""
         profile = AgentRegistry.get_profile("productivity")
@@ -234,7 +257,34 @@ class TestProductivityToolsAndAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("create_note", agent.tools)
         self.assertIn("create_task", agent.tools)
         self.assertIn("create_calendar_event", agent.tools)
+        self.assertIn("store_memory", agent.tools)
+
+    @patch("services.productivity_tools.store_in_4d_memory")
+    async def test_productivity_agent_tool_handlers(self, mock_store_memory):
+        """Test that ProductivityAgent handlers execute without AttributeError."""
+        agent = ProductivityAgent(user_id=self.user_id)
+        
+        # Test note creation via agent handler
+        note_res = await agent._tool_create_note(title="Agent Note", content="Agent Note Content")
+        self.assertTrue(note_res.get("success"), f"Agent note creation failed: {note_res}")
+
+        # Test task creation via agent handler
+        task_res = await agent._tool_create_task(title="Agent Task", priority="high")
+        self.assertTrue(task_res.get("success"), f"Agent task creation failed: {task_res}")
+
+        # Test event creation via agent handler
+        event_res = await agent._tool_create_calendar_event(
+            title="Agent Event",
+            start_time="2026-09-12 10:00",
+            end_time="2026-09-12 11:00"
+        )
+        self.assertTrue(event_res.get("success"), f"Agent event creation failed: {event_res}")
+
+        # Test store_memory via agent handler
+        mem_res = await agent._tool_store_memory(content="Agent Fact", category="fact")
+        self.assertTrue(mem_res.get("success"), f"Agent memory storage failed: {mem_res}")
 
 
 if __name__ == "__main__":
     unittest.main()
+

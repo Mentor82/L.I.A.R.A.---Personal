@@ -296,3 +296,131 @@ def get_web_search_service() -> WebSearchService:
     if _web_search_service is None:
         _web_search_service = WebSearchService()
     return _web_search_service
+
+
+def register_web_tools(registry) -> None:
+    """Registriert Web-Such- und Webseiten-Lese-Tools in der ToolRegistry."""
+    from services.tool_registry import ToolDefinition, ToolParameter, ToolCategory
+
+    # 🌍 Web Search Tool
+    registry.register_tool(ToolDefinition(
+        name="web_search",
+        description=(
+            "Durchsucht das Internet nach Informationen. search_type='instant' (Standard) "
+            "für schnelle Fakten/Definitionen via DuckDuckGo. search_type='web' für "
+            "Recherche-Fragen zu aktuellen Ereignissen oder Themen, die mehrere echte Quellen "
+            "brauchen - durchsucht das offene Web (SearXNG) und liefert tatsächlich abgerufene "
+            "Quellentexte mit URL/Titel statt nur einem kurzen Snippet. Bei search_type='web' "
+            "steuert policy='fresh' die Sortierung nach Aktualität (neueste Quellen zuerst, "
+            "Quellen ohne Datum werden markiert) - Standard ist policy='general' (Relevanz)."
+        ),
+        category=ToolCategory.INFORMATION,
+        parameters=[
+            ToolParameter(name="query", type="string", description="Die Suchanfrage", required=True),
+            ToolParameter(name="search_type", type="string", description="Art der Suche", required=False, default="instant", enum=["instant", "web", "wikipedia"]),
+            ToolParameter(name="language", type="string", description="Sprache der Ergebnisse", required=False, default="de", enum=["de", "en"]),
+            ToolParameter(name="policy", type="string", description="Nur für search_type='web': 'general' (Relevanz, Standard) oder 'fresh' (neueste Quellen zuerst)", required=False, default="general", enum=["general", "fresh"])
+        ],
+        function=_stub_fn,
+        requires_consent=True,
+        privacy_level="low"
+    ))
+
+    # 🌐 Web Page Fetch Tool (direct URL reading / curl-like)
+    registry.register_tool(ToolDefinition(
+        name="fetch_web_page",
+        description=(
+            "Liest den Textinhalt einer Webseite (URL) über eine sichere Sandbox ab. "
+            "Nutze dieses Tool, wenn der Nutzer dir einen direkten Link (z.B. 'https://...') "
+            "nennt oder du einen Artikel, eine Dokumentation oder Webseite im Detail analysieren möchtest."
+        ),
+        category=ToolCategory.INFORMATION,
+        parameters=[
+            ToolParameter(name="url", type="string", description="Die vollständige Web-Adresse (z.B. 'https://docs.python.org/3/' oder 'https://www.heise.de/...')", required=True)
+        ],
+        function=_stub_fn,
+        requires_consent=False,
+        privacy_level="low"
+    ))
+
+
+async def fetch_web_page_safe(url: str) -> Dict[str, Any]:
+    """
+    Liest den Textinhalt einer Webseite über die SSRF-gehärtete ProxySandbox ab.
+    """
+    import asyncio
+    from services.web_safety.proxy_sandbox import ProxySandbox
+
+    url_clean = (url or "").strip()
+    if not url_clean:
+        return {"error": "Keine URL angegeben."}
+    if not url_clean.startswith(("http://", "https://")):
+        url_clean = "https://" + url_clean
+
+    try:
+        sandbox = ProxySandbox()
+        fetched = await asyncio.to_thread(sandbox.fetch_safe, url_clean)
+        if isinstance(fetched, dict) and fetched.get("error"):
+            return {"error": f"Fehler beim Laden der Webseite: {fetched['error']}", "url": url_clean}
+
+        text_content = fetched.get("text_content", "") if isinstance(fetched, dict) else ""
+        max_chars = 4000
+        truncated_text = text_content[:max_chars] + ("\n\n[... Inhalt für LLM-Kontext gekürzt ...]" if len(text_content) > max_chars else "")
+
+        return {
+            "success": True,
+            "url": url_clean,
+            "title": fetched.get("title", "") if isinstance(fetched, dict) else "",
+            "description": fetched.get("description", "") if isinstance(fetched, dict) else "",
+            "text": truncated_text,
+            "length": len(text_content),
+            "is_truncated": len(text_content) > max_chars
+        }
+    except Exception as e:
+        return {"error": f"Abruf der Webseite fehlgeschlagen: {str(e)}", "url": url_clean}
+
+
+_WMO_WEATHER_CODES = {
+    0: "Klarer Himmel", 1: "Überwiegend klar", 2: "Teilweise bewölkt", 3: "Bedeckt",
+    45: "Nebel", 48: "Gefrierender Nebel",
+    51: "Leichter Nieselregen", 53: "Mäßiger Nieselregen", 55: "Starker Nieselregen",
+    56: "Leichter gefrierender Nieselregen", 57: "Starker gefrierender Nieselregen",
+    61: "Leichter Regen", 63: "Mäßiger Regen", 65: "Starker Regen",
+    66: "Leichter gefrierender Regen", 67: "Starker gefrierender Regen",
+    71: "Leichter Schneefall", 73: "Mäßiger Schneefall", 75: "Starker Schneefall",
+    77: "Schneegriesel",
+    80: "Leichte Regenschauer", 81: "Mäßige Regenschauer", 82: "Heftige Regenschauer",
+    85: "Leichte Schneeschauer", 86: "Starke Schneeschauer",
+    95: "Gewitter", 96: "Gewitter mit leichtem Hagel", 99: "Gewitter mit starkem Hagel",
+}
+
+
+async def execute_weather_tool(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Führt Wetter-Abfrage aus."""
+    service = get_web_search_service()
+    city = params.get("city")
+    country = params.get("country")
+    days = params.get("days", 3)
+    try:
+        days = max(1, min(int(days), 7))
+    except (TypeError, ValueError):
+        days = 3
+
+    result = await service.get_weather_info(city, forecast_days=days)
+    if "error" in result:
+        return {"city": city, "country": country, "error": result["error"]}
+
+    return {
+        "city": result.get("location", city),
+        "country": result.get("country", country),
+        "temperature": result.get("temperature"),
+        "condition": _WMO_WEATHER_CODES.get(result.get("weather_code"), "Unbekannt"),
+        "humidity": result.get("humidity"),
+        "wind_speed": result.get("wind_speed"),
+        "forecast": result.get("forecast", [])
+    }
+
+
+async def _stub_fn(**kwargs):
+    return {"error": "Not implemented"}
+

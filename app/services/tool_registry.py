@@ -51,60 +51,18 @@ class ToolRegistry:
     def _register_default_tools(self):
         """Registriere Standard-Tools"""
         
-        # 🌍 Web Search Tool
-        self.register_tool(ToolDefinition(
-            name="web_search",
-            description=(
-                "Durchsucht das Internet nach Informationen. search_type='instant' (Standard) "
-                "für schnelle Fakten/Definitionen via DuckDuckGo. search_type='web' für "
-                "Recherche-Fragen zu aktuellen Ereignissen oder Themen, die mehrere echte Quellen "
-                "brauchen - durchsucht das offene Web (SearXNG) und liefert tatsächlich abgerufene "
-                "Quellentexte mit URL/Titel statt nur einem kurzen Snippet. Bei search_type='web' "
-                "steuert policy='fresh' die Sortierung nach Aktualität (neueste Quellen zuerst, "
-                "Quellen ohne Datum werden markiert) - Standard ist policy='general' (Relevanz)."
-            ),
-            category=ToolCategory.INFORMATION,
-            parameters=[
-                ToolParameter(
-                    name="query",
-                    type="string",
-                    description="Die Suchanfrage",
-                    required=True
-                ),
-                ToolParameter(
-                    name="search_type",
-                    type="string",
-                    description="Art der Suche",
-                    required=False,
-                    default="instant",
-                    enum=["instant", "web", "wikipedia"]
-                ),
-                ToolParameter(
-                    name="language",
-                    type="string",
-                    description="Sprache der Ergebnisse",
-                    required=False,
-                    default="de",
-                    enum=["de", "en"]
-                ),
-                ToolParameter(
-                    name="policy",
-                    type="string",
-                    description="Nur für search_type='web': 'general' (Relevanz, Standard) oder 'fresh' (neueste Quellen zuerst)",
-                    required=False,
-                    default="general",
-                    enum=["general", "fresh"]
-                )
-            ],
-            function=self._web_search_stub,
-            # requires_consent=True routes through ToolExecutor's real
-            # user_privacy_settings.allow_web_search check - privacy_level
-            # stays "low" (that field only gates the Agent's native tool-set
-            # filter, unrelated to this).
-            requires_consent=True,
-            privacy_level="low"
-        ))
-        
+        # 🌍 Web Search & Page Fetch Tools (modularized in web_search_service.py)
+        from services.web_search_service import register_web_tools
+        register_web_tools(self)
+
+        # 🐙 GitHub Research Tools (modularized in github_service.py)
+        from services.github_service import register_github_tools
+        register_github_tools(self)
+
+        # 🩺 System Health & Metrics Tools (modularized in system_health_service.py)
+        from services.system_health_service import register_system_health_tools
+        register_system_health_tools(self)
+
         # 🌤️ Weather Tool
         self.register_tool(ToolDefinition(
             name="get_weather",
@@ -444,10 +402,6 @@ class ToolRegistry:
         }
     
     # Stub-Funktionen (werden später durch echte Services ersetzt)
-    async def _web_search_stub(self, **kwargs):
-        """Placeholder für Web-Search"""
-        return {"error": "Not implemented", "tool": "web_search"}
-    
     async def _weather_stub(self, **kwargs):
         """Placeholder für Weather"""
         return {"error": "Not implemented", "tool": "get_weather"}

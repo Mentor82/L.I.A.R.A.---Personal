@@ -612,29 +612,27 @@ export const workspaceAPI = {
     return apiFetch(`/workspace/sessions/${sessionId}/files`);
   },
 
-  /**
-   * Projektweite Textsuche (Pfad + Inhalt) über alle Dateien der Session.
-   */
   async search(sessionId, query, caseSensitive = false) {
     const params = new URLSearchParams({ q: query, case_sensitive: caseSensitive });
     return apiFetch(`/workspace/sessions/${sessionId}/search?${params}`);
   },
 
-  /**
-   * Lädt den Textinhalt einer Workspace-Datei für den Editor - reuses the
-   * existing code-exec download endpoint as plain text (fetch() ignores
-   * Content-Disposition, so the same "attachment" endpoint works fine here
-   * without needing a second backend route).
-   */
   async getFileContent(sessionId, filename) {
     const token = localStorage.getItem('liara_token');
     const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    if (!response.ok) {
-      throw new Error(`Datei konnte nicht geladen werden: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Datei konnte nicht geladen werden: ${response.status}`);
     return response.text();
+  },
+
+  async getFileBlob(sessionId, filename) {
+    const token = localStorage.getItem('liara_token');
+    const response = await fetch(`${API_BASE}/code-exec/sessions/${sessionId}/files/${encodeWorkspacePath(filename)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(`Datei konnte nicht geladen werden: ${response.status}`);
+    return response.blob();
   },
 
   async createFile(sessionId, filename, content = '') {
@@ -644,11 +642,6 @@ export const workspaceAPI = {
     });
   },
 
-  /**
-   * Legt einen (ggf. leeren) Unterordner an - Dateien selbst können auch
-   * über createFile mit einem `/`-Pfad in einem noch nicht existierenden
-   * Ordner angelegt werden (Zwischenordner entstehen dann automatisch).
-   */
   async createFolder(sessionId, path) {
     return apiFetch(`/workspace/sessions/${sessionId}/folders`, {
       method: 'POST',
@@ -656,12 +649,6 @@ export const workspaceAPI = {
     });
   },
 
-  /**
-   * Lädt eine oder mehrere Dateien vom eigenen Rechner hoch (Dateiauswahl
-   * oder Drag & Drop) - multipart/form-data, deshalb ein eigener fetch()
-   * statt apiFetch (das immer Content-Type: application/json setzt; der
-   * Browser muss hier selbst die multipart-Boundary setzen).
-   */
   async uploadFiles(sessionId, fileList, folder = '') {
     const token = localStorage.getItem('liara_token');
     const formData = new FormData();
@@ -706,9 +693,6 @@ export const workspaceAPI = {
     });
   },
 
-  /**
-   * LIARA's proposed-but-not-yet-applied changes (Agent-Vorbereitung v1).
-   */
   async listProposals(sessionId, status = null) {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
     return apiFetch(`/workspace/sessions/${sessionId}/proposals${query}`);
@@ -726,10 +710,6 @@ export const workspaceAPI = {
     });
   },
 
-  /**
-   * Issue #5: this session's own Python venv - packages the user (not
-   * inherited from the shared base env) added, plus a minimal status check.
-   */
   async getEnvironment(sessionId) {
     return apiFetch(`/workspace/sessions/${sessionId}/environment`);
   },
@@ -748,6 +728,22 @@ export const workspaceAPI = {
   async removePackage(sessionId, name) {
     return apiFetch(`/workspace/sessions/${sessionId}/packages/${encodeURIComponent(name)}`, {
       method: 'DELETE',
+    });
+  },
+
+  async listProcesses(sessionId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/processes`);
+  },
+
+  async killProcess(sessionId, pid) {
+    return apiFetch(`/workspace/sessions/${sessionId}/processes/${pid}/kill`, {
+      method: 'POST',
+    });
+  },
+
+  async killAllProcesses(sessionId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/processes/kill-all`, {
+      method: 'POST',
     });
   },
 };

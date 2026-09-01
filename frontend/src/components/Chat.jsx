@@ -8,6 +8,8 @@ import WebSearchResults from './WebSearchResults';
 import MarkdownMessage from './MarkdownMessage';
 import SentimentIndicator, { SentimentBadge } from './SentimentIndicator';
 import { MemoryIndicator, MemoryBadge } from './MemoryIndicator';
+import liaraLogo from '../assets/LIARA-LOGO.png';
+import { compressAndFormatImage } from '../utils/imageCompressor';
 import './Chat.css';
 
 // Collapsible display for reasoning-model output (deepseek-r1 etc.), kept
@@ -15,8 +17,8 @@ import './Chat.css';
 // while the answer hasn't started yet (so the user sees it "thinking" live),
 // then auto-collapses once - after that, the user's own toggle sticks.
 function ThinkingBlock({ thinking, isAnswering }) {
-  const [expanded, setExpanded] = useState(true);
-  const autoCollapsedRef = useRef(false);
+  const [expanded, setExpanded] = useState(!isAnswering);
+  const autoCollapsedRef = useRef(isAnswering);
 
   useEffect(() => {
     if (isAnswering && !autoCollapsedRef.current) {
@@ -105,6 +107,7 @@ function Chat() {
   const [liveSentiment, setLiveSentiment] = useState(null);  // Live-Sentiment während Eingabe
   const [memoryContext, setMemoryContext] = useState(null);  // Memory-Context von Neo4j
   const [selectedImage, setSelectedImage] = useState(null);  // Hochgeladenes Bild
+  const [selectedImageBase64, setSelectedImageBase64] = useState(null); // Base64 für Vision
   const [imagePreview, setImagePreview] = useState(null);    // Bild-Vorschau URL
   const [hailoTask, setHailoTask] = useState('detect');       // hailo task: detect|pose|segment
   const [hailoModel, setHailoModel] = useState('yolov8n');    // hailo model selection
@@ -398,8 +401,13 @@ function Chat() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    const trimmedMessage = message.trim();
+    const currentImageBase64 = selectedImageBase64;
+    const currentImagePreview = imagePreview;
+    const trimmedMessage = message.trim() || (currentImageBase64 ? 'Beschreibe dieses Bild und erkläre die Details.' : '');
     if (!trimmedMessage) return;
+
+    // Reset image preview state
+    removeImage();
 
     // 🔍 FRONTEND DEBUG LOG: Function entry
     const timestamp = new Date().toISOString();
@@ -435,7 +443,9 @@ function Chat() {
     const userMessage = { 
       role: 'user', 
       content: trimmedMessage,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      hasImage: Boolean(currentImageBase64),
+      imagePreview: currentImagePreview
     };
     
     setChatSessions(prev => prev.map(session =>
@@ -477,6 +487,7 @@ function Chat() {
     let messageAdded = false;
 
     const updateAssistantMessage = (patch) => {
+      setLoading(false);
       liaraMessage = { ...liaraMessage, ...patch };
       setChatSessions(prev => prev.map(session => {
         if (session.id !== activeSessionId) return session;
@@ -497,7 +508,8 @@ function Chat() {
       await streamChatSSE('/api/chat/stream', {
         message: trimmedMessage,
         model: modelToUse,
-        session_id: activeSessionId
+        session_id: activeSessionId,
+        images: currentImageBase64 ? [currentImageBase64] : undefined
       }, {
         signal: requestAbortController.signal,
         onActivity: () => {
@@ -818,25 +830,27 @@ function Chat() {
   };
 
   // 🖼️ Bild-Upload Handler
-  const handleImageSelect = (e) => {
+  const handleImageSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     // Validierung
-    if (!file.type.startsWith('image/')) {
-      setErrorMessage('Bitte nur Bilddateien hochladen (JPG, PNG, WEBP)');
+    if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|heic|heif|bmp|gif)$/i)) {
+      setErrorMessage('Bitte nur Bilddateien hochladen (JPG, PNG, WEBP, HEIC)');
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage('Bild zu groß. Maximum: 10 MB');
-      return;
+    try {
+      const compressed = await compressAndFormatImage(file, 1280, 0.82);
+      setSelectedImage(file);
+      setSelectedImageBase64(compressed.base64);
+      setImagePreview(compressed.previewUrl);
+    } catch (err) {
+      console.warn('Image compressor fallback:', err);
+      setSelectedImage(file);
+      const previewUrl = URL.createObjectURL(file);
+      setImagePreview(previewUrl);
     }
-
-    // Setze Bild und erstelle Vorschau
-    setSelectedImage(file);
-    const previewUrl = URL.createObjectURL(file);
-    setImagePreview(previewUrl);
   };
 
   // Hailo Vision Modelle pro Task
@@ -855,10 +869,11 @@ function Chat() {
   };
 
   const removeImage = () => {
-    if (imagePreview) {
+    if (imagePreview && imagePreview.startsWith('blob:')) {
       URL.revokeObjectURL(imagePreview);
     }
     setSelectedImage(null);
+    setSelectedImageBase64(null);
     setImagePreview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -1092,7 +1107,7 @@ function Chat() {
       <div className="chat-container">
         <div className="chat-header">
           <div className="chat-title">
-            <h2>🌙 {activeSession?.title || 'Chat mit Liara'}</h2>
+            <h2><img src={liaraLogo} alt="LIARA" className="chat-title-logo" /> {activeSession?.title || 'Chat mit Liara'}</h2>
           {currentMood && (
             <span className="chat-mood-indicator">Mood: {currentMood}</span>
           )}
@@ -1181,7 +1196,9 @@ function Chat() {
         {messages.map((msg, index) => (
           <div key={index} className={`message-bubble message-${msg.role}`}>
             <div className="bubble-avatar">
-              {msg.role === 'user' ? '👤' : msg.role === 'assistant' ? '🌙' : '⚠️'}
+              {msg.role === 'user' ? '👤' : msg.role === 'assistant' ? (
+                <img src={liaraLogo} alt="LIARA" className="bubble-avatar-logo" />
+              ) : '⚠️'}
             </div>
             <div className="bubble-content">
               <div className="bubble-header">
@@ -1326,7 +1343,9 @@ function Chat() {
 
         {loading && (
           <div className="message-bubble message-assistant loading-bubble">
-            <div className="bubble-avatar thinking">🌙</div>
+            <div className="bubble-avatar thinking">
+              <img src={liaraLogo} alt="LIARA" className="bubble-avatar-logo" />
+            </div>
             <div className="bubble-content">
               <div className="bubble-header">
                 <span className="bubble-sender">Liara</span>

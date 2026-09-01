@@ -22,6 +22,7 @@ from services.prompt_builder import (
     build_diagram_instructions,
     build_safety_dimensioning_instructions,
     build_no_fabrication_instructions,
+    build_memory_contract_instructions,
     build_task_list_instructions,
     build_factcheck_instructions,
     build_consent_required_instructions,
@@ -157,6 +158,35 @@ def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
         return f'Änderung vorschlagen: "{arguments.get("filename", "")}"'
     if tool_name == "workspace_propose_dependency_change":
         return f'Paket-Änderung vorschlagen: "{arguments.get("package", "")}"'
+    if tool_name == "create_note":
+        return f'Notiz anlegen: "{arguments.get("title", "")}"'
+    if tool_name == "list_notes":
+        return "Notizen durchsuchen"
+    if tool_name == "create_task":
+        return f'Aufgabe erstellen: "{arguments.get("title", "")}"'
+    if tool_name == "list_tasks":
+        return "Aufgabenliste abrufen"
+    if tool_name == "update_task_status":
+        status_text = "erledigt" if arguments.get("completed") else "offen"
+        return f'Aufgabe #{arguments.get("task_id", "")} als {status_text} markieren'
+    if tool_name == "create_calendar_event":
+        return f'Termin eintragen: "{arguments.get("title", "")}"'
+    if tool_name == "list_calendar_events":
+        return "Kalendertermine abrufen"
+    if tool_name == "search_memory":
+        return f'🔍 4D-Gedächtnis durchsuchen: "{arguments.get("query", "")}"'
+    if tool_name == "store_memory":
+        content_preview = (arguments.get("content") or arguments.get("fact") or "")[:40]
+        return f'🧠 4D-Gedächtnis: "{content_preview}" speichern'
+    if tool_name == "github_search":
+        lang_str = f" ({arguments.get('language')})" if arguments.get("language") else ""
+        return f'GitHub-Suche{lang_str}: "{arguments.get("query", "")}"'
+    if tool_name == "github_repo_readme":
+        return f'GitHub-README lesen: "{arguments.get("repo", "")}"'
+    if tool_name == "fetch_web_page":
+        return f'🌐 Webseite lesen: "{arguments.get("url", "")}"'
+    if tool_name == "get_system_health":
+        return "🩺 System-Status & Hardware-Metriken abrufen"
     return tool_name
 
 
@@ -183,7 +213,8 @@ def assemble_streaming_system_prompt(
     action_result: Optional[Dict],
     web_search_data: Optional[Dict],
     user_id: Optional[int],
-    session_id: Optional[int]
+    session_id: Optional[int],
+    vision_context: Optional[str] = None
 ) -> str:
     """Combines all instruction blocks into the complete system prompt."""
     prompt = f"""Du bist Liara, eine warmherzige Digitalbegleiterin.
@@ -238,6 +269,9 @@ Formatiere deine Antworten automatisch je nach Inhalt:
 
 10. WORKSPACE-PLÄNE UND LANGFORM-DOKUMENTE:
 {build_workspace_artifact_instructions()}
+
+11. GEDÄCHTNIS & 4D-MEMORY PLATTFORMVERTRAG:
+{build_memory_contract_instructions()}
 """
 
     if not supports_tools:
@@ -272,5 +306,8 @@ Formatiere deine Antworten automatisch je nach Inhalt:
                     prompt += f"\n--- Datei: {fn} ---\n{info['content']}\n"
                 elif info.get("ok"):
                     prompt += f"\n--- Datei: {fn} (Binärdatei, {info.get('size', 0)} Bytes) ---\n"
+
+    if vision_context:
+        prompt += f"\n\n{vision_context}"
 
     return prompt

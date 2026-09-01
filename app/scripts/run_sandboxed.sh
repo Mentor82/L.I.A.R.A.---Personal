@@ -45,7 +45,16 @@ PY_VER="3.14"
 if [[ "$LANGUAGE" =~ 3\.([0-9]+) ]]; then
   PY_VER="3.${BASH_REMATCH[1]}"
 fi
-SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv_$PY_VER"
+
+if [ "$PY_VER" = "3.14" ]; then
+  if [ -d "$(dirname "$WORKSPACE_DIR")/.venv" ]; then
+    SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
+  else
+    SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv_3.14"
+  fi
+else
+  SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv_$PY_VER"
+fi
 ensure_session_venv "$SESSION_VENV" "$PY_VER" || true
 
 # Resource limits - last line of defense if the caller's preexec_fn rlimits

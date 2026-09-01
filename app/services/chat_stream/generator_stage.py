@@ -50,49 +50,14 @@ from services.chat_stream.persistence_stage import (
     persist_assistant_turn,
 )
 from services.chat_persistence import persist_assistant_message
-from services.prompt_builder import _format_tool_result_for_llm, _get_tool_aware_system_prompt
+from services.chat_stream.generator_helpers import (
+    _resolve_symbol,
+    _flatten_messages_for_linep,
+    _append_linep_tool_call,
+)
 
 logger = logging.getLogger(__name__)
 mlogger = get_mirko_logger()
-
-
-def _resolve_symbol(name: str, fallback):
-    mod = sys.modules.get("api.routers.chat_streaming")
-    if mod and hasattr(mod, name):
-        return getattr(mod, name)
-    return fallback
-
-
-def _flatten_messages_for_linep(messages: List[Dict], include_tools: bool) -> str:
-    """Turns the OpenAI-style messages list into a single prompt string for LiNeP."""
-    parts = []
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content") or ""
-        if role == "system":
-            if include_tools:
-                content = f"{content}\n\n{_get_tool_aware_system_prompt()}"
-            parts.append(content)
-        elif role == "tool":
-            try:
-                tool_result = json.loads(content)
-            except (json.JSONDecodeError, TypeError):
-                tool_result = {"result": content}
-            parts.append(f"Tool-Ergebnis:\n{_format_tool_result_for_llm(tool_result)}")
-        elif role == "assistant":
-            if content:
-                parts.append(f"Assistant: {content}")
-        else:
-            parts.append(f"User: {content}")
-    parts.append("Assistant:")
-    return "\n\n".join(parts)
-
-
-def _append_linep_tool_call(turn_tool_calls: List[Dict], raw_block: str) -> None:
-    """Parses a completed <tool_call> block from LiNeP."""
-    parsed = get_tool_parser().extract_tool_call(f"<tool_call>{raw_block}</tool_call>")
-    if parsed:
-        turn_tool_calls.append({"function": {"name": parsed.tool_name, "arguments": parsed.parameters}})
 
 
 async def _handle_workspace_artifact_blocks(raw_blocks: List[str], user_id: Optional[int], session_id: Optional[int]):
@@ -129,6 +94,7 @@ async def stream_ollama_response(
     used_tools: bool = False,
     conversation_history: Optional[List[Dict]] = None,
     session_lock=None,
+    images: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streame Ollama-Response via Server-Sent Events."""
     lock_watchdog_task = None
@@ -189,6 +155,19 @@ async def stream_ollama_response(
         finally:
             db_turn.close()
 
+    vision_context = ""
+    if images and len(images) > 0:
+        try:
+            from services.vision_service import analyze_image_with_gemma, format_vision_context_block
+            logger.info("Analyzing %d image(s) via Gemma Vision worker...", len(images))
+            yield f"data: {json.dumps({'type': 'thinking', 'text': 'Analysiere Bild(er) mit Gemma Vision in der Cloud...\\n'})}\n\n"
+            for img in images:
+                analysis = await asyncio.to_thread(analyze_image_with_gemma, img, message)
+                if analysis:
+                    vision_context += format_vision_context_block(analysis)
+        except Exception as vis_err:
+            logger.error("Gemma Vision analysis error: %s", vis_err)
+
     supports_tools = await model_supports_tools(model)
     system_prompt = assemble_streaming_system_prompt(
         username=username,
@@ -203,6 +182,7 @@ async def stream_ollama_response(
         web_search_data=web_search_data,
         user_id=user_id,
         session_id=session_id,
+        vision_context=vision_context,
     )
 
     messages = [

@@ -87,12 +87,6 @@ def build_safety_dimensioning_instructions() -> str:
     recommendation. Deliberately NOT a blanket "always ask before
     answering" rule - that would make Liara annoyingly evasive for the
     vast majority of everyday questions that don't carry this risk.
-
-    This is advisory, not a hard guarantee - a prompt instruction can be
-    ignored by the model, especially under a persistent/rephrased user
-    request. It measurably reduces the failure mode observed in testing
-    (inventing motor specs and recommending fuse ratings from a data-less
-    question), it does not eliminate it.
     """
     return """WICHTIG - Sicherheitsrelevante technische Dimensionierung:
 Bei Fragen zur Dimensionierung/Auslegung in sicherheitskritischen Bereichen (z.B. elektrische
@@ -107,16 +101,7 @@ Dimensionierung zu erfinden, die im Ernstfall falsch und gefährlich sein könnt
 
 def build_no_fabrication_instructions() -> str:
     """
-    Narrowly scoped guardrail, same pattern as
-    build_safety_dimensioning_instructions() above: observed failure mode
-    was the model inventing plausible-looking Spotify playlist links (three
-    different "playlists" all pointing at the same fabricated ID) with no
-    tool call behind them at all, plus outputting raw HTML entities
-    (e.g. "&#x20;") and redundant markdown emphasis (e.g. "****text****")
-    that render as literal garbage since the frontend's markdown renderer
-    doesn't interpret HTML entities. Advisory only - a prompt instruction
-    can be ignored, it doesn't make fabrication or malformed output
-    impossible, just measurably rarer.
+    Narrowly scoped guardrail: avoids inventing plausible-looking URLs, links, or broken formatting.
     """
     return """WICHTIG - Keine erfundenen Links und keine kaputte Formatierung:
 Erfinde keine konkreten externen Links, IDs oder URLs (z.B. Spotify-Playlist-Links, YouTube-Video-IDs,
@@ -128,24 +113,22 @@ Nutze außerdem ausschließlich normale Markdown-Syntax mit echten Zeichen - kei
 Formatierungszeichen wie "****Text****" (nutze **Text** für Fett, nicht mehr)."""
 
 
+def build_memory_contract_instructions() -> str:
+    """
+    Guardrail against memory confirmation hallucination (Issue #27):
+    The model must NEVER claim that it stored/memorized information into 4D memory,
+    notes, or tasks unless it has actually executed the corresponding tool call
+    (store_memory, create_note, create_task) with success=True in the current turn.
+    """
+    return """WICHTIG - Gedächtnis & 4D-Memory Plattformvertrag (Anti-Halluzination):
+1. ECHTE SPEICHERUNG ERFORDERLICH: Behaupte NIEMALS ("Ich habe das gespeichert", "Ist im 4D-Gedächtnis verankert", "Habe ich mir notiert"), dass du etwas persistent gespeichert oder gemerkt hast, wenn du NICHT in DIESER Runde tatsächlich das Tool `store_memory`, `create_note` oder `create_task` aufgerufen hast und `success: true` zurückkam!
+2. AKTIVER MERKVORGANG: Wenn der Nutzer dich bittet, sich etwas zu merken ("Merk dir...", "Erinnere mich...", "Speichere das ab", "Das darfst du dir merken") oder dir die Erlaubnis gibt, eine Information zu speichern: Führe IMMER zuerst den entsprechenden Tool-Call `store_memory(content=...)` aus!
+3. KEINE VORGETÄUSCHTE SPEICHERUNG: Wenn kein `store_memory`-Tool ausgeführt wurde, darfst du lediglich sagen: "Möchtest du, dass ich das dauerhaft speichere?" oder "Ich habe das zur Kenntnis genommen", aber NIEMALS behaupten, dass ein Write in die Datenbank oder ins 4D-Gedächtnis stattgefunden hat."""
+
+
 def build_task_list_instructions() -> str:
     """
-    Tells the model it may open a multi-step answer with a <tasks>
-    checklist block, and may re-emit an updated version of it later in the
-    same response to check items off as it addresses them.
-
-    Scope note: this only ever produces a MODEL-AUTHORED plan display, not
-    a verified execution record - "done" here means only "the model says
-    it covered this," nothing more. chat_streaming.py calls the model
-    exactly once per message; there is no multi-step tool-execution loop
-    behind it (yet) that could confirm a step actually happened. See the
-    "Aufgaben" plan for the fuller reasoning and what changes once a real
-    Agent loop exists (done would then be system-confirmed, not
-    model-claimed, using this same {id, label, done} shape).
-
-    Wired into stream_ollama_response (the authenticated path) only, not
-    stream_guest_response - keeping this off the public guest path was a
-    deliberate scope decision, not an oversight.
+    Tells the model it may open a multi-step answer with a <tasks> checklist block.
     """
     return """WICHTIG - Aufgaben-Checkliste bei mehrschrittigen Anfragen:
 Wenn eine Anfrage aus mehreren klar abgrenzbaren Schritten besteht (z.B. eine Anleitung mit mehreren
@@ -167,30 +150,7 @@ eigentliche Antwort trotzdem vollständig und normal weiter."""
 
 def build_factcheck_instructions() -> str:
     """
-    Lets the model close out a web-search-grounded answer with a
-    <factcheck> block rating its own load-bearing claims against what the
-    shown sources actually support - same tag-extraction mechanism as
-    build_task_list_instructions() above (see factcheck_splitter.py).
-
-    Observed failure mode this addresses: a web-search answer can cite
-    real, genuinely-found sources for its general topic while still
-    stating specific details (exact counts, named incidents, precise
-    attributions) that go beyond what those sources actually say - the
-    story is real, some of the numbers aren't. The existing source list
-    at the end of an answer is undifferentiated: it says what was found,
-    not which specific sentence it does or doesn't back up.
-
-    Confidence levels are deliberately source-centric, not self-diagnostic
-    - the model rates what the shown sources support, not where its own
-    knowledge came from (it can't reliably introspect the latter).
-
-    Advisory only, same as every other guardrail in this module - a prompt
-    instruction can be ignored, it doesn't make the underlying problem
-    impossible, just measurably rarer. Wired into stream_ollama_response
-    only, not chat.py's SYNC-mode fallback or stream_guest_response -
-    neither has the streaming tag-extraction machinery to strip this
-    markup back out, so raw <factcheck> tags would otherwise leak into the
-    visible answer there.
+    Lets the model close out a web-search-grounded answer with a <factcheck> block.
     """
     return """WICHTIG - Faktencheck bei web-gestützten Antworten:
 Wenn deine Antwort wesentlich auf Ergebnissen einer Web-Suche (web_search mit search_type="web") beruht,
@@ -211,31 +171,16 @@ def build_consent_required_instructions() -> str:
     Observed failure mode (Issue #26): a model speculatively tells the user it lacks
     permission to use web search or requires settings toggles, even when the setting
     is already enabled and without actually trying the tool call.
-    Also handles the original issue where a tool call returning consent_required
-    prompted the model to ask the user 'may I?' inside the chat.
     """
     return """WICHTIG - Tool-Nutzung und consent_required:
-1. AKTIVES TOOL-CALLING: Wenn du aktuelle Informationen benötigst (z.B. Nachrichten, Formel 1, Wetter, Sportergebnisse, Web-Recherche, Dateien), führe IMMER direkt das passende Tool (z.B. `web_search`) aus.
+1. AKTIVES TOOL-CALLING: Wenn du aktuelle Informationen benötigst (z.B. Nachrichten, Wetter, Sportergebnisse, Web-Recherche, GitHub-Suche, Dateien), führe IMMER direkt das passende Tool (z.B. `web_search`) aus.
 2. KEINE SPEKULATIVEN VERWEIGERUNGEN: Behaupte NIEMALS vorab oder ohne einen tatsächlich fehlgeschlagenen Tool-Aufruf, dass dir die Erlaubnis für eine Suche/Aktion fehlt oder dass der Nutzer diese erst einschalten muss.
 3. BEI TATSÄCHLICHEM consent_required FEHLER: Erst wenn ein Tool-Aufruf in dieser Konversation tatsächlich mit "consent_required" oder einer Berechtigungs-Fehlermeldung fehlschlägt, frage NICHT erneut im Chat nach einem "Ja" (das ändert keine Systemeinstellung). Erkläre stattdessen freundlich, dass diese Funktion aktuell deaktiviert ist und in den Einstellungen (z.B. Profil/Einstellungen → Datenschutz bzw. Workspace) aktiviert werden kann."""
 
 
 def build_workspace_artifact_instructions() -> str:
     """
-    Lets a long-form plan/document get saved as a real Workspace file
-    instead of filling up the chat scrollback - same tag-extraction
-    mechanism as build_task_list_instructions()/build_factcheck_instructions()
-    above (see workspace_artifact_splitter.py). The Agent Hub already does
-    this automatically for its own final answer (base_agent.py); this gives
-    plain chat the same behavior for content the model itself judges to be
-    plan/document-length, gated behind an explicit tag rather than a length
-    heuristic so short answers are never mistakenly hidden behind a link.
-
-    Plain "Titel:"/"Inhalt:" labels instead of JSON inside the tag -
-    deliberately less structure than the <tool_call> convention: a malformed
-    tool-call gets a retry prompt (see chat.py's tool loop), but a malformed
-    artifact block here has nowhere to retry, so the format asks for as
-    little as possible from the model.
+    Lets a long-form plan/document get saved as a real Workspace file.
     """
     return """WICHTIG - Lange Pläne/Dokumente:
 Wenn du einen längeren, in sich geschlossenen Plan oder ein Dokument erstellst (z.B. auf explizite
@@ -263,13 +208,15 @@ def _get_tool_aware_system_prompt() -> str:
 {tool_descriptions}
 
 WICHTIG:
-- Nutze Tools NUR wenn du aktuelle/externe Daten brauchst
-- Bei Wetter, Standort, Web-Suche → Tool verwenden
+- Nutze Tools NUR wenn du aktuelle/externe Daten brauchst oder Speicheraktionen durchführst
+- Bei Wetter, Standort, Web-Suche, GitHub-Suche, Gedächtnis → Tool verwenden
 - Bei allgemeinen Fragen → OHNE Tool antworten
 - Wenn Tool verwendet: Antworte ERST mit <tool_call>, dann warte auf Result
 - Nach Tool-Result: Beantworte die Frage mit den erhaltenen Daten
 
 {build_consent_required_instructions()}
+
+{build_memory_contract_instructions()}
 """
 
 
@@ -301,5 +248,28 @@ def _format_tool_result_for_llm(tool_result: dict) -> str:
     elif tool_name == "get_current_time":
         formatted = result_data.get("formatted", "")
         return f"Aktuelle Zeit: {formatted}"
+    
+    elif tool_name == "store_memory":
+        return f"4D-Gedächtnis: Erfolgreich gespeichert (ID: {result_data.get('note_id', '?')})"
+
+    elif tool_name == "github_search":
+        count = result_data.get("count", 0)
+        repos = result_data.get("repositories", [])
+        return f"GitHub-Suche ({count} Repositories gefunden):\n" + "\n".join(
+            f"- {r.get('full_name')} ({r.get('stars')} Sterne, Lizenz: {r.get('license')}): {r.get('description')}"
+            for r in repos
+        )
+
+    elif tool_name == "github_repo_readme":
+        return f"README für {result_data.get('repository')}:\n{result_data.get('readme')}"
+
+    elif tool_name == "fetch_web_page":
+        title = result_data.get("title", "Kein Titel")
+        url = result_data.get("url", "")
+        return f"Inhalt der Webseite '{title}' ({url}):\n{result_data.get('text', '')}"
+
+    elif tool_name == "get_system_health":
+        import json
+        return f"System-Health & Metriken (Status: {result_data.get('status', 'ok')}):\n" + json.dumps(result_data, indent=2, ensure_ascii=False)
     
     return str(result_data)

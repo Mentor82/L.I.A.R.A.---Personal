@@ -33,22 +33,6 @@ WEB_SEARCH_SOURCE_TEXT_CAP = 2000
 
 logger = logging.getLogger(__name__)
 
-# WMO weather codes used by Open-Meteo -> German descriptions
-# https://open-meteo.com/en/docs (see "WMO Weather interpretation codes")
-_WMO_WEATHER_CODES = {
-    0: "Klarer Himmel", 1: "Überwiegend klar", 2: "Teilweise bewölkt", 3: "Bedeckt",
-    45: "Nebel", 48: "Gefrierender Nebel",
-    51: "Leichter Nieselregen", 53: "Mäßiger Nieselregen", 55: "Starker Nieselregen",
-    56: "Leichter gefrierender Nieselregen", 57: "Starker gefrierender Nieselregen",
-    61: "Leichter Regen", 63: "Mäßiger Regen", 65: "Starker Regen",
-    66: "Leichter gefrierender Regen", 67: "Starker gefrierender Regen",
-    71: "Leichter Schneefall", 73: "Mäßiger Schneefall", 75: "Starker Schneefall",
-    77: "Schneegriesel",
-    80: "Leichte Regenschauer", 81: "Mäßige Regenschauer", 82: "Heftige Regenschauer",
-    85: "Leichte Schneeschauer", 86: "Starke Schneeschauer",
-    95: "Gewitter", 96: "Gewitter mit leichtem Hagel", 99: "Gewitter mit starkem Hagel",
-}
-
 
 class ToolExecutionError(Exception):
     """Tool-Ausführungs-Fehler"""
@@ -197,6 +181,11 @@ class ToolExecutor:
         if tool_def.name == "web_search":
             return await self._execute_web_search(parameters)
 
+        # 🌐 Web Page Fetch (direct URL reading)
+        elif tool_def.name == "fetch_web_page":
+            from services.web_search_service import fetch_web_page_safe
+            return await fetch_web_page_safe(parameters.get("url", ""))
+
         # Weather
         elif tool_def.name == "get_weather":
             return await self._execute_weather(parameters)
@@ -209,9 +198,25 @@ class ToolExecutor:
         elif tool_def.name == "wikipedia_search":
             return await self._execute_wikipedia(parameters)
 
+        # 🐙 GitHub Search
+        elif tool_def.name == "github_search":
+            from services.github_service import get_github_service
+            return await get_github_service().search_repositories(**parameters)
+
+        # 🐙 GitHub Readme
+        elif tool_def.name == "github_repo_readme":
+            from services.github_service import get_github_service
+            return await get_github_service().get_repository_readme(**parameters)
+
         # Current Time
         elif tool_def.name == "get_current_time":
             return await self._execute_current_time(parameters)
+
+        # 🩺 System Health & Metrics
+        elif tool_def.name == "get_system_health":
+            from services.system_health_service import get_full_system_health
+            scope = parameters.get("scope", "summary")
+            return await asyncio.to_thread(get_full_system_health, scope=scope)
 
         # Workspace: inspect
         elif tool_def.name == "workspace_list_files":
@@ -404,39 +409,11 @@ class ToolExecutor:
         without_date = [d[1] for d in dated if d[0] is None]
         with_date.sort(key=lambda d: d[0], reverse=True)
         return [d[1] for d in with_date] + without_date
-    
+
     async def _execute_weather(self, params: Dict[str, Any]) -> Dict:
-        """
-        Führt Wetter-Abfrage aus - reuses web_search_service.get_weather_info()
-        (the same Open-Meteo call chat_streaming.py's pre-LLM heuristic already
-        uses) instead of a second, independent Open-Meteo implementation.
-        """
-        city = params.get("city")
-        country = params.get("country")
-        days = params.get("days", 3)
-        try:
-            days = max(1, min(int(days), 7))
-        except (TypeError, ValueError):
-            days = 3
-
-        result = await self.web_search.get_weather_info(city, forecast_days=days)
-
-        if "error" in result:
-            return {
-                "city": city,
-                "country": country,
-                "error": result["error"]
-            }
-
-        return {
-            "city": result.get("location", city),
-            "country": result.get("country", country),
-            "temperature": result.get("temperature"),
-            "condition": _WMO_WEATHER_CODES.get(result.get("weather_code"), "Unbekannt"),
-            "humidity": result.get("humidity"),
-            "wind_speed": result.get("wind_speed"),
-            "forecast": result.get("forecast", [])
-        }
+        """Führt Wetter-Abfrage aus."""
+        from services.web_search_service import execute_weather_tool
+        return await execute_weather_tool(params)
     
     def _get_user_location(self, user_id: int) -> Optional[Dict]:
         """Short-lived-session wrapper around location_service.get_user_location (issue #13 item 6)."""

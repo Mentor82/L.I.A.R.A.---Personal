@@ -43,9 +43,7 @@
   border-color: var(--color-purple);
 }
 
-.code-copy-btn:active {
-  transform: scale(0.95);
-}
+.code-copy-btn:active { transform: scale(0.95); }
 
 .code-highlighter {
   margin: 0 !important;
@@ -56,23 +54,10 @@
   overflow-x: auto;
 }
 
-.code-highlighter::-webkit-scrollbar {
-  height: 8px;
-}
-
-.code-highlighter::-webkit-scrollbar-track {
-  background: var(--bg-input);
-  border-radius: 4px;
-}
-
-.code-highlighter::-webkit-scrollbar-thumb {
-  background: var(--bg-purple-hover);
-  border-radius: 4px;
-}
-
-.code-highlighter::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 92, 246, 0.6);
-}
+.code-highlighter::-webkit-scrollbar { height: 8px; }
+.code-highlighter::-webkit-scrollbar-track { background: var(--bg-input); border-radius: 4px; }
+.code-highlighter::-webkit-scrollbar-thumb { background: var(--bg-purple-hover); border-radius: 4px; }
+.code-highlighter::-webkit-scrollbar-thumb:hover { background: rgba(139, 92, 246, 0.6); }
 
 /* Mermaid Diagrams */
 .mermaid-diagram {
@@ -85,10 +70,7 @@
   text-align: center;
 }
 
-.mermaid-diagram svg {
-  max-width: 100%;
-  height: auto;
-}
+.mermaid-diagram svg { max-width: 100%; height: auto; }
 
 .mermaid-loading {
   margin: 12px 0;
@@ -102,11 +84,7 @@
 }
 
 /* Code Run Button + Result */
-.code-block-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
+.code-block-actions { display: flex; gap: 8px; align-items: center; }
 
 .code-run-btn {
   background: var(--bg-purple-hover);
@@ -120,15 +98,8 @@
   transition: all 0.2s ease;
 }
 
-.code-run-btn:hover:not(:disabled) {
-  background: var(--color-purple);
-  color: #fff;
-}
-
-.code-run-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+.code-run-btn:hover:not(:disabled) { background: var(--color-purple); color: #fff; }
+.code-run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .code-run-loading {
   display: flex;
@@ -139,9 +110,7 @@
   color: var(--color-text-muted);
 }
 
-.code-run-result {
-  margin-top: 4px;
-}
+.code-run-result { margin-top: 4px; }
 
 .code-run-output {
   margin: 8px 0 0 0;
@@ -157,11 +126,7 @@
   overflow-y: auto;
 }
 
-.code-run-stderr {
-  display: block;
-  color: var(--color-danger);
-  margin-top: 4px;
-}
+.code-run-stderr { display: block; color: var(--color-danger); margin-top: 4px; }
 
 .code-run-files {
   list-style: none;
@@ -182,9 +147,7 @@
   cursor: pointer;
 }
 
-.code-file-download-btn:hover {
-  background: var(--bg-purple-hover);
-}
+.code-file-download-btn:hover { background: var(--bg-purple-hover); }
 
 /* Inline Code */
 .inline-code {
@@ -210,11 +173,10 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  table-layout: auto;
 }
 
-.markdown-table thead {
-  background: var(--bg-purple-muted);
-}
+.markdown-table thead { background: var(--bg-purple-muted); }
 
 .markdown-table th {
   padding: 12px 16px;
@@ -230,13 +192,23 @@
   color: var(--color-text);
 }
 
-.markdown-table tbody tr:hover {
-  background: var(--bg-purple-subtle);
+.markdown-table th:first-child,
+.markdown-table td:first-child {
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  width: 1%;
+  min-width: 85px;
 }
 
-.markdown-table tbody tr:last-child td {
-  border-bottom: none;
+.markdown-table th:nth-child(2),
+.markdown-table td:nth-child(2) {
+  width: auto;
+  word-break: break-word;
 }
+
+.markdown-table tbody tr:hover { background: var(--bg-purple-subtle); }
+.markdown-table tbody tr:last-child td { border-bottom: none; }
 
 /* Blockquotes */
 .markdown-blockquote {
@@ -249,9 +221,7 @@
   font-style: italic;
 }
 
-.markdown-blockquote p {
-  margin: 0;
-}
+.markdown-blockquote p { margin: 0; }
 
 /* Links */
 .markdown-link {
@@ -309,26 +279,15 @@
 }
 
 .markdown-ul li,
-.markdown-ol li {
-  margin: 6px 0;
-}
-
-.markdown-ul li::marker {
-  color: var(--color-purple);
-}
-
-.markdown-ol li::marker {
-  color: var(--color-purple);
-  font-weight: 600;
-}
+.markdown-ol li { margin: 6px 0; }
+.markdown-ul li::marker { color: var(--color-purple); }
+.markdown-ol li::marker { color: var(--color-purple); font-weight: 600; }
 
 /* Nested Lists */
 .markdown-ul ul,
 .markdown-ul ol,
 .markdown-ol ul,
-.markdown-ol ol {
-  margin: 8px 0;
-}
+.markdown-ol ol { margin: 8px 0; }
 
 /* Paragraphs */
 .markdown-p {
@@ -338,10 +297,7 @@
 }
 
 /* Images (generierte Bilder) */
-.markdown-image-wrapper {
-  margin: 16px 0;
-  text-align: center;
-}
+.markdown-image-wrapper { margin: 16px 0; text-align: center; }
 
 .markdown-image {
   max-width: 320px;
@@ -387,10 +343,6 @@
 
 .image-lightbox-img {
   max-width: 90vw;
-  /* Leaves a clear margin above the image (mostly backdrop, not image
-     content) so the close button never sits directly on top of a
-     light-colored image like a white-background plot, where a translucent
-     light button would be almost invisible. */
   max-height: 78vh;
   border-radius: 8px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
@@ -401,8 +353,6 @@
   position: fixed;
   top: 20px;
   right: 24px;
-  /* Solid dark background (not translucent white) so it stays visible
-     regardless of what's behind it - backdrop or a light image. */
   background: rgba(20, 20, 20, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.4);
   color: #fff;
@@ -416,9 +366,7 @@
   justify-content: center;
 }
 
-.image-lightbox-close:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
+.image-lightbox-close:hover { background: rgba(255, 255, 255, 0.2); }
 
 /* Strong/Bold */
 .markdown-p strong,
@@ -450,60 +398,55 @@ hr {
   
   .table-wrapper {
     font-size: 13px;
+    margin: 12px 0;
   }
   
+  .markdown-table {
+    table-layout: auto;
+  }
+
   .markdown-table th,
   .markdown-table td {
-    padding: 8px 12px;
+    padding: 8px 10px;
+  }
+
+  .markdown-table th:first-child,
+  .markdown-table td:first-child {
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
+    min-width: 85px;
+    width: 1%;
+    padding-right: 12px;
+  }
+
+  .markdown-table th:nth-child(2),
+  .markdown-table td:nth-child(2) {
+    width: auto;
+    word-break: break-word;
   }
   
-  .markdown-h1 {
-    font-size: 24px;
-  }
-  
-  .markdown-h2 {
-    font-size: 20px;
-  }
-  
-  .markdown-h3 {
-    font-size: 18px;
-  }
+  .markdown-h1 { font-size: 24px; }
+  .markdown-h2 { font-size: 20px; }
+  .markdown-h3 { font-size: 18px; }
 }
 
 /* Dark Mode Optimization */
 @media (prefers-color-scheme: dark) {
-  .code-block-wrapper {
-    background: #0d0d0d;
-  }
-  
-  .markdown-table tbody tr:hover {
-    background: rgba(139, 92, 246, 0.08);
-  }
+  .code-block-wrapper { background: #0d0d0d; }
+  .markdown-table tbody tr:hover { background: rgba(139, 92, 246, 0.08); }
 }
 
 /* High Contrast Mode */
 @media (prefers-contrast: high) {
-  .code-block-wrapper {
-    border: 2px solid #8b5cf6;
-  }
-  
-  .markdown-table {
-    border: 2px solid #8b5cf6;
-  }
-  
-  .markdown-blockquote {
-    border-left: 6px solid #8b5cf6;
-  }
+  .code-block-wrapper { border: 2px solid #8b5cf6; }
+  .markdown-table { border: 2px solid #8b5cf6; }
+  .markdown-blockquote { border-left: 6px solid #8b5cf6; }
 }
 
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   .code-copy-btn,
-  .markdown-link {
-    transition: none;
-  }
-  
-  .code-copy-btn:active {
-    transform: none;
-  }
+  .markdown-link { transition: none; }
+  .code-copy-btn:active { transform: none; }
 }

@@ -10,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class SSRFError(Exception):
@@ -61,7 +61,7 @@ class ProxySandbox:
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': self.USER_AGENT,
-            'Accept': 'text/html,application/xhtml+xml',
+            'Accept': 'text/html,application/xhtml+xml,application/json,text/plain,text/markdown,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'de,en;q=0.9',
             'DNT': '1',  # Do Not Track
         })
@@ -82,7 +82,10 @@ class ProxySandbox:
 
         Raises SSRFError if the target isn't safe to fetch.
         """
-        parsed = urlparse(url)
+        try:
+            parsed = urlparse(url)
+        except Exception as e:
+            raise SSRFError(f'Ungültige URL-Syntax: {str(e)}')
 
         if parsed.scheme not in ('http', 'https'):
             raise SSRFError(f'Unsupported scheme: {parsed.scheme or "(none)"}')
@@ -91,15 +94,17 @@ class ProxySandbox:
         if not hostname:
             raise SSRFError('URL has no hostname')
 
+        hostname_clean = hostname.rstrip('.')
+
         try:
-            addresses = {info[4][0] for info in socket.getaddrinfo(hostname, None)}
-        except socket.gaierror as e:
-            raise SSRFError(f'Could not resolve host: {hostname}') from e
+            addresses = {info[4][0] for info in socket.getaddrinfo(hostname_clean, None)}
+        except (socket.gaierror, UnicodeError, Exception) as e:
+            raise SSRFError(f'Host konnte nicht aufgelöst werden ({hostname_clean}): {str(e)}') from e
 
         for addr in addresses:
             ip = ipaddress.ip_address(addr)
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                raise SSRFError(f'Host "{hostname}" resolves to a non-public address ({addr})')
+                raise SSRFError(f'Host "{hostname_clean}" resolves to a non-public address ({addr})')
 
 
     def fetch_safe(self, url: str, allow_redirects: bool = True) -> Dict:
@@ -130,8 +135,13 @@ class ProxySandbox:
                 'error': Optional[str]
             }
         """
+        url_clean = (url or "").strip().rstrip('.,;:)"\'')
+        if url_clean.endswith('...') or url_clean.endswith('…'):
+            result = {'url': url, 'final_url': None, 'status_code': None, 'content_type': None, 'title': '', 'headings': [], 'paragraphs': [], 'lists': [], 'tables': [], 'meta_description': '', 'links': [], 'images': [], 'raw_html': '', 'text_content': '', 'timestamp': datetime.now(timezone.utc).isoformat(), 'error': 'Unvollständige oder abgeschnittene URL'}
+            return result
+
         result = {
-            'url': url,
+            'url': url_clean,
             'final_url': None,
             'status_code': None,
             'content_type': None,
@@ -145,7 +155,7 @@ class ProxySandbox:
             'images': [],
             'raw_html': '',
             'text_content': '',
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'error': None
         }
         
@@ -155,8 +165,8 @@ class ProxySandbox:
             # (127.0.0.1, RFC1918 ranges, 169.254.169.254 cloud metadata,
             # etc.) - previously unchecked entirely. Must happen before the
             # request is ever made, not just on the response.
-            self._check_target_is_public(url)
-            original_domain = urlparse(url).netloc
+            self._check_target_is_public(url_clean)
+            original_domain = urlparse(url_clean).netloc
 
             # Manual redirect loop (issue #9): requests' own
             # allow_redirects=True follows the ENTIRE chain before control
@@ -208,9 +218,10 @@ class ProxySandbox:
             result['final_url'] = response.url
             result['content_type'] = response.headers.get('Content-Type', '')
 
-            # Check Content-Type (nur HTML)
-            if 'text/html' not in result['content_type']:
-                result['error'] = f'Invalid content type: {result["content_type"]}'
+            ct_lower = result['content_type'].lower()
+            # Support HTML, JSON, Plaintext, XML, CSV
+            if not any(ct in ct_lower for ct in ('text/html', 'xhtml', 'json', 'text/plain', 'text/markdown', 'xml', 'text/csv')):
+                result['error'] = f'Unsupported content type: {result["content_type"]}'
                 return result
             
             # Check Content-Length (max 10 MB)
@@ -227,26 +238,39 @@ class ProxySandbox:
                     result['error'] = 'Content size limit exceeded'
                     return result
             
-            html = content.decode('utf-8', errors='ignore')
-            result['raw_html'] = html
-            
-            # Parse mit BeautifulSoup
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            # Remove scripts, styles, iframes
-            for tag in soup(['script', 'style', 'iframe', 'noscript']):
-                tag.decompose()
-            
-            # Extract data
-            result['title'] = self._extract_title(soup)
-            result['meta_description'] = self._extract_meta_description(soup)
-            result['headings'] = self._extract_headings(soup)
-            result['paragraphs'] = self._extract_paragraphs(soup)
-            result['lists'] = self._extract_lists(soup)
-            result['tables'] = self._extract_tables(soup)
-            result['links'] = self._extract_links(soup, url)
-            result['images'] = self._extract_images(soup, url)
-            result['text_content'] = self._extract_text_content(soup)
+            decoded_text = content.decode('utf-8', errors='ignore')
+            result['raw_html'] = decoded_text
+
+            if 'json' in ct_lower:
+                import json
+                try:
+                    parsed_json = json.loads(decoded_text)
+                    result['text_content'] = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+                    result['title'] = f"JSON API Response ({urlparse(url_clean).path or '/'})"
+                except Exception:
+                    result['text_content'] = decoded_text
+                    result['title'] = f"JSON Data ({urlparse(url_clean).path or '/'})"
+            elif any(ct in ct_lower for ct in ('text/plain', 'text/markdown', 'text/csv')):
+                result['text_content'] = decoded_text
+                result['title'] = f"Text ({urlparse(url_clean).path or '/'})"
+            else:
+                # Parse HTML/XML mit BeautifulSoup
+                soup = BeautifulSoup(decoded_text, 'html.parser')
+                
+                # Remove scripts, styles, iframes
+                for tag in soup(['script', 'style', 'iframe', 'noscript']):
+                    tag.decompose()
+                
+                # Extract data
+                result['title'] = self._extract_title(soup)
+                result['meta_description'] = self._extract_meta_description(soup)
+                result['headings'] = self._extract_headings(soup)
+                result['paragraphs'] = self._extract_paragraphs(soup)
+                result['lists'] = self._extract_lists(soup)
+                result['tables'] = self._extract_tables(soup)
+                result['links'] = self._extract_links(soup, url_clean)
+                result['images'] = self._extract_images(soup, url_clean)
+                result['text_content'] = self._extract_text_content(soup)
             
         except SSRFError as e:
             result['error'] = f'Blocked: {str(e)}'

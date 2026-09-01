@@ -16,33 +16,39 @@ class IntentDetector:
     PATTERNS = {
         # List/Show Intents (müssen ZUERST geprüft werden)
         'list_tasks': [
-            r'(?:zeig|show|liste|anzeig).*(?:task|aufgabe|todo)',
-            r'(?:welche|was für|meine).*(?:task|aufgabe|todo)',
-            r'(?:task|aufgabe|todo).*(?:liste|übersicht|anzeig)',
+            r'(?:zeig|show|liste|anzeig).*(?:task|aufgabe|todo|to-do)',
+            r'(?:welche|was für|meine).*(?:task|aufgabe|todo|to-do)',
+            r'(?:task|aufgabe|todo|to-do).*(?:liste|übersicht|anzeig)',
+            r'(?:was\s+muss\s+ich|was\s+ist\s+zu\s+tun)',
         ],
         'list_events': [
             r'(?:zeig|show|liste|anzeig).*(?:termin|meeting|event|kalender)',
             r'(?:welche|was für|meine).*(?:termin|meeting|event)',
             r'(?:termin|event|kalender).*(?:liste|übersicht|anzeig)',
+            r'(?:was\s+steht\s+(?:heute|morgen|an))',
         ],
         'list_notes': [
-            r'(?:zeig|show|liste|anzeig).*(?:notiz|note)',
-            r'(?:welche|was für|meine).*(?:notiz|note)',
-            r'(?:notiz|note).*(?:liste|übersicht|anzeig)',
+            r'(?:zeig|show|liste|anzeig).*(?:notiz|note|erinnerung)',
+            r'(?:welche|was für|meine).*(?:notiz|note|erinnerung)',
+            r'(?:notiz|note|erinnerung).*(?:liste|übersicht|anzeig)',
         ],
-        # Create Intents (danach prüfen)
-        'create_note': [
-            r'(?:erstell|mach|hinzufüg|neu|speicher|schreib|merk).*(?:notiz|note)',
-            r'merk\s+(?:dir|es)',  # "merk dir", "merk es" (ohne dass)
-            r'(?:erinner|remind).*(?:mich|me)',  # "erinnere mich", "remind me"
-            r'(?:neue|create)\s+(?:erinnerung|reminder)',  # "neue Erinnerung"
-        ],
-        'create_task': [
-            r'(?:erstell|mach|hinzufüg|neu|add).*(?:task|aufgabe|todo)',
-        ],
+        # Create Events (Termine & zeitgebundene Erinnerungen)
         'create_event': [
-            r'(?:erstell|mach|hinzufüg|neu).*(?:termin|meeting|event|besprechung)',
-            r'(?:termin|meeting|besprechung).*(?:morgen|übermorgen|heute|nächste|um\s+\d)',
+            r'(?:erstell|mach|hinzufüg|neu|trag|plan|setz).*(?:termin|meeting|event|besprechung|kalender)',
+            r'(?:termin|meeting|besprechung|event).*(?:morgen|übermorgen|heute|nächste|um\s+\d+|\d+:\d+|\d+\s*uhr)',
+            r'(?:erinner|remind).*(?:mich|me).*(?:morgen|übermorgen|heute|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|um\s+\d+|\d+:\d+|\d+\s*uhr|am\s+\d+)',
+        ],
+        # Create Tasks (To-Dos)
+        'create_task': [
+            r'(?:erstell|mach|hinzufüg|neu|add|trag).*(?:task|aufgabe|todo|to-do)',
+            r'(?:muss|sollte|will)\s+(?:ich\s+)?(?:noch\s+)?(?:erledigen|machen|kaufen|besorgen)',
+        ],
+        # Create Notes (Notizen & allgemeine Erinnerungen/Gedächtnis)
+        'create_note': [
+            r'(?:erstell|mach|hinzufüg|neu|speicher|schreib|notier).*(?:notiz|note)',
+            r'merk\s+(?:dir|es)',  # "merk dir", "merk es"
+            r'(?:erinner|remind).*(?:mich|me)',  # Allgemeine Erinnerung
+            r'(?:neue|create)\s+(?:erinnerung|reminder)',
         ]
     }
     
@@ -125,8 +131,9 @@ class IntentDetector:
         
         # Pattern 2: Kontext-basierte Erkennung
         if not title:
-            # "Meeting" oder "Termin" + Kontext
+            # "Meeting" oder "Termin" oder "Erinnere mich an" + Kontext
             context_patterns = [
+                r'(?:erinner|remind).*?(?:an|at)\s+([a-zA-ZäöüÄÖÜß\s]+?)(?:\s+um|\s+morgen|\s+heute|\s+in|$)',
                 r'(?:meeting|termin|besprechung|treffen)\s+(?:mit\s+)?([a-zA-ZäöüÄÖÜß\s]+?)(?:\s+um|\s+morgen|\s+heute|\s+in|$)',
                 r'(?:meeting|termin)\s+([^um]+?)(?:\s+um|\s+morgen|$)'
             ]
@@ -137,7 +144,7 @@ class IntentDetector:
                     candidate = match.group(1).strip()
                     # Filtere Trigger-Wörter und Zeit-Keywords raus
                     time_keywords = ['morgen', 'heute', 'übermorgen', 'nächste', 'woche']
-                    if candidate and len(candidate) > 2 and candidate.lower() not in ['der', 'die', 'das', 'in', 'bei'] + time_keywords:
+                    if candidate and len(candidate) > 2 and candidate.lower() not in ['der', 'die', 'das', 'in', 'bei', 'den', 'dem'] + time_keywords:
                         title = candidate
                         break
         
@@ -148,7 +155,7 @@ class IntentDetector:
         # Pattern 4: Generischer Fallback
         if not title:
             # Entferne Trigger-Wörter und Zeit-Angaben
-            cleaned = re.sub(r'(?:erstell|mach|neu|add|hinzufüg|termin|meeting|event|besprechung)\s*', '', message, flags=re.IGNORECASE)
+            cleaned = re.sub(r'(?:erstell|mach|neu|add|hinzufüg|termin|meeting|event|besprechung|erinnere\s+mich\s+an|erinnere\s+mich|erinnerung)\s*', '', message, flags=re.IGNORECASE)
             cleaned = re.sub(r'(?:morgen|heute|übermorgen|nächste\s+woche|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\s*', '', cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r'(?:um\s+)?\d{1,2}(?::\d{2})?\s*(?:uhr|h)?', '', cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r'\s+', ' ', cleaned).strip()  # Mehrfach-Spaces entfernen
@@ -173,14 +180,6 @@ class IntentDetector:
         if time_info:
             details['start_time'] = time_info['start']
             details['end_time'] = time_info['end']
-        
-        return details
-        if re.search(r'(?:privat|personal|familie)', message, re.IGNORECASE):
-            details['event_type'] = 'private'
-        elif re.search(r'(?:meeting|besprechung|firma|büro|raum)', message, re.IGNORECASE):
-            details['event_type'] = 'meeting'
-        else:
-            details['event_type'] = 'other'
         
         return details
     

@@ -1,0 +1,219 @@
+/* ==========================================================================
+   LIARA Mobile Beta - Minimalist Workspace
+   ========================================================================== */
+
+.mobile-workspace-app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+  background: var(--bg-main, #0a0b12);
+  color: var(--color-text, #f1f5f9);
+  overflow: hidden;
+}
+
+.mobile-ws-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.85rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  background: var(--bg-card, #13141f);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.mobile-ws-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text, #f1f5f9);
+}
+
+.mobile-ws-nav {
+  display: flex;
+  background: rgba(20, 22, 36, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.mobile-ws-tab {
+  flex: 1;
+  padding: 0.55rem 0.4rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted, #94a3b8);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-ws-tab.active {
+  color: #00e5ff;
+  border-bottom-color: #00e5ff;
+  background: rgba(0, 229, 255, 0.06);
+}
+
+.mobile-ws-proc-badge {
+  padding: 0.1rem 0.35rem;
+  background: rgba(246, 173, 85, 0.2);
+  border: 1px solid rgba(246, 173, 85, 0.4);
+  color: #f6ad55;
+  border-radius: 10px;
+  font-size: 0.65rem;
+}
+
+.mobile-ws-view {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Files List */
+.mobile-ws-files {
+  padding: 0.85rem;
+}
+
+.mobile-files-actions {
+  margin-bottom: 0.85rem;
+}
+
+.mobile-btn-primary {
+  width: 100%;
+  padding: 0.6rem;
+  background: var(--accent-gradient, linear-gradient(135deg, #7928ca 0%, #ff0080 100%));
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(121, 40, 202, 0.3);
+}
+
+.mobile-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mobile-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-card, #13141f);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mobile-file-item:active {
+  background: rgba(0, 229, 255, 0.08);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+
+.mobile-file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.mobile-file-icon {
+  font-size: 1rem;
+}
+
+.mobile-file-name {
+  font-size: 0.84rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-file-arrow {
+  color: var(--color-text-muted, #94a3b8);
+  font-size: 0.85rem;
+}
+
+/* Editor View */
+.mobile-editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mobile-editor-filename {
+  font-size: 0.78rem;
+  color: var(--color-text-muted, #94a3b8);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-editor-btns {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mobile-btn-sm {
+  padding: 0.25rem 0.55rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: var(--color-text, #f1f5f9);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mobile-run-btn {
+  background: rgba(72, 187, 120, 0.2);
+  border-color: #48bb78;
+  color: #48bb78;
+}
+
+.mobile-codemirror-wrapper {
+  flex: 1;
+  min-height: 250px;
+  background: #0a0e14;
+}
+
+.mobile-codemirror-wrapper .cm-editor {
+  height: 100%;
+  font-size: 12px;
+}
+
+.mobile-run-result-box {
+  max-height: 35vh;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Terminal View */
+.mobile-ws-terminal {
+  padding: 0.5rem;
+  height: 100%;
+}
+
+.mobile-ws-terminal .workspace-shell-panel {
+  height: 100%;
+}
