@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 
@@ -172,7 +172,7 @@ class ToolExecutor:
                 "success": True,
                 "tool": tool_call.tool_name,
                 "result": result,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "execution_time_ms": elapsed_ms
             }
 
@@ -679,7 +679,7 @@ class ToolExecutor:
             "error": error_msg,
             "consent_required": consent_required,
             "result": result,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "execution_time_ms": execution_time_ms,
         }
 

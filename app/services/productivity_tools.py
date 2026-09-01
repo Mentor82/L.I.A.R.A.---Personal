@@ -166,23 +166,24 @@ def execute_productivity_tool(
     tool_name: str,
     user_id: int,
     params: Dict[str, Any],
-    session_factory=SessionLocal
+    session_factory=None
 ) -> Optional[Dict[str, Any]]:
     """Executes a productivity tool and returns a result dict, or None if not handled."""
+    sf = session_factory or SessionLocal
     if tool_name == "create_note":
-        return _execute_create_note(user_id, params, session_factory)
+        return _execute_create_note(user_id, params, sf)
     elif tool_name == "list_notes":
-        return _execute_list_notes(user_id, params, session_factory)
+        return _execute_list_notes(user_id, params, sf)
     elif tool_name == "create_task":
-        return _execute_create_task(user_id, params, session_factory)
+        return _execute_create_task(user_id, params, sf)
     elif tool_name == "list_tasks":
-        return _execute_list_tasks(user_id, params, session_factory)
+        return _execute_list_tasks(user_id, params, sf)
     elif tool_name == "update_task_status":
-        return _execute_update_task_status(user_id, params, session_factory)
+        return _execute_update_task_status(user_id, params, sf)
     elif tool_name == "create_calendar_event":
-        return _execute_create_calendar_event(user_id, params, session_factory)
+        return _execute_create_calendar_event(user_id, params, sf)
     elif tool_name == "list_calendar_events":
-        return _execute_list_calendar_events(user_id, params, session_factory)
+        return _execute_list_calendar_events(user_id, params, sf)
     elif tool_name == "search_memory":
         return _execute_search_memory(user_id, params)
     return None
