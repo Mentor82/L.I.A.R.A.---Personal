@@ -135,6 +135,7 @@
     "welcomeTitle": "Hi, I'm Liara",
     "welcomeSubtitle": "How can I help you today?",
     "sessionError": "Could not create the chat - the session will be created automatically when you send a message.",
+    "stallNotice": "⏳ This is taking unusually long - the server may be under heavy load. I'm still waiting, but you can also cancel.",
     "thinking": "Thought Process",
     "workspace": "Workspace",
     "files": "Files",

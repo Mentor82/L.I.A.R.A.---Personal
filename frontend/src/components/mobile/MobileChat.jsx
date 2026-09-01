@@ -31,6 +31,10 @@ import './MobileChat.css';
 // conversation would ever be persisted.
 const PENDING_SESSION_ID = 'pending';
 
+// Matches the desktop chat: after this long without a single SSE event the
+// user gets told the request is unusually slow (it keeps running).
+const STALL_THRESHOLD_MS = 45000;
+
 export default function MobileChat({ user, onLogout }) {
   const { t } = useTranslation();
   const { setViewMode } = useViewMode();
@@ -60,6 +64,12 @@ export default function MobileChat({ user, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [sessionError, setSessionError] = useState(false);
+  // Same informational stall watchdog the desktop chat already has: a request
+  // can sit with zero SSE events for minutes under heavy server load, which
+  // from the user's seat is indistinguishable from a hung send button. The
+  // request is never given up on, this only tells the user what's going on.
+  const [stalled, setStalled] = useState(false);
+  const lastActivityRef = useRef(Date.now());
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState(() => {
     return localStorage.getItem('liara_selected_model') || 'llama3.2:3b';
@@ -179,6 +189,18 @@ export default function MobileChat({ user, onLogout }) {
       scrollToBottom(true);
     }
   }, [messages, generating, loading]);
+
+  // Polls instead of using a single timeout so a late-arriving event clears
+  // the notice again via the touch in the SSE handler below.
+  useEffect(() => {
+    if (!generating) return undefined;
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > STALL_THRESHOLD_MS) {
+        setStalled(true);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [generating]);
 
   // Handle textarea auto-grow
   const handleInputChange = (e) => {
@@ -373,6 +395,8 @@ export default function MobileChat({ user, onLogout }) {
 
     setLoading(true);
     setGenerating(true);
+    lastActivityRef.current = Date.now();
+    setStalled(false);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -388,6 +412,10 @@ export default function MobileChat({ user, onLogout }) {
         },
         {
           signal: controller.signal,
+          onActivity: () => {
+            lastActivityRef.current = Date.now();
+            setStalled(false);
+          },
           onEvent: async (parsed) => {
             if (parsed.type === 'thinking') {
               setLoading(false);
@@ -576,6 +604,7 @@ export default function MobileChat({ user, onLogout }) {
     } finally {
       setLoading(false);
       setGenerating(false);
+      setStalled(false);
       abortControllerRef.current = null;
       setChatSessions((prev) =>
         prev.map((s) => {
@@ -598,6 +627,7 @@ export default function MobileChat({ user, onLogout }) {
     }
     setLoading(false);
     setGenerating(false);
+    setStalled(false);
   };
 
   const filteredSessions = chatSessions.filter((s) =>
@@ -704,6 +734,11 @@ export default function MobileChat({ user, onLogout }) {
                       <span />
                     </div>
                   ) : null}
+
+                  {/* Request is still running but has been quiet for a while */}
+                  {stalled && generating && !isUser && index === messages.length - 1 && (
+                    <div className="mobile-stall-notice">{t('mobile.stallNotice')}</div>
+                  )}
 
                   {/* Attached Action Cards */}
                   {msg.workspaceArtifacts && <WorkspaceArtifactsBlock artifacts={msg.workspaceArtifacts} />}

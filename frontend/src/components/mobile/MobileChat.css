@@ -742,3 +742,14 @@
   background: rgba(234, 179, 8, 0.12);
   border: 1px solid rgba(234, 179, 8, 0.35);
 }
+
+/* Shown when a running request has not produced any SSE event for a while. */
+.mobile-stall-notice {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--color-text-muted, #94a3b8);
+  background: rgba(148, 163, 184, 0.12);
+}
