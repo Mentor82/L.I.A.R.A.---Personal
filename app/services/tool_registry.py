@@ -14,6 +14,8 @@ class ToolCategory(str, Enum):
     SYSTEM = "system"            # Systemabfragen
     UTILITY = "utility"          # Hilfsfunktionen
     WORKSPACE = "workspace"      # Workspace-Dateien lesen/vorschlagen
+    PRODUCTIVITY = "productivity"  # Notizen, Tasks, Kalender
+    MEMORY = "memory"            # 4D Memory & Wissenssuche
 
 
 @dataclass
@@ -326,6 +328,10 @@ class ToolRegistry:
             requires_consent=True,
             privacy_level="low"
         ))
+
+        # 📅 Notes, Tasks, Calendar, and Memory Tools (modularized in productivity_tools.py)
+        from services.productivity_tools import register_productivity_tools
+        register_productivity_tools(self)
 
     def register_tool(self, tool: ToolDefinition):
         """Registriere neues Tool"""

@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Optional
 from services.agents.base_agent import BaseAgent
 from services.agents.code_agent import CodeAgent
 from services.agents.research_agent import ResearchAgent
+from services.agents.productivity_agent import ProductivityAgent
 
 
 class AgentRegistry:
@@ -44,6 +45,25 @@ class AgentRegistry:
                 "wikipedia_search"
             ],
             "class": ResearchAgent
+        },
+        "productivity": {
+            "id": "productivity",
+            "name": "Productivity Agent",
+            "description": "Autonome Aufgabenverwaltung, Terminplanung, Notizen und 4D Memory Gedächtnisabruf.",
+            "default_model": "llama3.2:3b",
+            "icon": "📅",
+            "category": "productivity",
+            "tools": [
+                "create_note",
+                "list_notes",
+                "create_task",
+                "list_tasks",
+                "update_task_status",
+                "create_calendar_event",
+                "list_calendar_events",
+                "search_memory"
+            ],
+            "class": ProductivityAgent
         }
     }
 
@@ -85,10 +105,11 @@ class AgentRegistry:
         agent_cls = profile["class"]
         chosen_model = model or profile["default_model"]
         steps = max_steps or 12
+        uid = user_id or 1
 
         if agent_cls == CodeAgent:
             return CodeAgent(
-                user_id=user_id,
+                user_id=uid,
                 session_id=session_id,
                 workspace_root=workspace_root,
                 model=chosen_model,
@@ -96,6 +117,12 @@ class AgentRegistry:
             )
         elif agent_cls == ResearchAgent:
             return ResearchAgent(
+                model=chosen_model,
+                max_steps=steps
+            )
+        elif agent_cls == ProductivityAgent:
+            return ProductivityAgent(
+                user_id=uid,
                 model=chosen_model,
                 max_steps=steps
             )

@@ -18,6 +18,7 @@ from services.location_service import get_location_service
 from services.search_broker import get_search_broker
 from services.web_safety.proxy_sandbox import get_proxy_sandbox
 from services import session_workspace
+from services.productivity_tools import execute_productivity_tool
 
 WORKSPACE_AGENT_TOOLS = (
     "workspace_list_files", "workspace_read_file", "workspace_propose_change",
@@ -228,6 +229,11 @@ class ToolExecutor:
         # approve/reject-by-the-user gate as a file proposal.
         elif tool_def.name == "workspace_propose_dependency_change":
             return self._execute_workspace_propose_dependency(user_id, session_id, parameters)
+
+        # 📅 Productivity & Memory Tools (Notes, Tasks, Calendar, 4D Memory)
+        prod_res = execute_productivity_tool(tool_def.name, user_id, parameters)
+        if prod_res is not None:
+            return prod_res
 
         # Fallback to stub function
         else:
