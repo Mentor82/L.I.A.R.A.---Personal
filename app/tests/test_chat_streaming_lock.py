@@ -14,7 +14,9 @@ from api.routers.chat_streaming import (
     _release_session_lock,
     stream_ollama_response,
     SESSION_GENERATION_LOCK_TTL,
-    SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT
+    SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
+    SessionLockTimeoutError,
+    SessionLockUnavailableError,
 )
 
 class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
@@ -135,13 +137,34 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn_b_history[1]["content"], "Antwort auf A")
 
     @patch("api.routers.chat_streaming.get_redis_service")
+    def test_acquire_session_lock_raises_unavailable_when_redis_missing(self, mock_get_redis):
+        """Verify _acquire_session_lock raises SessionLockUnavailableError when Redis is unavailable."""
+        mock_get_redis.return_value = None
+        with self.assertRaises(SessionLockUnavailableError):
+            _acquire_session_lock(123)
+
+        mock_svc = MagicMock()
+        mock_svc.client = None
+        mock_get_redis.return_value = mock_svc
+        with self.assertRaises(SessionLockUnavailableError):
+            _acquire_session_lock(123)
+
+    @patch("api.routers.chat_streaming.get_redis_service")
+    def test_acquire_session_lock_raises_timeout_when_contended(self, mock_get_redis):
+        """Verify _acquire_session_lock raises SessionLockTimeoutError when lock cannot be acquired."""
+        mock_svc = MagicMock()
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = False
+        mock_svc.client.lock.return_value = mock_lock
+        mock_get_redis.return_value = mock_svc
+
+        with self.assertRaises(SessionLockTimeoutError):
+            _acquire_session_lock(123)
+
     @patch("api.routers.chat_streaming._acquire_session_lock")
-    async def test_stream_ollama_response_lock_timeout_aborts(self, mock_acquire, mock_get_redis):
-        """Verify that if lock acquisition returns None on an active Redis service, stream aborts cleanly with error event."""
-        mock_acquire.return_value = None
-        mock_redis_svc = MagicMock()
-        mock_redis_svc.client = MagicMock()
-        mock_get_redis.return_value = mock_redis_svc
+    async def test_stream_ollama_response_lock_timeout_aborts(self, mock_acquire):
+        """Verify stream aborts with error event when lock acquisition times out."""
+        mock_acquire.side_effect = SessionLockTimeoutError("Contention timeout")
 
         generator = stream_ollama_response(
             message="Test message",
@@ -157,3 +180,23 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         parsed = json.loads(events[0].replace("data: ", "").strip())
         self.assertEqual(parsed.get("type"), "error")
         self.assertIn("vorherige Anfrage", parsed.get("error", ""))
+
+    @patch("api.routers.chat_streaming._acquire_session_lock")
+    async def test_stream_ollama_response_redis_unavailable_aborts(self, mock_acquire):
+        """Verify stream fails closed with error event when Redis is unavailable (no lockless fallback)."""
+        mock_acquire.side_effect = SessionLockUnavailableError("Redis is down")
+
+        generator = stream_ollama_response(
+            message="Test message",
+            session_id=123,
+            user_id=1
+        )
+
+        events = []
+        async for chunk in generator:
+            events.append(chunk)
+
+        self.assertEqual(len(events), 1)
+        parsed = json.loads(events[0].replace("data: ", "").strip())
+        self.assertEqual(parsed.get("type"), "error")
+        self.assertIn("Sitzungskoordination momentan nicht verfügbar", parsed.get("error", ""))

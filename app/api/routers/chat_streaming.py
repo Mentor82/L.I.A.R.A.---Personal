@@ -79,28 +79,52 @@ SESSION_GENERATION_LOCK_TTL = 1200  # seconds
 SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 1200  # seconds
 
 
+class SessionLockError(Exception):
+    """Base exception for chat session lock failures."""
+    pass
+
+
+class SessionLockTimeoutError(SessionLockError):
+    """Raised when lock acquisition times out due to session lock contention."""
+    pass
+
+
+class SessionLockUnavailableError(SessionLockError):
+    """Raised when Redis or the lock coordination infrastructure is unavailable."""
+    pass
+
+
 def _acquire_session_lock(session_id: int):
     """
-    Redis lock serializing active /chat/stream generation per session (issue #13, #18).
+    Redis lock serializing active /chat/stream generation per session (issue #13, #18, #25).
     Because lock acquisition runs inside stream_ollama_response while _with_sse_keepalive
     actively sends pulses to keep HTTP proxies happy, this wait can safely block until
     the preceding turn finishes.
 
-    Returns the acquired Lock object, or None if Redis is unavailable / lock acquire times out.
+    Returns:
+        The acquired Redis Lock object.
+
+    Raises:
+        SessionLockUnavailableError: If Redis is unreachable or fails.
+        SessionLockTimeoutError: If the acquire timeout expires while waiting on a previous turn.
     """
     try:
         redis_svc = get_redis_service()
         if not redis_svc or not redis_svc.client:
-            return None
+            raise SessionLockUnavailableError("Redis service is unavailable")
         lock = redis_svc.client.lock(
             f"chat_stream_lock:{session_id}",
             timeout=SESSION_GENERATION_LOCK_TTL,
             blocking_timeout=SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
         )
-        return lock if lock.acquire(blocking=True) else None
+        if not lock.acquire(blocking=True):
+            raise SessionLockTimeoutError(f"Session lock acquisition timed out for session {session_id}")
+        return lock
+    except (SessionLockTimeoutError, SessionLockUnavailableError):
+        raise
     except Exception as e:
-        logger.warning(f"Session generation lock unavailable for session {session_id}: {e}")
-        return None
+        logger.warning(f"Session generation lock error for session {session_id}: {e}")
+        raise SessionLockUnavailableError(f"Redis lock error: {e}") from e
 
 
 def _release_session_lock(lock) -> None:
@@ -464,14 +488,22 @@ async def stream_ollama_response(
     """
     # issue #18 + #13: Acquire session lock inside the stream generator so the HTTP
     # StreamingResponse is returned immediately to prevent reverse-proxy 524 timeouts.
+    # Strict fail-closed: never proceed lockless to preserve same-session turn serialization.
     if session_lock is None and session_id is not None:
-        session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
-        if session_lock is None:
-            redis_svc = get_redis_service()
-            if redis_svc and redis_svc.client:
-                logger.error("Session generation lock acquisition timed out for session %s - aborting to prevent un-serialized generation race", session_id)
-                yield f"data: {json.dumps({'type': 'error', 'error': 'Die vorherige Anfrage in dieser Sitzung läuft noch oder hat das Zeitlimit überschritten.'})}\n\n"
-                return
+        try:
+            session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
+        except SessionLockTimeoutError:
+            logger.error("Session generation lock acquisition timed out for session %s - aborting turn to prevent un-serialized generation race", session_id)
+            yield f"data: {json.dumps({'type': 'error', 'error': 'Die vorherige Anfrage in dieser Sitzung läuft noch oder hat das Zeitlimit überschritten.'})}\n\n"
+            return
+        except SessionLockUnavailableError as ex:
+            logger.error("Session generation lock unavailable for session %s (%s) - fail closed to prevent un-serialized generation race", session_id, ex)
+            yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungskoordination momentan nicht verfügbar. Bitte versuche es in Kürze erneut.'})}\n\n"
+            return
+        except Exception as ex:
+            logger.error("Unexpected error acquiring session lock for session %s: %s", session_id, ex)
+            yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungsfehler aufgetreten. Bitte versuche es erneut.'})}\n\n"
+            return
 
     # Mood-Detection und System-Prompt (per-user, DB-backed)
     mood_system = MoodSystem(user_id)
