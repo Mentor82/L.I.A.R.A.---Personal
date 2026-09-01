@@ -41,7 +41,7 @@ router = APIRouter(prefix="/workspace", tags=["Workspace Terminal"])
 logger = logging.getLogger(__name__)
 
 RUNNER_USER = "liara-runner"
-RUNNER_SHELL_SCRIPT = str(Path(__file__).resolve().parent.parent / "scripts" / "run_sandboxed_shell.sh")
+RUNNER_SHELL_SCRIPT = str(Path(__file__).resolve().parent.parent.parent / "scripts" / "run_sandboxed_shell.sh")
 
 
 def _session_owned(db, session_id: int, user_id: int) -> bool:
