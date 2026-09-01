@@ -1,8 +1,8 @@
 """
 Vision Service - Multimodal Hybrid Context Pipeline & Vision API
 ================================================================
-Analysiert Bilder via gemma4:cloud (Ollama Cloud) oder LLaVA (lokal)
-und liefert präzise visuelle Beschreibungen für das Hauptmodell.
+Analysiert Bilder standardmäßig via qwen3.5:cloud (Ollama Cloud)
+mit automatischem Fallback auf qwen3.5:0.8b (lokal, blitzschnell auf CPU).
 """
 
 import asyncio
@@ -18,9 +18,10 @@ import requests
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-VISION_MODEL = os.getenv("VISION_MODEL", "gemma4:cloud")
+VISION_MODEL = os.getenv("VISION_MODEL", "qwen3.5:cloud")
+VISION_FALLBACK_MODEL = os.getenv("VISION_FALLBACK_MODEL", "qwen3.5:0.8b")
 
-GEMMA_VISION_SYSTEM_PROMPT = """Du bist ein hochpräziser visueller Bild-Analysator für ein nachgelagertes KI-Sprachmodell.
+VISION_SYSTEM_PROMPT = """Du bist ein hochpräziser visueller Bild-Analysator für ein nachgelagertes KI-Sprachmodell.
 Deine Aufgabe ist es, das übergebene Bild sachlich, detailliert und vollständig zu analysieren.
 Strukturiere deine Beschreibung wie folgt:
 1. [Bild-Typ & Szene]: Was ist zu sehen (Foto, Screenshot, Diagramm, Code-Editor, UI, Schaltplan)?
@@ -29,10 +30,10 @@ Strukturiere deine Beschreibung wie folgt:
 Antworte direkt auf Deutsch, sachlich, präzise und ohne Floskeln."""
 
 
-def analyze_image_with_gemma(image_base64_or_path: str, user_question: str = "") -> str:
+def analyze_image_with_vision(image_base64_or_path: str, user_question: str = "") -> str:
     """
-    Analysiert ein Bild über Ollama (gemma4:cloud oder Fallback) und liefert
-    eine detaillierte visuelle Beschreibung als Kontext zurück.
+    Analysiert ein Bild über Ollama mit Primärmodell (qwen3.5:cloud)
+    und automatischem Fallback auf lokales Modell (qwen3.5:0.8b).
     """
     if not image_base64_or_path:
         return ""
@@ -50,7 +51,7 @@ def analyze_image_with_gemma(image_base64_or_path: str, user_question: str = "")
         "messages": [
             {
                 "role": "system",
-                "content": GEMMA_VISION_SYSTEM_PROMPT
+                "content": VISION_SYSTEM_PROMPT
             },
             {
                 "role": "user",
@@ -64,8 +65,9 @@ def analyze_image_with_gemma(image_base64_or_path: str, user_question: str = "")
         }
     }
 
+    # 1. Versuch: qwen3.5:cloud
     try:
-        logger.info(f"Sending image to Vision model '{VISION_MODEL}'...")
+        logger.info(f"Sending image to Primary Vision model '{VISION_MODEL}'...")
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/chat",
             data=json.dumps(payload).encode("utf-8"),
@@ -74,40 +76,68 @@ def analyze_image_with_gemma(image_base64_or_path: str, user_question: str = "")
         with urllib.request.urlopen(req, timeout=35) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             content = data.get("message", {}).get("content", "")
-            logger.info(f"Gemma Vision analysis succeeded ({len(content)} chars)")
-            return content.strip()
+            if content:
+                logger.info(f"Primary Vision analysis ({VISION_MODEL}) succeeded ({len(content)} chars)")
+                return content.strip()
     except Exception as e:
-        logger.error(f"Gemma Vision analysis failed: {e}")
-        try:
-            logger.info("Attempting local llava:7b fallback...")
-            payload["model"] = "llava:7b"
-            req_fb = urllib.request.Request(
-                f"{OLLAMA_URL}/api/chat",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req_fb, timeout=40) as resp_fb:
-                data_fb = json.loads(resp_fb.read().decode("utf-8"))
-                content_fb = data_fb.get("message", {}).get("content", "")
+        logger.warning(f"Primary Vision model '{VISION_MODEL}' failed: {e}. Switching to fallback '{VISION_FALLBACK_MODEL}'...")
+
+    # 2. Versuch: Lokaler Fallback qwen3.5:0.8b
+    try:
+        logger.info(f"Attempting Local Vision fallback '{VISION_FALLBACK_MODEL}'...")
+        payload["model"] = VISION_FALLBACK_MODEL
+        req_fb = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req_fb, timeout=30) as resp_fb:
+            data_fb = json.loads(resp_fb.read().decode("utf-8"))
+            content_fb = data_fb.get("message", {}).get("content", "")
+            if content_fb:
+                logger.info(f"Fallback Vision analysis ({VISION_FALLBACK_MODEL}) succeeded ({len(content_fb)} chars)")
                 return content_fb.strip()
-        except Exception as fb_err:
-            logger.error(f"Local vision fallback also failed: {fb_err}")
-            return f"[Bildanalyse nicht verfügbar: {e}]"
+    except Exception as fb_err:
+        logger.error(f"Local vision fallback '{VISION_FALLBACK_MODEL}' also failed: {fb_err}")
+
+    # 3. Versuch: gemma4:cloud als sekundärer Cloud-Fallback
+    try:
+        logger.info("Attempting secondary cloud fallback 'gemma4:cloud'...")
+        payload["model"] = "gemma4:cloud"
+        req_gemma = urllib.request.Request(
+            f"{OLLAMA_URL}/api/chat",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req_gemma, timeout=30) as resp_gemma:
+            data_gemma = json.loads(resp_gemma.read().decode("utf-8"))
+            content_gemma = data_gemma.get("message", {}).get("content", "")
+            if content_gemma:
+                return content_gemma.strip()
+    except Exception:
+        pass
+
+    return "[Bildanalyse temporär nicht verfügbar]"
+
+
+# Backwards compatibility alias
+analyze_image_with_gemma = analyze_image_with_vision
 
 
 def format_vision_context_block(vision_analysis: str) -> str:
     """Formatiert die Bildanalyse als standardisierten Markdown-Kontextblock."""
-    if not vision_analysis or vision_analysis.startswith("[Bildanalyse nicht verfügbar"):
+    if not vision_analysis or vision_analysis.startswith("[Bildanalyse"):
         return ""
-    return f"\n\n[Visueller Bildkontext (analysiert von Gemma Vision)]:\n{vision_analysis}\n\n(Beziehe diesen visuellen Kontext direkt in deine Antwort auf die Benutzerfrage ein.)\n"
+    return f"\n\n[Visueller Bildkontext (analysiert von Qwen Vision Sensor)]:\n{vision_analysis}\n\n(Beziehe diesen visuellen Kontext direkt in deine Antwort auf die Benutzerfrage ein.)\n"
 
 
 class VisionService:
-    """Service für Bildanalyse mit gemma4:cloud / LLaVA"""
+    """Service für Bildanalyse mit qwen3.5:cloud / qwen3.5:0.8b"""
 
     def __init__(self, ollama_url: str = OLLAMA_URL):
         self.ollama_url = ollama_url
         self.default_model = VISION_MODEL
+        self.fallback_model = VISION_FALLBACK_MODEL
 
     async def is_available(self) -> bool:
         """Prüfe ob Vision-Modelle verfügbar sind"""
@@ -117,7 +147,7 @@ class VisionService:
                 if resp.status_code != 200:
                     return False
                 models = resp.json().get("models", [])
-                return any("gemma4" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() for m in models)
+                return any("qwen3.5" in m["name"].lower() or "gemma4" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() for m in models)
             except Exception:
                 return False
         return await asyncio.to_thread(_check)
@@ -132,7 +162,7 @@ class VisionService:
                 models = resp.json().get("models", [])
                 return [
                     m["name"] for m in models
-                    if "gemma4" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() or "kimi" in m["name"].lower()
+                    if "qwen3.5" in m["name"].lower() or "gemma4" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() or "kimi" in m["name"].lower()
                 ]
             except Exception:
                 return []
@@ -152,29 +182,39 @@ class VisionService:
         payload = {
             "model": chosen_model,
             "messages": [
-                {"role": "system", "content": GEMMA_VISION_SYSTEM_PROMPT},
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt, "images": [raw_b64]}
             ],
             "stream": False,
             "options": {"temperature": 0.2}
         }
 
-        def _do_post():
+        def _do_post(model_name: str):
+            payload["model"] = model_name
             resp = requests.post(f"{self.ollama_url}/api/chat", json=payload, timeout=45)
             resp.raise_for_status()
             data = resp.json()
             return data.get("message", {}).get("content", "").strip()
 
         try:
-            description = await asyncio.to_thread(_do_post)
+            description = await asyncio.to_thread(_do_post, chosen_model)
             return {
                 "description": description or "Keine Beschreibung erhalten",
                 "model_used": chosen_model,
                 "success": True
             }
         except Exception as e:
-            logger.error(f"VisionService error: {e}")
-            raise Exception(f"Vision API Fehler: {str(e)}")
+            logger.warning(f"VisionService primary model '{chosen_model}' failed: {e}. Trying fallback '{self.fallback_model}'...")
+            try:
+                description_fb = await asyncio.to_thread(_do_post, self.fallback_model)
+                return {
+                    "description": description_fb or "Keine Beschreibung erhalten",
+                    "model_used": self.fallback_model,
+                    "success": True
+                }
+            except Exception as fb_err:
+                logger.error(f"VisionService fallback also failed: {fb_err}")
+                raise Exception(f"Vision API Fehler: {str(e)} | Fallback: {str(fb_err)}")
 
     async def analyze_image_with_context(
         self,

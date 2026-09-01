@@ -1485,9 +1485,9 @@ function Chat() {
                 onClick={handleImageAnalysis}
                 disabled={!message.trim() && !selectedImageBase64}
                 className="chat-submit vision-submit"
-                title="Multimodale Bildanalyse (Gemma Vision ➔ Chat-Modell)"
+                title="Multimodale Bildanalyse (Qwen 3.5 Vision Sensor ➔ Chat-Modell)"
               >
-                📷 Gemma Vision
+                📷 Qwen Vision
               </button>
               <button
                 type="button"

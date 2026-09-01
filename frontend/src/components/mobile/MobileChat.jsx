@@ -753,7 +753,7 @@ export default function MobileChat({ user, onLogout }) {
             <img src={attachedImage.previewUrl} alt="Preview" className="mobile-preview-thumb" />
             <div className="mobile-preview-info">
               <span className="mobile-preview-name">{attachedImage.name}</span>
-              <span className="mobile-preview-badge">📷 Gemma Vision Worker</span>
+              <span className="mobile-preview-badge">📷 Qwen Vision Sensor</span>
             </div>
             <button
               type="button"
