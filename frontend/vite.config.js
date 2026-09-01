@@ -21,32 +21,41 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('katex')) {
-              return 'katex-vendor';
-            }
-            if (id.includes('@xterm')) {
-              return 'terminal-vendor';
-            }
-            if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) {
-              return 'syntax-highlighter-vendor';
-            }
-            if (id.includes('@codemirror') || id.includes('@uiw/react-codemirror')) {
-              return 'codemirror-vendor';
-            }
-            if (id.includes('lexical') || id.includes('@lexical')) {
-              return 'lexical-vendor';
-            }
-            if (id.includes('lucide-react')) {
-              return 'lucide-vendor';
-            }
-            if (id.includes('react-markdown') || id.includes('remark-') || id.includes('rehype-')) {
-              return 'markdown-vendor';
-            }
-            if (id.includes('react-router-dom') || id.includes('react-dom') || id.includes('/react/')) {
+          const normalized = id.replace(/\\/g, '/');
+          if (normalized.includes('/node_modules/')) {
+            if (
+              normalized.includes('/react/') ||
+              normalized.includes('/react-dom/') ||
+              normalized.includes('/react-router/') ||
+              normalized.includes('/react-router-dom/') ||
+              normalized.includes('/scheduler/') ||
+              normalized.includes('/use-sync-external-store/') ||
+              normalized.includes('/@remix-run/router/')
+            ) {
               return 'react-vendor';
             }
-            if (id.includes('i18next') || id.includes('react-i18next')) {
+            if (normalized.includes('/katex/')) {
+              return 'katex-vendor';
+            }
+            if (normalized.includes('/@xterm/') || normalized.includes('/xterm/')) {
+              return 'terminal-vendor';
+            }
+            if (normalized.includes('react-syntax-highlighter') || normalized.includes('prismjs')) {
+              return 'syntax-highlighter-vendor';
+            }
+            if (normalized.includes('@codemirror') || normalized.includes('@uiw/react-codemirror')) {
+              return 'codemirror-vendor';
+            }
+            if (normalized.includes('lexical') || normalized.includes('@lexical')) {
+              return 'lexical-vendor';
+            }
+            if (normalized.includes('lucide-react')) {
+              return 'lucide-vendor';
+            }
+            if (normalized.includes('react-markdown') || normalized.includes('remark-') || normalized.includes('rehype-')) {
+              return 'markdown-vendor';
+            }
+            if (normalized.includes('i18next') || normalized.includes('react-i18next')) {
               return 'i18n-vendor';
             }
           }
