@@ -79,7 +79,7 @@ import httpx
 from httpx import ASGITransport, AsyncClient
 
 
-class TestAsyncBridgeClient:
+class AsyncBridgeClient:
     def __init__(self, app):
         self.app = app
         self.transport = ASGITransport(app=app)
@@ -103,7 +103,7 @@ class TestAgentRouter(unittest.TestCase):
         self.app = FastAPI()
         self.app.include_router(agent_router)
         self.app.dependency_overrides[require_active_user] = mock_require_active_user
-        self.client = TestAsyncBridgeClient(self.app)
+        self.client = AsyncBridgeClient(self.app)
 
     def tearDown(self):
         self.app.dependency_overrides.clear()
