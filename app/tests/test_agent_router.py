@@ -74,21 +74,38 @@ def mock_require_active_user():
     return MockUser()
 
 
+import asyncio
+import httpx
+from httpx import ASGITransport, AsyncClient
+
+
+class TestAsyncBridgeClient:
+    def __init__(self, app):
+        self.app = app
+        self.transport = ASGITransport(app=app)
+
+    def get(self, path, **kwargs):
+        async def _do():
+            async with AsyncClient(transport=self.transport, base_url="http://testserver") as client:
+                return await client.get(path, **kwargs)
+        return asyncio.run(_do())
+
+    def post(self, path, **kwargs):
+        async def _do():
+            async with AsyncClient(transport=self.transport, base_url="http://testserver") as client:
+                return await client.post(path, **kwargs)
+        return asyncio.run(_do())
+
+
 class TestAgentRouter(unittest.TestCase):
 
     def setUp(self):
         self.app = FastAPI()
         self.app.include_router(agent_router)
         self.app.dependency_overrides[require_active_user] = mock_require_active_user
-        try:
-            import httpx
-            self.client = httpx.Client(transport=httpx.ASGITransport(app=self.app), base_url="http://testserver")
-        except Exception:
-            self.client = TestClient(self.app)
+        self.client = TestAsyncBridgeClient(self.app)
 
     def tearDown(self):
-        if hasattr(self, "client") and hasattr(self.client, "close"):
-            self.client.close()
         self.app.dependency_overrides.clear()
 
     def test_get_agent_types(self):
