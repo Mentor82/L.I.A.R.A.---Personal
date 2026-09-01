@@ -459,8 +459,45 @@ export default function MobileChat({ user, onLogout }) {
                   return { ...s, messages: msgs };
                 })
               );
+            } else if (parsed.type === 'usage') {
+              const usageData = parsed.usage || {
+                in: parsed.tokens_in,
+                think: parsed.tokens_think,
+                out: parsed.tokens_out,
+                total: parsed.tokens_total
+              };
+              setChatSessions((prev) =>
+                prev.map((s) => {
+                  if (s.id !== currSessionId) return s;
+                  const msgs = [...s.messages];
+                  const last = msgs[msgs.length - 1];
+                  if (last && last.role === 'assistant') {
+                    msgs[msgs.length - 1] = {
+                      ...last,
+                      tokens: usageData,
+                    };
+                  }
+                  return { ...s, messages: msgs };
+                })
+              );
             } else if (parsed.type === 'done') {
               setLoading(false);
+              if (parsed.usage) {
+                setChatSessions((prev) =>
+                  prev.map((s) => {
+                    if (s.id !== currSessionId) return s;
+                    const msgs = [...s.messages];
+                    const last = msgs[msgs.length - 1];
+                    if (last && last.role === 'assistant') {
+                      msgs[msgs.length - 1] = {
+                        ...last,
+                        tokens: parsed.usage,
+                      };
+                    }
+                    return { ...s, messages: msgs };
+                  })
+                );
+              }
             }
           },
         }
@@ -738,6 +775,34 @@ export default function MobileChat({ user, onLogout }) {
                   {msg.workspaceProposals && <WorkspaceProposalsBlock proposals={msg.workspaceProposals} />}
                   {msg.agentSteps && <AgentStepsBlock steps={msg.agentSteps} />}
                   {msg.webSources && <WebSourcesBlock sources={msg.webSources} />}
+
+                  {/* Message Footer with Model & Tokens */}
+                  {!isUser && (msg.model || msg.tokens) && (
+                    <div className="mobile-bubble-footer">
+                      <div className="mobile-bubble-footer-left">
+                        {msg.model && <span className="mobile-bubble-model">🤖 {msg.model.split(':')[0]}</span>}
+                        {msg.mood && <span className="mobile-bubble-mood"> · 🌙 {msg.mood}</span>}
+                      </div>
+                      {msg.tokens && (
+                        <div
+                          className="mobile-bubble-tokens"
+                          title={`Tokens: ${msg.tokens.in ?? 0} in, ${msg.tokens.think ?? 0} think, ${msg.tokens.out ?? 0} out, ${msg.tokens.total ?? ((msg.tokens.in || 0) + (msg.tokens.think || 0) + (msg.tokens.out || 0))} gesamt`}
+                        >
+                          <span className="token-item"><span className="token-lbl">in:</span> {msg.tokens.in ?? 0}</span>
+                          {Number(msg.tokens.think) > 0 && (
+                            <>
+                              <span className="token-dot">·</span>
+                              <span className="token-item"><span className="token-lbl">think:</span> {msg.tokens.think}</span>
+                            </>
+                          )}
+                          <span className="token-dot">·</span>
+                          <span className="token-item"><span className="token-lbl">out:</span> {msg.tokens.out ?? 0}</span>
+                          <span className="token-dot">·</span>
+                          <span className="token-item token-total-item"><span className="token-lbl">gesamt:</span> {msg.tokens.total ?? ((msg.tokens.in || 0) + (msg.tokens.think || 0) + (msg.tokens.out || 0))}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );

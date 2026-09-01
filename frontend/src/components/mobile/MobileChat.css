@@ -434,6 +434,57 @@
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
 
+.mobile-bubble-footer {
+  margin-top: 0.65rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.72rem;
+  opacity: 0.75;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  line-height: 1.2;
+}
+
+.mobile-bubble-footer-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.mobile-bubble-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  margin-left: auto;
+  opacity: 0.85;
+}
+
+.mobile-bubble-tokens .token-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.1rem;
+}
+
+.mobile-bubble-tokens .token-lbl {
+  opacity: 0.65;
+  font-size: 0.68rem;
+}
+
+.mobile-bubble-tokens .token-dot {
+  opacity: 0.35;
+  margin: 0 1px;
+}
+
+.mobile-bubble-tokens .token-total-item {
+  font-weight: 600;
+  opacity: 0.95;
+}
+
 .mobile-msg-bubble table {
   width: 100%;
   table-layout: auto;

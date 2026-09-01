@@ -54,6 +54,7 @@ from services.chat_stream.generator_helpers import (
     _resolve_symbol,
     _flatten_messages_for_linep,
     _append_linep_tool_call,
+    calculate_usage_stats,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,6 +203,8 @@ async def stream_ollama_response(
 
     full_response_text = ""
     full_thinking_text = ""
+    total_prompt_tokens = 0
+    total_eval_tokens = 0
     persisted_attempted = False
 
     def _persist_turn(interrupted: bool = False) -> bool:
@@ -499,6 +502,11 @@ async def stream_ollama_response(
                                                 yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
 
                                     if chunk.get("done", False):
+                                        if chunk.get("prompt_eval_count"):
+                                            total_prompt_tokens = chunk.get("prompt_eval_count", 0)
+                                        if chunk.get("eval_count"):
+                                            total_eval_tokens += chunk.get("eval_count", 0)
+
                                         leftover_thinking, leftover_content = thinking_splitter.flush()
                                         if leftover_thinking:
                                             full_thinking_text += leftover_thinking
@@ -630,10 +638,19 @@ async def stream_ollama_response(
         if user_id is not None:
             mood_system.update_mood(interaction_type, intensity=0.5)
 
+        usage_info = calculate_usage_stats(
+            prompt_tokens=total_prompt_tokens,
+            eval_tokens=total_eval_tokens,
+            thinking_text=full_thinking_text,
+            response_text=full_response_text,
+            messages=messages
+        )
+        yield f"data: {json.dumps({'type': 'usage', 'usage': usage_info, 'tokens_in': usage_info['in'], 'tokens_think': usage_info['think'], 'tokens_out': usage_info['out'], 'tokens_total': usage_info['total']})}\n\n"
+
         if user_id is not None and session_id is not None and full_response_text:
             _check_lock_held()
             persisted_attempted = True
-            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True, 'usage': usage_info})}\n\n"
 
             persisted_ok = False
             try:
@@ -642,7 +659,7 @@ async def stream_ollama_response(
                 logger.error(f"Assistant message persistence task failed: {e}")
             yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
         else:
-            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True, 'usage': usage_info})}\n\n"
 
     except SessionLockLostError as e:
         logger.error("Turn aborted due to lock lease loss (session=%s): %s", session_id, e)

@@ -65,3 +65,40 @@ async def _handle_workspace_artifact_blocks(raw_blocks: List[str], user_id: Opti
         if filename is None:
             payload["content"] = content
         yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def calculate_usage_stats(
+    prompt_tokens: int,
+    eval_tokens: int,
+    thinking_text: str,
+    response_text: str,
+    messages: Optional[List[Dict]] = None
+) -> Dict[str, int]:
+    """Calculates structured token statistics for input, thinking, output, and total."""
+    if prompt_tokens <= 0 and messages:
+        prompt_chars = sum(len(str(m.get("content", ""))) for m in messages if isinstance(m, dict))
+        prompt_tokens = max(1, round(prompt_chars / 3.8))
+
+    think_len = len(thinking_text) if thinking_text else 0
+    resp_len = len(response_text) if response_text else 0
+    total_gen_chars = think_len + resp_len
+
+    if eval_tokens <= 0 and total_gen_chars > 0:
+        eval_tokens = max(1, round(total_gen_chars / 3.8))
+
+    if think_len > 0 and total_gen_chars > 0 and eval_tokens > 0:
+        tokens_think = round(eval_tokens * (think_len / total_gen_chars))
+        tokens_out = max(0, eval_tokens - tokens_think)
+    else:
+        tokens_think = 0
+        tokens_out = max(0, eval_tokens)
+
+    tokens_in = max(0, prompt_tokens)
+    tokens_total = tokens_in + tokens_think + tokens_out
+
+    return {
+        "in": tokens_in,
+        "think": tokens_think,
+        "out": tokens_out,
+        "total": tokens_total
+    }
