@@ -62,7 +62,30 @@ export async function getSessionMessages(sessionId) {
   if (!response.ok) {
     throw new Error('Failed to fetch messages')
   }
-  
+
+  return await response.json()
+}
+
+/**
+ * Toggle a single item's done-state on a persisted assistant message's
+ * <tasks> checklist.
+ */
+export async function updateMessageTaskItem(messageId, itemId, done) {
+  const token = localStorage.getItem('liara_token')
+
+  const response = await fetch(`${API_BASE}/chat/messages/${messageId}/tasks`, {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ item_id: itemId, done })
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to update task item')
+  }
+
   return await response.json()
 }
 

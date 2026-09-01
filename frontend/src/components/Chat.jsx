@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { chatAPI, moodAPI } from '../services/api';
 import { chatArchiveAPI } from '../services/chatArchiveService';
-import { getChatSessions, createChatSession, getSessionMessages, deleteChatSession } from '../services/chatService';
+import { getChatSessions, createChatSession, getSessionMessages, deleteChatSession, updateMessageTaskItem } from '../services/chatService';
 import { streamChatSSE } from '../services/sseClient';
 import WebSearchResults from './WebSearchResults';
 import MarkdownMessage from './MarkdownMessage';
@@ -607,7 +607,12 @@ function Chat() {
               updateAssistantMessage({ tokens: parsed.usage });
             }
           } else if (parsed.type === 'persisted') {
-            updateAssistantMessage({ persisted: parsed.success });
+            // Real DB id, only now known - lets a just-finished message's
+            // <tasks> checklist become checkable without needing a reload
+            // first (see the messageId prop passed to TaskListBlock below).
+            updateAssistantMessage(
+              parsed.message_id ? { persisted: parsed.success, id: parsed.message_id } : { persisted: parsed.success }
+            );
           }
         }
       });
@@ -839,6 +844,45 @@ function Chat() {
       } catch (error) {
         console.error('Failed to load messages:', error);
       }
+    }
+  };
+
+  // Toggles one <tasks> checklist item's done-state on a persisted assistant
+  // message and saves it, so the check survives navigating away and back
+  // (previously the checklist was display-only and lived only in this
+  // session's React state). Optimistic local update first, since the
+  // model's own initial done/undone marks already showed as unresponsive
+  // input before this - a round-trip-before-feedback toggle would feel the
+  // same way.
+  const handleTaskToggle = async (messageId, itemId, done) => {
+    setChatSessions(prev => prev.map(session => {
+      if (session.id !== activeSessionId) return session;
+      return {
+        ...session,
+        messages: session.messages.map(m =>
+          m.id === messageId && m.tasks
+            ? { ...m, tasks: m.tasks.map(t => (t.id === itemId ? { ...t, done } : t)) }
+            : m
+        )
+      };
+    }));
+
+    try {
+      await updateMessageTaskItem(messageId, itemId, done);
+    } catch (error) {
+      console.error('Failed to save task toggle:', error);
+      // Revert on failure - the server never saw the change.
+      setChatSessions(prev => prev.map(session => {
+        if (session.id !== activeSessionId) return session;
+        return {
+          ...session,
+          messages: session.messages.map(m =>
+            m.id === messageId && m.tasks
+              ? { ...m, tasks: m.tasks.map(t => (t.id === itemId ? { ...t, done: !done } : t)) }
+              : m
+          )
+        };
+      }));
     }
   };
 
@@ -1288,7 +1332,14 @@ function Chat() {
                 <WorkspaceArtifactsBlock artifacts={msg.workspaceArtifacts} />
               )}
               {msg.role === 'assistant' && (
-                <TaskListBlock tasks={msg.tasks} />
+                <TaskListBlock
+                  tasks={msg.tasks}
+                  onToggle={
+                    typeof msg.id === 'number'
+                      ? (itemId, done) => handleTaskToggle(msg.id, itemId, done)
+                      : undefined
+                  }
+                />
               )}
               {!msg.actionResult?.success && (
                 <div className="bubble-text">

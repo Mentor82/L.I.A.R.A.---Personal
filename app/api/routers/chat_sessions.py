@@ -44,6 +44,7 @@ class ChatMessage(BaseModel):
     mood: Optional[str]
     thinking: Optional[str] = None
     tokens: Optional[Dict[str, Any]] = None
+    tasks: Optional[List[Dict[str, Any]]] = None
     timestamp: datetime
 
     class Config:
@@ -178,7 +179,7 @@ async def get_session_messages(
     
     try:
         result = db.execute(text("""
-            SELECT id, role, content, model, mood, thinking, tokens, timestamp
+            SELECT id, role, content, model, mood, thinking, tokens, tasks, timestamp
             FROM chat_messages
             WHERE session_id = :session_id
             ORDER BY timestamp ASC, id ASC
@@ -206,13 +207,24 @@ async def get_session_messages(
                     tok_data = json.loads(raw_tok)
                 except Exception:
                     tok_data = None
-        
+
         # Fallback-Berechnung für ältere / unvollständige Messages
         if not tok_data and row.role == 'assistant' and (row.content or getattr(row, 'thinking', None)):
             tok_data = TokenEstimator.estimate_turn_tokens(
                 response_text=row.content or "",
                 thinking_text=getattr(row, 'thinking', "") or ""
             )
+
+        tasks_data = None
+        if has_tokens_col and getattr(row, 'tasks', None):
+            raw_tasks = row.tasks
+            if isinstance(raw_tasks, list):
+                tasks_data = raw_tasks
+            elif isinstance(raw_tasks, str):
+                try:
+                    tasks_data = json.loads(raw_tasks)
+                except Exception:
+                    tasks_data = None
 
         messages.append({
             'id': row.id,
@@ -222,10 +234,62 @@ async def get_session_messages(
             'mood': row.mood,
             'thinking': getattr(row, 'thinking', None),
             'tokens': tok_data,
+            'tasks': tasks_data,
             'timestamp': row.timestamp
         })
-    
+
     return messages
+
+
+class TaskItemUpdate(BaseModel):
+    item_id: str
+    done: bool
+
+
+@router.patch("/messages/{message_id}/tasks")
+async def update_message_task_item(
+    message_id: int,
+    update: TaskItemUpdate,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Toggles a single item's done-state on a persisted assistant message's
+    <tasks> checklist (issue: model-authored plans/todos disappeared after
+    navigating away and back, and the checkboxes were read-only). Ownership
+    checked via a join on chat_sessions.user_id, same pattern as every other
+    per-message endpoint - a message_id alone says nothing about who owns it.
+    """
+    row = db.execute(text("""
+        SELECT cm.tasks FROM chat_messages cm
+        JOIN chat_sessions cs ON cs.id = cm.session_id
+        WHERE cm.id = :message_id AND cs.user_id = :user_id
+    """), {'message_id': message_id, 'user_id': current_user.id}).first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    try:
+        tasks = json.loads(row.tasks) if row.tasks else []
+    except Exception:
+        tasks = []
+
+    item_found = False
+    for item in tasks:
+        if str(item.get('id')) == str(update.item_id):
+            item['done'] = update.done
+            item_found = True
+            break
+
+    if not item_found:
+        raise HTTPException(status_code=404, detail="Task item not found")
+
+    db.execute(text("""
+        UPDATE chat_messages SET tasks = :tasks WHERE id = :message_id
+    """), {'tasks': json.dumps(tasks), 'message_id': message_id})
+    db.commit()
+
+    return {"success": True, "tasks": tasks}
 
 
 @router.put("/sessions/{session_id}", response_model=ChatSession)

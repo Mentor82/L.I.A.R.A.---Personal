@@ -116,27 +116,34 @@ def persist_assistant_turn(
     model: str,
     mood_snapshot: Dict[str, Any],
     tokens: Optional[Dict[str, Any]] = None,
+    tasks: Optional[list] = None,
     user_message_id: Optional[int] = None,
     personality: Optional[str] = None,
     memory_enabled: bool = True,
     used_tools: bool = False,
     interrupted: bool = False
-) -> bool:
+) -> Optional[int]:
     """
     Persists the completed or interrupted assistant turn message and updates Neo4j relationships.
+
+    Returns the new chat_messages.id on success (truthy, usable by callers that
+    only check success) or None on failure - lets the SSE 'persisted' event
+    also carry the real message id (needed client-side to later PATCH a
+    <tasks> checklist item's done-state on this exact message).
     """
     if user_id is None or session_id is None:
-        return False
+        return None
 
     db = SessionLocal()
     try:
         tokens_json = json.dumps(tokens) if tokens else None
+        tasks_json = json.dumps(tasks) if tasks else None
         try:
             insert_result = db.execute(text("""
                 INSERT INTO chat_messages
-                    (user_id, session_id, role, content, model, mood, thinking, tokens, timestamp)
+                    (user_id, session_id, role, content, model, mood, thinking, tokens, tasks, timestamp)
                 VALUES
-                    (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, :tokens, CURRENT_TIMESTAMP)
+                    (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, :tokens, :tasks, CURRENT_TIMESTAMP)
                 RETURNING id
             """), {
                 'user_id': user_id,
@@ -145,7 +152,8 @@ def persist_assistant_turn(
                 'model': f"{model} (interrupted)" if interrupted else model,
                 'mood': mood_snapshot.get("mood", "neutral"),
                 'thinking': full_thinking_text or None,
-                'tokens': tokens_json
+                'tokens': tokens_json,
+                'tasks': tasks_json
             })
         except Exception:
             db.rollback()
@@ -200,9 +208,9 @@ def persist_assistant_turn(
                     )
                 except Exception as e:
                     logger.error(f"RESULTED_IN relationship failed: {e}")
-        return True
+        return assistant_message_id
     except Exception as e:
         logger.error(f"Assistant message persistence failed: {e}")
-        return False
+        return None
     finally:
         db.close()

@@ -22,7 +22,10 @@ export function renderInlineMarkdown(text) {
   return parts;
 }
 
-export function TaskListBlock({ tasks }) {
+// `onToggle` is only wired up once the message has a real DB id (persisted -
+// see Chat.jsx's 'persisted' SSE handler) so a checklist still being
+// streamed live can't be checked off into a message that doesn't exist yet.
+export function TaskListBlock({ tasks, onToggle }) {
   const [expanded, setExpanded] = useState(true);
   if (!tasks || tasks.length === 0) return null;
 
@@ -36,7 +39,12 @@ export function TaskListBlock({ tasks }) {
         <ul className="task-list-content">
           {tasks.map((item) => (
             <li key={item.id} className={`task-list-item ${item.done ? 'done' : ''}`}>
-              <input type="checkbox" checked={item.done} disabled readOnly />
+              <input
+                type="checkbox"
+                checked={!!item.done}
+                disabled={!onToggle}
+                onChange={onToggle ? () => onToggle(item.id, !item.done) : undefined}
+              />
               <span>{renderInlineMarkdown(item.label)}</span>
             </li>
           ))}

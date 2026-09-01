@@ -202,11 +202,12 @@ async def stream_ollama_response(
 
     full_response_text = ""
     full_thinking_text = ""
+    full_tasks_items = None
     total_prompt_tokens = 0
     total_eval_tokens = 0
     persisted_attempted = False
 
-    def _persist_turn(interrupted: bool = False, tokens_data: Optional[Dict[str, Any]] = None) -> bool:
+    def _persist_turn(interrupted: bool = False, tokens_data: Optional[Dict[str, Any]] = None) -> Optional[int]:
         return persist_assistant_turn(
             user_id=user_id,
             session_id=session_id,
@@ -215,6 +216,7 @@ async def stream_ollama_response(
             model=model,
             mood_snapshot=mood_snapshot,
             tokens=tokens_data,
+            tasks=full_tasks_items,
             user_message_id=user_message_id,
             personality=personality,
             memory_enabled=memory_enabled,
@@ -343,7 +345,8 @@ async def stream_ollama_response(
                     if content_part:
                         content_part, completed_task_blocks = task_extractor.feed(content_part)
                         for raw_block in completed_task_blocks:
-                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                            full_tasks_items = parse_task_items(raw_block)
+                            yield f"data: {json.dumps({'type': 'tasks', 'items': full_tasks_items})}\n\n"
 
                     if content_part:
                         content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
@@ -377,7 +380,8 @@ async def stream_ollama_response(
                 if leftover_content:
                     leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
                     for raw_block in leftover_task_blocks:
-                        yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                        full_tasks_items = parse_task_items(raw_block)
+                        yield f"data: {json.dumps({'type': 'tasks', 'items': full_tasks_items})}\n\n"
                     if leftover_content:
                         leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
                         for raw_block in leftover_factcheck_blocks:
@@ -479,7 +483,8 @@ async def stream_ollama_response(
                                             if content_part:
                                                 content_part, completed_task_blocks = task_extractor.feed(content_part)
                                                 for raw_block in completed_task_blocks:
-                                                    yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                                                    full_tasks_items = parse_task_items(raw_block)
+                                                    yield f"data: {json.dumps({'type': 'tasks', 'items': full_tasks_items})}\n\n"
 
                                             if content_part:
                                                 content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
@@ -514,7 +519,8 @@ async def stream_ollama_response(
                                         if leftover_content:
                                             leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
                                             for raw_block in leftover_task_blocks:
-                                                yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
+                                                full_tasks_items = parse_task_items(raw_block)
+                                                yield f"data: {json.dumps({'type': 'tasks', 'items': full_tasks_items})}\n\n"
                                             if leftover_content:
                                                 leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
                                                 for raw_block in leftover_factcheck_blocks:
@@ -652,12 +658,12 @@ async def stream_ollama_response(
             persisted_attempted = True
             yield f"data: {json.dumps({'type': 'done', 'mood_updated': True, 'usage': usage_info})}\n\n"
 
-            persisted_ok = False
+            persisted_message_id = None
             try:
-                persisted_ok = await asyncio.to_thread(_persist_turn, False, usage_info)
+                persisted_message_id = await asyncio.to_thread(_persist_turn, False, usage_info)
             except Exception as e:
                 logger.error(f"Assistant message persistence task failed: {e}")
-            yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
+            yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_message_id is not None, 'message_id': persisted_message_id})}\n\n"
         else:
             yield f"data: {json.dumps({'type': 'done', 'mood_updated': True, 'usage': usage_info})}\n\n"
 
