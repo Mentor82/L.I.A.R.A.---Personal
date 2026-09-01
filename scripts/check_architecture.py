@@ -32,8 +32,9 @@ DEFAULT_HARD_LIMIT = 800
 RATCHET_GROWTH_TOLERANCE = 25  # Max lines a legacy file can grow before triggering a failure
 
 IGNORE_DIRS = {
-    'node_modules', '.git', 'venv', 'dist', '__pycache__',
-    '.pytest_cache', 'build', '.idea', '.vscode', 'mlog'
+    'node_modules', '.git', 'venv', '.venv', 'env', '.env', 'dist', '__pycache__',
+    '.pytest_cache', 'build', '.idea', '.vscode', 'mlog', 'session_files',
+    'site-packages', 'coverage', '.coverage'
 }
 
 BACKEND_EXTENSIONS = {'.py'}
@@ -60,7 +61,9 @@ def scan_directory(base_dir: Path, extensions: set) -> Dict[str, int]:
         return results
 
     for root, dirs, files in os.walk(base_dir):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith('.')]
+        if any(part in IGNORE_DIRS or part.startswith('.') for part in Path(root).parts):
+            continue
         for file in files:
             ext = Path(file).suffix.lower()
             if ext in extensions:
