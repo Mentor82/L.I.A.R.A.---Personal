@@ -853,6 +853,45 @@ function Chat() {
     }
   };
 
+  const handlePaste = async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          try {
+            const compressed = await compressAndFormatImage(file, 1280, 0.82);
+            setSelectedImage(file);
+            setSelectedImageBase64(compressed.base64);
+            setImagePreview(compressed.previewUrl);
+          } catch (err) {
+            console.warn('Paste image compressor fallback:', err);
+          }
+          break;
+        }
+      }
+    }
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    if (file.type.startsWith('image/')) {
+      try {
+        const compressed = await compressAndFormatImage(file, 1280, 0.82);
+        setSelectedImage(file);
+        setSelectedImageBase64(compressed.base64);
+        setImagePreview(compressed.previewUrl);
+      } catch (err) {
+        console.warn('Drop image compressor fallback:', err);
+      }
+    }
+  };
+
   // Hailo Vision Modelle pro Task
   const hailoModelOptions = {
     detect: ['yolov8n', 'yolov8s', 'yolov10n', 'yolov11n'],
@@ -1423,7 +1462,8 @@ function Chat() {
               }, 800);  // 800ms Debounce
             }}
             onKeyPress={handleKeyPress}
-            placeholder={selectedImage ? "Beschreibe das Bild oder stelle eine Frage..." : "Schreibe eine Nachricht... (Enter zum Senden, Shift+Enter für neue Zeile)"}
+            onPaste={handlePaste}
+            placeholder={selectedImage ? "Beschreibe das Bild oder stelle eine Frage..." : "Schreibe eine Nachricht... (Enter zum Senden, Shift+Enter für neue Zeile, Bild einfügen mit Strg+V)"}
             disabled={loading}
             className="chat-input"
             rows="1"

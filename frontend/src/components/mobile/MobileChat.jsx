@@ -214,6 +214,26 @@ export default function MobileChat({ user, onLogout }) {
     }
   };
 
+  const handlePaste = async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          try {
+            const compressed = await compressAndFormatImage(file, 1280, 0.82);
+            setAttachedImage(compressed);
+          } catch (err) {
+            console.warn('Mobile paste image compression fallback:', err);
+          }
+          break;
+        }
+      }
+    }
+  };
+
   const handleNewChat = async () => {
     try {
       const newSession = await createChatSession(t('mobile.newChat'));
@@ -768,6 +788,7 @@ export default function MobileChat({ user, onLogout }) {
             rows={1}
             value={message}
             onChange={handleInputChange}
+            onPaste={handlePaste}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
