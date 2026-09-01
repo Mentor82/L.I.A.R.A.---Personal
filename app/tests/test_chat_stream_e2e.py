@@ -3,7 +3,7 @@ E2E Chat Streaming & Multi-Turn Agent Sequence Test Suite (Issue #25)
 ====================================================================
 Tests end-to-end multi-turn sequences, tool execution with state accumulation,
 splitter tag extraction without content leaks, keepalive timing, lease loss recovery,
-and graceful client cancellation.
+and graceful client cancellation using Cloud Models (e.g. gpt-oss:20b-cloud, kimi-k3:cloud).
 """
 
 import os
@@ -59,6 +59,7 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
         self.patch_db_mood = patch("liara_engine.memory.mood_system.SessionLocal", return_value=self.mock_db)
         self.patch_db_core = patch("core.database.SessionLocal", return_value=self.mock_db)
         self.patch_linep = patch("services.chat_stream.generator_stage.linep_enabled", return_value=False)
+
         self.patch_db_gen.start()
         self.patch_db_pers.start()
         self.patch_db_mood.start()
@@ -74,10 +75,9 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
     async def test_e2e_splitter_pipeline_combined_tags(self):
         """
-        Verify that a streamed LLM response containing <think>, <tasks>,
-        <factcheck>, and <workspace_artifact> tags extracts each into its
-        own structured SSE event with ZERO tag or JSON fragments leaking into
-        the visible 'content' events.
+        Verify that a streamed Cloud Model response (e.g. gpt-oss:20b-cloud) containing
+        <think>, <tasks>, <factcheck>, and <workspace_artifact> tags extracts each into its
+        own structured SSE event with ZERO tag or JSON fragments leaking into the visible 'content' events.
         """
         chunks_in = [
             "<think>Ich muss ",
@@ -110,13 +110,14 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.chat_streaming._acquire_session_lock", return_value=self.mock_lock), \
              patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client), \
-             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=1024), \
+             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
              patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False), \
              patch("services.chat_stream.generator_stage.save_artifact", return_value="architecture.md"):
 
             events = []
             generator = stream_ollama_response(
                 message="Erstelle Architekturplan",
+                model="gpt-oss:20b-cloud",
                 session_id=42,
                 user_id=1,
                 session_lock=self.mock_lock
@@ -174,7 +175,7 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
     async def test_multi_turn_tool_sequence_and_history(self):
         """
-        Verify multi-turn tool calling:
+        Verify multi-turn tool calling with Cloud Model (gpt-oss:20b-cloud):
         Turn 1 triggers a tool and records agent_steps, web_sources, and message history.
         Turn 2 passes that history into subsequent LLM calls.
         """
@@ -223,13 +224,14 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.chat_streaming._acquire_session_lock", return_value=self.mock_lock), \
              patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client), \
-             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=1024), \
+             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
              patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=True), \
              patch("services.chat_stream.generator_stage.get_tool_executor", return_value=mock_executor):
 
             events = []
             generator = stream_ollama_response(
                 message="Wie ist Liara aufgebaut?",
+                model="gpt-oss:20b-cloud",
                 session_id=101,
                 user_id=1,
                 session_lock=self.mock_lock
@@ -238,8 +240,6 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
             async for line in generator:
                 if line.startswith("data: "):
                     events.append(json.loads(line.replace("data: ", "").strip()))
-
-        print("\nDEBUG EVENTS:", [e.get("type") for e in events], events)
 
         # Verify tool execution events
         agent_steps_events = [e for e in events if e.get("type") == "agent_steps"]
@@ -309,12 +309,12 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.chat_streaming._acquire_session_lock", return_value=mock_lock_lost), \
              patch("api.routers.chat_streaming._renew_session_lock", return_value=False), \
              patch("api.routers.chat_streaming.SESSION_GENERATION_LOCK_RENEW_INTERVAL", 0.01), \
-             patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client1), \
-             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=1024), \
-             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False):
+             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
+             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False), \
+             patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client1):
 
             events_turn1 = []
-            async for line in stream_ollama_response(message="Turn 1", session_id=200, user_id=None):
+            async for line in stream_ollama_response(message="Turn 1", model="gpt-oss:20b-cloud", session_id=200, user_id=None):
                 if line.startswith("data: "):
                     events_turn1.append(json.loads(line.replace("data: ", "").strip()))
 
@@ -345,12 +345,12 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.chat_streaming._acquire_session_lock", return_value=mock_lock_healthy), \
              patch("api.routers.chat_streaming._renew_session_lock", return_value=True), \
-             patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client2), \
-             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=1024), \
-             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False):
+             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
+             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False), \
+             patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client2):
 
             events_turn2 = []
-            async for line in stream_ollama_response(message="Turn 2", session_id=200, user_id=None):
+            async for line in stream_ollama_response(message="Turn 2", model="gpt-oss:20b-cloud", session_id=200, user_id=None):
                 if line.startswith("data: "):
                     events_turn2.append(json.loads(line.replace("data: ", "").strip()))
 
@@ -384,14 +384,13 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
         mock_client.stream.return_value = mock_stream_ctx
 
         with patch("api.routers.chat_streaming._acquire_session_lock", return_value=mock_lock), \
-             patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client), \
-             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=1024), \
-             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False):
+             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
+             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False), \
+             patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client):
 
-            generator = stream_ollama_response(message="Endless", session_id=300, user_id=None)
+            generator = stream_ollama_response(message="Endless", model="kimi-k3:cloud", session_id=300, user_id=None)
             wrapped = _with_sse_keepalive(generator, interval=1.0)
 
-            # Consume 3 chunks and then simulate client disconnect
             consumed = 0
             async for _ in wrapped:
                 consumed += 1
@@ -404,7 +403,7 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
     async def test_consent_gating_multi_turn(self):
         """
-        Verify that when a sensitive tool execution requires explicit consent,
+        Verify that when a sensitive tool execution requires explicit consent on a Cloud Model (gpt-oss:20b-cloud),
         the tool executor returns consent_required, agent_steps marks status as error/blocked,
         and the model does not execute unconsented actions.
         """
@@ -451,13 +450,14 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.chat_streaming._acquire_session_lock", return_value=self.mock_lock), \
              patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client), \
-             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=1024), \
+             patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
              patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=True), \
              patch("services.chat_stream.generator_stage.get_tool_executor", return_value=mock_executor):
 
             events = []
             generator = stream_ollama_response(
                 message="Lösche das Verzeichnis",
+                model="gpt-oss:20b-cloud",
                 session_id=400,
                 user_id=1,
                 session_lock=self.mock_lock
