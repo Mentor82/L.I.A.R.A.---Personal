@@ -573,11 +573,22 @@ function WorkspacePage() {
   useEffect(() => {
     (async () => {
       try {
-        const list = await chatAPI.getSessions();
+        let list = await chatAPI.getSessions();
+        if (!list || list.length === 0) {
+          try {
+            const fresh = await chatAPI.createSession('Workspace');
+            list = [fresh];
+          } catch {
+            list = [];
+          }
+        }
         setSessions(list);
         const savedId = parseInt(localStorage.getItem('liara_active_session'), 10);
         const initial = list.find((s) => s.id === savedId) || list[0];
-        if (initial) setSessionId(initial.id);
+        if (initial) {
+          setSessionId(initial.id);
+          localStorage.setItem('liara_active_session', initial.id.toString());
+        }
       } catch (err) {
         setError(err.message || 'Sessions konnten nicht geladen werden.');
       }

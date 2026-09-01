@@ -201,6 +201,9 @@ function App() {
   }, [user, workspaceAgentEnabled])
 
   const handleLogin = (userData) => {
+    // Clear stale session caches from any previously logged-in user on this browser
+    localStorage.removeItem('liara_chat_sessions');
+    localStorage.removeItem('liara_active_session');
     setUser(userData)
     // Show location consent modal after successful login (not for guests)
     if (!userData.is_guest) {

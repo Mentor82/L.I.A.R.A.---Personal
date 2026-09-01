@@ -31,6 +31,7 @@ import time
 import psutil
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from core.database import SessionLocal, get_db
 from core.dependencies import get_current_user_ws, require_active_user
@@ -53,7 +54,7 @@ RUNNER_SHELL_SCRIPT = str(Path(__file__).resolve().parent.parent.parent / "scrip
 async def list_session_processes(
     session_id: int,
     current_user: User = Depends(require_active_user),
-    db: SessionLocal = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """Listet alle aktiven Sandbox-Prozesse für die gegebene Workspace-Session."""
     if not _session_owned(db, session_id, current_user.id):
@@ -142,7 +143,7 @@ async def kill_session_process(
     session_id: int,
     pid: int,
     current_user: User = Depends(require_active_user),
-    db: SessionLocal = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """Beendet einen aktiven Sandbox-Prozess."""
     if not _session_owned(db, session_id, current_user.id):
@@ -161,7 +162,7 @@ async def kill_session_process(
 async def kill_all_session_processes(
     session_id: int,
     current_user: User = Depends(require_active_user),
-    db: SessionLocal = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """Beendet alle aktiven Sandbox-Prozesse dieser Session."""
     if not _session_owned(db, session_id, current_user.id):

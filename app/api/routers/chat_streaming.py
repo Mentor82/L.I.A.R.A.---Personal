@@ -226,8 +226,17 @@ async def stream_chat(
             SELECT id FROM chat_sessions WHERE id = :session_id AND user_id = :user_id
         """), {'session_id': request.session_id, 'user_id': current_user.id}).first()
         if not session_check:
-            raise HTTPException(status_code=404, detail="Session not found or access denied")
-        session_id = request.session_id
+            logger.info("Session %s not found or not owned by user %s. Creating fresh session.", request.session_id, current_user.id)
+            title = request.message[:50] + "..." if len(request.message) > 50 else request.message
+            session_result = db.execute(text("""
+                INSERT INTO chat_sessions (user_id, title, created_at, updated_at)
+                VALUES (:user_id, :title, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
+            """), {'user_id': current_user.id, 'title': title})
+            db.commit()
+            session_id = session_result.scalar()
+        else:
+            session_id = request.session_id
 
     return StreamingResponse(
         _with_sse_keepalive(stream_ollama_response(
