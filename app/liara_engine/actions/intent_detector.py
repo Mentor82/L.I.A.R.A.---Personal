@@ -13,41 +13,52 @@ class IntentDetector:
     """Erkennt Intents aus Chat-Nachrichten"""
     
     # Muster für verschiedene Intents (Reihenfolge wichtig!)
+    #
+    # Every keyword alternative gets a LEADING \b only (not a trailing one) -
+    # confirmed live that a plain trailing \b breaks legitimate inflected
+    # forms ("Aufgaben" doesn't end where the stem "aufgabe" does, so
+    # \baufgabe\b never matches it - only \baufgabe does, since nothing
+    # requires the match to end at a word boundary). The leading \b alone
+    # already fixes the actual bug: "Checkliste" no longer false-matches the
+    # bare "liste" alternative (no boundary between "Check" and "liste",
+    # both word chars) and "update_task_checklist" (a tool name) no longer
+    # false-matches "task" (surrounded by "_", also a word char) - both
+    # were hijacking messages that were never asking to list/create a task.
     PATTERNS = {
         # List/Show Intents (müssen ZUERST geprüft werden)
         'list_tasks': [
-            r'(?:zeig|show|liste|anzeig).*(?:task|aufgabe|todo|to-do)',
-            r'(?:welche|was für|meine).*(?:task|aufgabe|todo|to-do)',
-            r'(?:task|aufgabe|todo|to-do).*(?:liste|übersicht|anzeig)',
+            r'\b(?:zeig|show|liste|anzeig).*\b(?:task|aufgabe|todo|to-do)',
+            r'\b(?:welche|was für|meine).*\b(?:task|aufgabe|todo|to-do)',
+            r'\b(?:task|aufgabe|todo|to-do).*\b(?:liste|übersicht|anzeig)',
             r'(?:was\s+muss\s+ich|was\s+ist\s+zu\s+tun)',
         ],
         'list_events': [
-            r'(?:zeig|show|liste|anzeig).*(?:termin|meeting|event|kalender)',
-            r'(?:welche|was für|meine).*(?:termin|meeting|event)',
-            r'(?:termin|event|kalender).*(?:liste|übersicht|anzeig)',
+            r'\b(?:zeig|show|liste|anzeig).*\b(?:termin|meeting|event|kalender)',
+            r'\b(?:welche|was für|meine).*\b(?:termin|meeting|event)',
+            r'\b(?:termin|event|kalender).*\b(?:liste|übersicht|anzeig)',
             r'(?:was\s+steht\s+(?:heute|morgen|an))',
         ],
         'list_notes': [
-            r'(?:zeig|show|liste|anzeig).*(?:notiz|note|erinnerung)',
-            r'(?:welche|was für|meine).*(?:notiz|note|erinnerung)',
-            r'(?:notiz|note|erinnerung).*(?:liste|übersicht|anzeig)',
+            r'\b(?:zeig|show|liste|anzeig).*\b(?:notiz|note|erinnerung)',
+            r'\b(?:welche|was für|meine).*\b(?:notiz|note|erinnerung)',
+            r'\b(?:notiz|note|erinnerung).*\b(?:liste|übersicht|anzeig)',
         ],
         # Create Events (Termine & zeitgebundene Erinnerungen)
         'create_event': [
-            r'(?:erstell|mach|hinzufüg|neu|trag|plan|setz).*(?:termin|meeting|event|besprechung|kalender)',
-            r'(?:termin|meeting|besprechung|event).*(?:morgen|übermorgen|heute|nächste|um\s+\d+|\d+:\d+|\d+\s*uhr)',
-            r'(?:erinner|remind).*(?:mich|me).*(?:morgen|übermorgen|heute|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|um\s+\d+|\d+:\d+|\d+\s*uhr|am\s+\d+)',
+            r'\b(?:erstell|mach|hinzufüg|neu|trag|plan|setz).*\b(?:termin|meeting|event|besprechung|kalender)',
+            r'\b(?:termin|meeting|besprechung|event).*(?:morgen|übermorgen|heute|nächste|um\s+\d+|\d+:\d+|\d+\s*uhr)',
+            r'\b(?:erinner|remind).*\b(?:mich|me).*(?:morgen|übermorgen|heute|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|um\s+\d+|\d+:\d+|\d+\s*uhr|am\s+\d+)',
         ],
         # Create Tasks (To-Dos)
         'create_task': [
-            r'(?:erstell|mach|hinzufüg|neu|add|trag).*(?:task|aufgabe|todo|to-do)',
+            r'\b(?:erstell|mach|hinzufüg|neu|add|trag).*\b(?:task|aufgabe|todo|to-do)',
             r'(?:muss|sollte|will)\s+(?:ich\s+)?(?:noch\s+)?(?:erledigen|machen|kaufen|besorgen)',
         ],
         # Create Notes (Notizen & allgemeine Erinnerungen/Gedächtnis)
         'create_note': [
-            r'(?:erstell|mach|hinzufüg|neu|speicher|schreib|notier).*(?:notiz|note)',
+            r'\b(?:erstell|mach|hinzufüg|neu|speicher|schreib|notier).*\b(?:notiz|note)',
             r'merk\s+(?:dir|es)',  # "merk dir", "merk es"
-            r'(?:erinner|remind).*(?:mich|me)',  # Allgemeine Erinnerung
+            r'\b(?:erinner|remind).*\b(?:mich|me)',  # Allgemeine Erinnerung
             r'(?:neue|create)\s+(?:erinnerung|reminder)',
         ]
     }
