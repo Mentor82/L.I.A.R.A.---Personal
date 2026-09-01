@@ -5,6 +5,7 @@ Spezialist für mehrstufige Recherchen, Faktenabgleiche und Quellenextraktion.
 from typing import Optional, Dict, Any
 from services.agents.base_agent import BaseAgent
 from services.web_search_service import WebSearchService
+from services.search_broker import get_search_broker
 
 
 RESEARCH_AGENT_SYSTEM_PROMPT = """Du bist Liaras spezialisierter autonomer Recherche-Agent.
@@ -40,6 +41,7 @@ class ResearchAgent(BaseAgent):
             max_steps=max_steps
         )
         self.search_service = WebSearchService()
+        self.search_broker = get_search_broker()
         self._register_research_tools()
 
     def _register_research_tools(self):
@@ -73,9 +75,23 @@ class ResearchAgent(BaseAgent):
         )
 
     async def _tool_web_search(self, query: str) -> Dict[str, Any]:
+        # Real web search via the self-hosted SearXNG instance (SearchBroker),
+        # same backend chat_streaming.py's general web_search tool uses -
+        # web_search_service.py's DuckDuckGo Instant Answer API only returns
+        # something for narrow infobox/definition-style queries and comes
+        # back empty for the kind of open research questions this agent is
+        # actually meant to handle.
         try:
-            res = await self.search_service.search_instant_answer(query)
-            return res
+            results = await self.search_broker.search(query)
+            if not results:
+                return {"error": f"Keine Ergebnisse für '{query}' gefunden (Suche nicht verfügbar oder keine Treffer)."}
+            return {
+                "query": query,
+                "results": [
+                    {"title": r["title"], "url": r["url"], "snippet": r["snippet"]}
+                    for r in results
+                ]
+            }
         except Exception as e:
             return {"error": f"Websuche fehlgeschlagen: {str(e)}"}
 
