@@ -880,72 +880,9 @@ function Chat() {
     }
   };
 
-  const handleImageAnalysis = async () => {
-    if (!selectedImage || !message.trim()) {
-      setErrorMessage('Bitte Bild auswählen und Frage eingeben');
-      return;
-    }
-
-    setLoading(true);
-    setIsSending(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedImage);
-      formData.append('message', message.trim());
-      formData.append('session_id', activeSessionId);
-
-      const token = localStorage.getItem('liara_token');
-      const response = await fetch('/api/vision/chat', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error(`Vision API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // User message mit Bild-Indikator
-      const userMessage = {
-        role: 'user',
-        content: message.trim(),
-        timestamp: new Date().toISOString(),
-        hasImage: true,
-        imagePreview: imagePreview
-      };
-
-      // Liara response
-      const liaraMessage = {
-        role: 'assistant',
-        content: data.response,
-        model: data.model_used || 'llava:7b',
-        timestamp: new Date().toISOString(),
-        isVisionResponse: true
-      };
-
-      // Add both messages
-      setChatSessions(prev => prev.map(session =>
-        session.id === activeSessionId
-          ? { ...session, messages: [...session.messages, userMessage, liaraMessage] }
-          : session
-      ));
-
-      // Reset
-      setMessage('');
-      removeImage();
-
-    } catch (error) {
-      console.error('Image analysis failed:', error);
-      setErrorMessage('Bildanalyse fehlgeschlagen: ' + error.message);
-    } finally {
-      setLoading(false);
-      setIsSending(false);
-    }
+  const handleImageAnalysis = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    handleSubmit(e || { preventDefault: () => {} });
   };
 
   const handleHailoVision = async () => {
@@ -1506,11 +1443,11 @@ function Chat() {
               <button
                 type="button"
                 onClick={handleImageAnalysis}
-                disabled={!message.trim()}
+                disabled={!message.trim() && !selectedImageBase64}
                 className="chat-submit vision-submit"
-                title="LLM-Bildanalyse (llava:7b, unabhängig vom oben gewählten Modell)"
+                title="Multimodale Bildanalyse (Gemma Vision ➔ Chat-Modell)"
               >
-                🖼️ LLM
+                📷 Gemma Vision
               </button>
               <button
                 type="button"

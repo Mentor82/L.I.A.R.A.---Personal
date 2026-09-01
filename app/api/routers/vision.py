@@ -254,11 +254,11 @@ async def get_vision_models(current_user: User = Depends(require_active_user)):
     
     return {
         'available_models': models,
-        'default_model': 'llava:7b',
+        'default_model': 'gemma4:cloud',
         'recommended': {
-            'fast': 'llava:7b',
-            'quality': 'llava:13b',
-            'premium': 'llava:34b'
+            'fast': 'gemma4:cloud',
+            'quality': 'kimi-k3:cloud',
+            'local': 'llava:7b'
         }
     }
 
@@ -268,14 +268,14 @@ async def get_vision_status():
     """
     🔍 Vision Service Status
     
-    Prüft ob LLaVA verfügbar ist
+    Prüft ob Vision verfügbar ist
     """
     vision_service = get_vision_service()
     is_available = await vision_service.is_available()
     
     return {
         'vision_available': is_available,
-        'model': 'llava:7b',
+        'model': 'gemma4:cloud',
         'capabilities': [
             'Bildbeschreibung',
             'Objekt-Erkennung',
