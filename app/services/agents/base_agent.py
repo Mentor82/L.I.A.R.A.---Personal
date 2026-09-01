@@ -83,7 +83,10 @@ class BaseAgent:
         # (research_agent.py imports BaseAgent from this same module).
         from services.agents.research_agent import ResearchAgent
 
-        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=6)
+        # 10, not a tighter budget - confirmed live that 6 was too tight for
+        # a real multi-source task (search + fetch_web_page on a couple of
+        # sources + synthesis routinely needs more than 6 ReAct turns).
+        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=10)
         result = await sub_agent.run(task=task)
         if result.get("success"):
             return {"answer": result["answer"]}

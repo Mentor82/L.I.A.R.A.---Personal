@@ -482,7 +482,10 @@ class ToolExecutor:
         from services.agents.base_agent import RESEARCH_DELEGATION_MODEL
 
         task = params.get("task", "")
-        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=6)
+        # 10, not a tighter budget - confirmed live that 6 was too tight for
+        # a real multi-source task (search + fetch_web_page on a couple of
+        # sources + synthesis routinely needs more than 6 ReAct turns).
+        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=10)
         result = await sub_agent.run(task=task)
         if result.get("success"):
             return {"answer": result["answer"]}
