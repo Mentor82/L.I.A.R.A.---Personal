@@ -59,6 +59,7 @@ def _acquire_session_lock(session_id: int):
             f"chat_stream_lock:{session_id}",
             timeout=SESSION_GENERATION_LOCK_TTL,
             blocking_timeout=SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
+            thread_local=False,
         )
         if not lock.acquire(blocking=True):
             raise SessionLockTimeoutError(f"Session lock acquisition timed out for session {session_id}")

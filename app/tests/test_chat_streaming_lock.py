@@ -315,6 +315,24 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SessionLockTimeoutError):
             _acquire_session_lock(123)
 
+    @patch("api.routers.chat_streaming.get_redis_service")
+    def test_acquire_session_lock_uses_non_thread_local_ownership(self, mock_get_redis):
+        """Verify _acquire_session_lock requests thread_local=False for async/threadpool safe ownership."""
+        mock_svc = MagicMock()
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = True
+        mock_svc.client.lock.return_value = mock_lock
+        mock_get_redis.return_value = mock_svc
+
+        lock = _acquire_session_lock(999)
+        self.assertEqual(lock, mock_lock)
+        mock_svc.client.lock.assert_called_once_with(
+            "chat_stream_lock:999",
+            timeout=60,
+            blocking_timeout=1200,
+            thread_local=False,
+        )
+
     @patch("api.routers.chat_streaming._acquire_session_lock")
     async def test_stream_ollama_response_lock_timeout_aborts(self, mock_acquire):
         """Verify stream aborts with error event when lock acquisition times out."""

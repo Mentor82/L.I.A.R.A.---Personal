@@ -58,12 +58,15 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
         self.patch_db_pers = patch("services.chat_stream.persistence_stage.SessionLocal", return_value=self.mock_db)
         self.patch_db_mood = patch("liara_engine.memory.mood_system.SessionLocal", return_value=self.mock_db)
         self.patch_db_core = patch("core.database.SessionLocal", return_value=self.mock_db)
+        self.patch_linep = patch("services.chat_stream.generator_stage.linep_enabled", return_value=False)
         self.patch_db_gen.start()
         self.patch_db_pers.start()
         self.patch_db_mood.start()
         self.patch_db_core.start()
+        self.patch_linep.start()
 
     def tearDown(self):
+        self.patch_linep.stop()
         self.patch_db_gen.stop()
         self.patch_db_pers.stop()
         self.patch_db_mood.stop()
