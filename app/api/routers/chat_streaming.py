@@ -91,6 +91,11 @@ class SessionLockUnavailableError(SessionLockError):
     pass
 
 
+class SessionLockLostError(SessionLockError):
+    """Raised when the session generation lock lease is lost mid-turn."""
+    pass
+
+
 def _acquire_session_lock(session_id: int):
     """
     Redis lock serializing active /chat/stream generation per session (issue #13, #18, #25).
@@ -142,22 +147,28 @@ def _renew_session_lock(lock) -> bool:
         return False
 
 
-async def _session_lock_watchdog(lock, interval: float = SESSION_GENERATION_LOCK_RENEW_INTERVAL):
+async def _session_lock_watchdog(lock, lock_lost_event: Optional[asyncio.Event] = None, interval: Optional[float] = None):
     """
     Background heartbeat task that periodically renews the session lock lease
-    while generation/tools are active. Stops automatically when cancelled.
+    while generation/tools are active. If renewal fails, signals lock_lost_event
+    so active generation immediately aborts fail-closed. Stops automatically when cancelled.
     """
+    sleep_interval = interval if interval is not None else SESSION_GENERATION_LOCK_RENEW_INTERVAL
     try:
         while True:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(sleep_interval)
             renewed = await asyncio.to_thread(_renew_session_lock, lock)
             if not renewed:
-                logger.warning("Session lock lease renewal failed - lock ownership may have been lost")
+                logger.warning("Session lock lease renewal failed - lock ownership lost! Signalling turn abort.")
+                if lock_lost_event is not None:
+                    lock_lost_event.set()
                 break
     except asyncio.CancelledError:
         pass
     except Exception as e:
         logger.warning(f"Session lock watchdog error: {e}")
+        if lock_lost_event is not None:
+            lock_lost_event.set()
 
 
 def _release_session_lock(lock) -> None:
@@ -523,6 +534,12 @@ async def stream_ollama_response(
     # StreamingResponse is returned immediately to prevent reverse-proxy 524 timeouts.
     # Strict fail-closed: never proceed lockless to preserve same-session turn serialization.
     lock_watchdog_task = None
+    lock_lost_event = asyncio.Event()
+
+    def _check_lock_held():
+        if lock_lost_event.is_set():
+            raise SessionLockLostError("Sitzungskoordination wurde während der Anfrage unterbrochen (Lease-Verlust).")
+
     if session_lock is None and session_id is not None:
         try:
             session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
@@ -541,7 +558,7 @@ async def stream_ollama_response(
 
     # Start background heartbeat watchdog to keep extending lock lease for long-running turns
     if session_lock is not None:
-        lock_watchdog_task = asyncio.create_task(_session_lock_watchdog(session_lock))
+        lock_watchdog_task = asyncio.create_task(_session_lock_watchdog(session_lock, lock_lost_event))
 
     # Mood-Detection und System-Prompt (per-user, DB-backed)
     mood_system = MoodSystem(user_id)
@@ -941,6 +958,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 logger.warning("[LiNeP-Switch] LINEP_ENABLED, but linep-server unreachable -> fallback to Ollama-HTTP (session=%s)", session_id)
 
         for iteration in range(MAX_AGENT_ITERATIONS + 1):
+            _check_lock_held()
             iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
 
             if iteration_tools is None and ollama_tools:
@@ -1000,6 +1018,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # lock in its finally - a local catch-and-return here would
                 # silently skip both.
                 async for event_kind, event_payload in get_linep_provider().generate_stream(prompt_text, model, num_predict):
+                    _check_lock_held()
                     if event_kind == "thinking":
                         full_thinking_text += event_payload
                         yield f"data: {json.dumps({'type': 'thinking', 'text': event_payload})}\n\n"
@@ -1185,6 +1204,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                         # Stream Response Chunks - line by line
                         async for line in response.aiter_lines():
+                            _check_lock_held()
                             if line:
                                 try:
                                     chunk = json.loads(line)
@@ -1342,6 +1362,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                 tool_executor = get_tool_executor()
                 for tc in turn_tool_calls:
+                    _check_lock_held()
                     fn = tc.get("function", {})
                     tool_name = fn.get("name", "")
                     arguments = fn.get("arguments") or {}
@@ -1359,6 +1380,8 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                     except Exception as e:
                         logger.error(f"Agent tool execution failed: {tool_name}: {e}")
                         tool_result = {"success": False, "error": str(e)}
+
+                    _check_lock_held()
 
                     agent_steps[-1]["status"] = "done" if tool_result.get("success") else "error"
                     yield f"data: {json.dumps({'type': 'agent_steps', 'items': agent_steps})}\n\n"
@@ -1434,6 +1457,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # link below) never matched what the user
         # actually saw.
         if user_id is not None and session_id is not None and full_response_text:
+            _check_lock_held()
             # Marks that the normal path is about to attempt persistence
             # (issue #7 item 3) - the finally block below only falls back to
             # its own best-effort persist when this never got set, i.e. when
@@ -1458,6 +1482,11 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
         else:
             yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
+
+    except SessionLockLostError as e:
+        logger.error("Turn aborted due to lock lease loss (session=%s): %s", session_id, e)
+        persisted_attempted = True  # Prevent finally from persisting corrupted/orphaned state
+        yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungskoordination wurde während der Anfrage unterbrochen.'})}\n\n"
 
     except httpx.TimeoutException:
         error = ChatError(
@@ -1522,8 +1551,8 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # to silently drop whatever had already been streamed to and shown
         # in the user's browser - persisted_attempted stays False in every
         # one of those cases, so this is a last-chance best-effort save of
-        # that partial reply (done while still holding the lock).
-        if not persisted_attempted and full_response_text and user_id is not None and session_id is not None:
+        # that partial reply (done while still holding the lock, UNLESS lock ownership was lost).
+        if not lock_lost_event.is_set() and not persisted_attempted and full_response_text and user_id is not None and session_id is not None:
             try:
                 await asyncio.to_thread(persist_assistant_turn, True)
             except Exception as e:
@@ -1537,8 +1566,9 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
             except Exception:
                 pass
 
-        # Explicitly release the session lock in Redis
-        _release_session_lock(session_lock)
+        # Explicitly release the session lock in Redis only if we didn't lose ownership
+        if not lock_lost_event.is_set():
+            _release_session_lock(session_lock)
 
 
 @router.post("/stream")

@@ -20,6 +20,7 @@ from api.routers.chat_streaming import (
     SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
     SessionLockTimeoutError,
     SessionLockUnavailableError,
+    SessionLockLostError,
 )
 
 class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
@@ -88,22 +89,36 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
             return True
         mock_lock.reacquire.side_effect = mock_reacquire
 
-        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, interval=0.02))
+        lock_lost_event = asyncio.Event()
+        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, lock_lost_event, interval=0.02))
         await asyncio.sleep(0.065)
         watchdog_task.cancel()
         await asyncio.gather(watchdog_task, return_exceptions=True)
 
         self.assertGreaterEqual(renew_count, 2)
+        self.assertFalse(lock_lost_event.is_set())
+
+    async def test_session_lock_watchdog_signals_lock_lost_on_failure(self):
+        """Verify watchdog signals lock_lost_event when lease renewal fails."""
+        mock_lock = MagicMock()
+        mock_lock.reacquire.return_value = False  # Renewal fails (e.g. key expired in Redis)
+
+        lock_lost_event = asyncio.Event()
+        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, lock_lost_event, interval=0.02))
+        await asyncio.sleep(0.05)
+
+        self.assertTrue(lock_lost_event.is_set())
+        watchdog_task.cancel()
+        await asyncio.gather(watchdog_task, return_exceptions=True)
 
     async def test_lease_renewal_protects_turn_longer_than_ttl(self):
         """
         Verify that an active turn running longer than initial TTL is protected by
         watchdog lease renewal, preventing a concurrent turn from acquiring the lock mid-turn.
         """
+        import time
         active_owner = None
         ttl_expiry_time = 0.0
-
-        import time
 
         class TimeAwareMockLock:
             def __init__(self, owner_id):
@@ -139,7 +154,8 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         # Worker A acquires lock (initial TTL = 80ms)
         self.assertTrue(lock_a.acquire())
         # Start watchdog renewing every 30ms
-        watchdog_a = asyncio.create_task(_session_lock_watchdog(lock_a, interval=0.03))
+        lock_lost_a = asyncio.Event()
+        watchdog_a = asyncio.create_task(_session_lock_watchdog(lock_a, lock_lost_a, interval=0.03))
 
         # Worker A runs for 180ms (> 2x initial TTL of 80ms)
         await asyncio.sleep(0.18)
@@ -336,3 +352,70 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         parsed = json.loads(events[0].replace("data: ", "").strip())
         self.assertEqual(parsed.get("type"), "error")
         self.assertIn("Sitzungskoordination momentan nicht verfügbar", parsed.get("error", ""))
+
+    @patch("api.routers.chat_streaming._acquire_session_lock")
+    @patch("api.routers.chat_streaming._renew_session_lock")
+    @patch("api.routers.chat_streaming.httpx.AsyncClient")
+    @patch("api.routers.chat_streaming.get_model_num_predict")
+    @patch("api.routers.chat_streaming.get_config_service")
+    @patch("api.routers.chat_streaming.MoodSystem")
+    async def test_stream_ollama_response_lease_loss_aborts_mid_turn(self, mock_mood, mock_get_config, mock_num_predict, mock_http_client, mock_renew, mock_acquire):
+        """
+        Verify that when lease renewal fails during an active generation turn,
+        the turn aborts fail-closed with SSE error 'Sitzungskoordination wurde während der Anfrage unterbrochen'
+        and does not perform normal turn completion.
+        """
+        mock_mood_instance = MagicMock()
+        mock_mood_instance.get_snapshot.return_value = {"mood": "neutral", "modifier": ""}
+        mock_mood.return_value = mock_mood_instance
+        mock_mood.detect_interaction_type.return_value = "chat"
+
+        mock_num_predict.return_value = 1024
+        mock_cfg_svc = MagicMock()
+        mock_cfg_svc.get_max_tokens.return_value = 1024
+        mock_get_config.return_value = mock_cfg_svc
+
+        mock_lock = MagicMock()
+        mock_acquire.return_value = mock_lock
+        mock_renew.return_value = False  # Renewal immediately fails on watchdog tick
+
+        # Mock slow streaming from Ollama
+        async def mock_aiter_lines():
+            yield json.dumps({"message": {"content": "First word"}})
+            await asyncio.sleep(0.05)  # Watchdog fires and sets lock_lost_event
+            yield json.dumps({"message": {"content": "Second word"}})
+            yield json.dumps({"done": True})
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.return_value = None
+        mock_resp.aiter_lines = MagicMock(side_effect=mock_aiter_lines)
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__aenter__.return_value = mock_client_instance
+        mock_client_instance.__aexit__.return_value = None
+
+        mock_stream_ctx = MagicMock()
+        mock_stream_ctx.__aenter__.return_value = mock_resp
+        mock_stream_ctx.__aexit__.return_value = None
+        mock_client_instance.stream.return_value = mock_stream_ctx
+        mock_http_client.return_value = mock_client_instance
+
+        with patch("api.routers.chat_streaming.SESSION_GENERATION_LOCK_RENEW_INTERVAL", 0.02):
+            generator = stream_ollama_response(
+                message="Test message",
+                session_id=123,
+                user_id=None
+            )
+
+            events = []
+            async for chunk in generator:
+                events.append(chunk)
+
+            parsed_errors = [
+                json.loads(e.replace("data: ", "").strip()).get("error", "")
+                for e in events if e.startswith("data: ") and '"error"' in e
+            ]
+            self.assertTrue(
+                any("Sitzungskoordination wurde während der Anfrage unterbrochen" in err for err in parsed_errors),
+                f"Events yielded: {events}"
+            )
