@@ -21,13 +21,20 @@ OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 VISION_MODEL = os.getenv("VISION_MODEL", "qwen3.5:cloud")
 VISION_FALLBACK_MODEL = os.getenv("VISION_FALLBACK_MODEL", "qwen3.5:0.8b")
 
-VISION_SYSTEM_PROMPT = """Du bist ein hochpräziser visueller Bild-Analysator für ein nachgelagertes KI-Sprachmodell.
-Deine Aufgabe ist es, das übergebene Bild sachlich, detailliert und vollständig zu analysieren.
-Strukturiere deine Beschreibung wie folgt:
-1. [Bild-Typ & Szene]: Was ist zu sehen (Foto, Screenshot, Diagramm, Code-Editor, UI, Schaltplan)?
-2. [Erkannter Text & OCR]: Alle im Bild sichtbaren Texte, Fehlermeldungen, Werte oder Code-Schnipsel exakt wortgetreu wiedergeben.
-3. [Visuelle Details]: Layout, Farben, Markierungen, UI-Elemente, Diagramm-Achsen und Besonderheiten.
-Antworte direkt auf Deutsch, sachlich, präzise und ohne Floskeln."""
+VISION_SYSTEM_PROMPT = """Du bist der spezialisierte visuelle Sensor-Agent für LIARA.
+Deine Aufgabe ist es, das übergebene Bild messerscharf und unverfälscht in zwei getrennte Ebenen zu zerlegen:
+
+1. [VISION_FACTS] (Gesicherte optische Wahrnehmung - Nur was direkt messbar/sichtbar ist):
+- Titel, Labels & OCR: Alle im Bild sichtbaren Wörter, Zahlen, Werte, Fehlermeldungen exakt wortgetreu.
+- Abmessungen & Geometrie: Maßlinien, Pixelangaben, Einheiten, Seitenverhältnisse, Achsen.
+- Visuelle Elemente & Farben: Objekte, Komponenten, Farbwerte, Ansichten (z.B. Frontal, Seite, Oben).
+- Unsicherheiten & Limitierungen: Was ist unscharf, verdeckt, angeschnitten oder nicht zweifelsfrei lesbar?
+
+2. [VISION_INTERPRETATION] (Hypothesen & Kontext - Was es wahrscheinlich bedeutet):
+- Domäne & Typ: (z.B. VFX-Spec-Sheet, Frontend-UI-Mockup, Server-Log, Elektronik-Schaltplan).
+- Mögliche Funktion/Zweck: Plausible Anwendungsfälle oder technische Einordnung als getrennte Hypothese.
+
+Antworte präzise auf Deutsch, klar strukturiert und trenne Fakten strikt von Interpretationen."""
 
 
 def analyze_image_with_vision(image_base64_or_path: str, user_question: str = "") -> str:
@@ -128,7 +135,12 @@ def format_vision_context_block(vision_analysis: str) -> str:
     """Formatiert die Bildanalyse als standardisierten Markdown-Kontextblock."""
     if not vision_analysis or vision_analysis.startswith("[Bildanalyse"):
         return ""
-    return f"\n\n[Visueller Bildkontext (analysiert von Qwen Vision Sensor)]:\n{vision_analysis}\n\n(Beziehe diesen visuellen Kontext direkt in deine Antwort auf die Benutzerfrage ein.)\n"
+    return (
+        f"\n\n[Visueller Sensor-Befund (Qwen Vision Sensor)]:\n"
+        f"{vision_analysis}\n\n"
+        f"(Anweisung an das Modell: Nutze [VISION_FACTS] als verifizierte optische Realität. "
+        f"Nutze [VISION_INTERPRETATION] als Arbeitshypothesen und trenne eigene Schlussfolgerungen transparent von den Fakten.)\n\n"
+    )
 
 
 class VisionService:
