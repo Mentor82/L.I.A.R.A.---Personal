@@ -185,10 +185,14 @@ async def stream_ollama_response(
         vision_context=vision_context,
     )
 
+    user_turn_content = message
+    if vision_context:
+        user_turn_content = f"{vision_context}\n\nAktuelle Frage zum Bild: {message}" if message else vision_context
+
     messages = [
         {"role": "system", "content": system_prompt},
         *(conversation_history or []),
-        {"role": "user", "content": message}
+        {"role": "user", "content": user_turn_content}
     ]
 
     ollama_tools = None

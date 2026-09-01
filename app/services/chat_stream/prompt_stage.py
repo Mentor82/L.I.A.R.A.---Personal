@@ -308,6 +308,13 @@ Formatiere deine Antworten automatisch je nach Inhalt:
                     prompt += f"\n--- Datei: {fn} (Binärdatei, {info.get('size', 0)} Bytes) ---\n"
 
     if vision_context:
-        prompt += f"\n\n{vision_context}"
+        prompt += (
+            f"\n\n12. VISUELLER SENSOR-KONTEXT (STRIKTE PRIORITÄTS- & DISZIPLIN-REGEL):\n"
+            f"- Der folgende [Visuelle Sensor-Befund] ist die autoritative Wahrheit über das aktuelle Bild.\n"
+            f"- Erfinde NIEMALS abweichende Bildinhalte und verfalle nicht in Vermutungen über frühere Bilder.\n"
+            f"- Steht deine eigene Annahme im Konflikt mit [VISION_FACTS], verwirf deine Annahme ausnahmslos.\n"
+            f"- Trenne strikt: [VISION_FACTS] (gesehene Fakten) vs. [VISION_INTERPRETATION] (Hypothesen).\n\n"
+            f"{vision_context}"
+        )
 
     return prompt
