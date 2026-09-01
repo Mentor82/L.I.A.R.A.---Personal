@@ -54,24 +54,13 @@ from services.chat_stream.generator_helpers import (
     _resolve_symbol,
     _flatten_messages_for_linep,
     _append_linep_tool_call,
+    _handle_workspace_artifact_blocks,
     calculate_usage_stats,
 )
+from services.context import ContextBudgetManager
 
 logger = logging.getLogger(__name__)
 mlogger = get_mirko_logger()
-
-
-async def _handle_workspace_artifact_blocks(raw_blocks: List[str], user_id: Optional[int], session_id: Optional[int]):
-    """Saves each completed <workspace_artifact> block and yields its SSE line."""
-    for raw_block in raw_blocks:
-        title, content = parse_workspace_artifact(raw_block)
-        filename = None
-        if user_id is not None and session_id is not None:
-            filename = await asyncio.to_thread(save_artifact, user_id, session_id, title, content, "Plan")
-        payload = {"type": "workspace_artifact", "title": title, "filename": filename}
-        if filename is None:
-            payload["content"] = content
-        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 async def stream_ollama_response(
@@ -195,6 +184,16 @@ async def stream_ollama_response(
         *(conversation_history or []),
         {"role": "user", "content": user_turn_content}
     ]
+
+    # Dynamisches 4-Schichten Context-Budgeting & Rolling Compaction
+    context_res = ContextBudgetManager.process_turn_context(
+        messages=messages,
+        model_name=model,
+        memory_items=memory_context
+    )
+    messages = context_res.messages
+    if context_res.memory_items is not None:
+        memory_context = context_res.memory_items
 
     ollama_tools = None
     if supports_tools:

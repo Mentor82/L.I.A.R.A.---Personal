@@ -2,7 +2,12 @@ import os
 import sys
 import unittest
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+# Add app directory to sys.path
+APP_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(APP_DIR))
 
 if "redis" not in sys.modules:
     try:

@@ -47,7 +47,8 @@ import {
   WebSourcesBlock,
   FactCheckBlock,
   WorkspaceProposalsBlock,
-  WorkspaceArtifactsBlock
+  WorkspaceArtifactsBlock,
+  ChatBubbleFooter
 } from './chat/ChatCards';
 
 function Chat() {
@@ -1311,32 +1312,7 @@ function Chat() {
                   Ich warte noch, du kannst aber auch abbrechen und es später erneut versuchen.
                 </div>
               )}
-              {(msg.model || msg.tokens) && (
-                <div className="bubble-footer">
-                  <div className="bubble-footer-left">
-                    {msg.model && <span className="bubble-model">🤖 {msg.model}</span>}
-                    {msg.mood && <span className="bubble-mood"> · 🌙 {msg.mood}</span>}
-                  </div>
-                  {msg.tokens && (
-                    <div
-                      className="bubble-tokens"
-                      title={`Tokens: ${msg.tokens.in ?? 0} in, ${msg.tokens.think ?? 0} think, ${msg.tokens.out ?? 0} out, ${msg.tokens.total ?? ((msg.tokens.in || 0) + (msg.tokens.think || 0) + (msg.tokens.out || 0))} gesamt`}
-                    >
-                      <span className="token-item"><span className="token-lbl">in:</span> {msg.tokens.in ?? 0}</span>
-                      {Number(msg.tokens.think) > 0 && (
-                        <>
-                          <span className="token-dot">·</span>
-                          <span className="token-item"><span className="token-lbl">think:</span> {msg.tokens.think}</span>
-                        </>
-                      )}
-                      <span className="token-dot">·</span>
-                      <span className="token-item"><span className="token-lbl">out:</span> {msg.tokens.out ?? 0}</span>
-                      <span className="token-dot">·</span>
-                      <span className="token-item token-total-item"><span className="token-lbl">gesamt:</span> {msg.tokens.total ?? ((msg.tokens.in || 0) + (msg.tokens.think || 0) + (msg.tokens.out || 0))}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+              <ChatBubbleFooter model={msg.model} mood={msg.mood} tokens={msg.tokens} />
             </div>
           </div>
         ))}

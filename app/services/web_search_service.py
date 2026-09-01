@@ -4,7 +4,7 @@ Privacy-focused web search integration using DuckDuckGo Instant Answer API
 """
 
 import httpx
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import logging
 from datetime import datetime
 import json

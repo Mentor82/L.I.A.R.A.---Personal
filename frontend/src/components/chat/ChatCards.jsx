@@ -201,3 +201,34 @@ export function WorkspaceArtifactsBlock({ artifacts }) {
     </div>
   );
 }
+
+export function ChatBubbleFooter({ model, mood, tokens }) {
+  if (!model && !tokens) return null;
+
+  return (
+    <div className="bubble-footer">
+      <div className="bubble-footer-left">
+        {model && <span className="bubble-model">🤖 {model}</span>}
+        {mood && <span className="bubble-mood"> · 🌙 {mood}</span>}
+      </div>
+      {tokens && (
+        <div
+          className="bubble-tokens"
+          title={`Tokens: ${tokens.in ?? 0} in, ${tokens.think ?? 0} think, ${tokens.out ?? 0} out, ${tokens.total ?? ((tokens.in || 0) + (tokens.think || 0) + (tokens.out || 0))} gesamt`}
+        >
+          <span className="token-item"><span className="token-lbl">in:</span> {tokens.in ?? 0}</span>
+          {Number(tokens.think) > 0 && (
+            <>
+              <span className="token-dot">·</span>
+              <span className="token-item"><span className="token-lbl">think:</span> {tokens.think}</span>
+            </>
+          )}
+          <span className="token-dot">·</span>
+          <span className="token-item"><span className="token-lbl">out:</span> {tokens.out ?? 0}</span>
+          <span className="token-dot">·</span>
+          <span className="token-item token-total-item"><span className="token-lbl">gesamt:</span> {tokens.total ?? ((tokens.in || 0) + (tokens.think || 0) + (tokens.out || 0))}</span>
+        </div>
+      )}
+    </div>
+  );
+}

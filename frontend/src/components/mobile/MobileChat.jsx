@@ -14,31 +14,13 @@ import {
 } from '../chat/ChatCards';
 import liaraLogo from '../../assets/LIARA-LOGO.png';
 import { compressAndFormatImage } from '../../utils/imageCompressor';
+import {
+  MobileThinkingBlock,
+  MobileBubbleFooter,
+  MobileDrawer,
+  MobileTopBar
+} from './MobileChatComponents';
 import './MobileChat.css';
-
-function MobileThinkingBlock({ thinking, isAnswering, labelThinking, labelDone }) {
-  const [expanded, setExpanded] = useState(!isAnswering);
-  const autoCollapsedRef = useRef(isAnswering);
-
-  useEffect(() => {
-    if (isAnswering && !autoCollapsedRef.current) {
-      autoCollapsedRef.current = true;
-      setExpanded(false);
-    }
-  }, [isAnswering]);
-
-  if (!thinking) return null;
-
-  return (
-    <div className="mobile-thinking-block">
-      <button type="button" className="mobile-thinking-toggle" onClick={() => setExpanded((v) => !v)}>
-        <span>🧠 {isAnswering ? labelDone : labelThinking}</span>
-        <span className="mobile-thinking-caret">{expanded ? '▾' : '▸'}</span>
-      </button>
-      {expanded && <div className="mobile-thinking-content">{thinking}</div>}
-    </div>
-  );
-}
 
 export default function MobileChat({ user, onLogout }) {
   const { t } = useTranslation();
@@ -553,184 +535,61 @@ export default function MobileChat({ user, onLogout }) {
 
   return (
     <div className="mobile-chat-app">
-      {/* Topbar (ChatGPT/Copilot Style) */}
-      <header className="mobile-topbar">
-        <button
-          className="mobile-icon-btn"
-          onClick={() => setDrawerOpen(true)}
-          title={t('mobile.history')}
-        >
-          ☰
-        </button>
+      <MobileTopBar
+        onOpenDrawer={() => setDrawerOpen(true)}
+        selectedModel={selectedModel}
+        modelPickerOpen={modelPickerOpen}
+        setModelPickerOpen={setModelPickerOpen}
+        models={models}
+        onSelectModel={(name) => {
+          setSelectedModel(name);
+          localStorage.setItem('liara_selected_model', name);
+          setModelPickerOpen(false);
+        }}
+        onNewChat={handleNewChat}
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+        onSwitchDesktop={() => {
+          setViewMode('desktop');
+          setMenuOpen(false);
+        }}
+        onNavigateWorkspace={() => {
+          navigate('/workspace');
+          setMenuOpen(false);
+        }}
+        onNavigateConfig={() => {
+          navigate('/config');
+          setMenuOpen(false);
+        }}
+        onLogout={onLogout ? () => {
+          onLogout();
+          setMenuOpen(false);
+        } : undefined}
+        t={t}
+      />
 
-        <div className="mobile-model-pill-wrapper">
-          <button
-            className="mobile-model-pill"
-            onClick={() => setModelPickerOpen((v) => !v)}
-          >
-            <span>{selectedModel.split(':')[0]}</span>
-            <span className="mobile-pill-arrow">▾</span>
-          </button>
-
-          {modelPickerOpen && (
-            <div className="mobile-model-dropdown">
-              <div className="mobile-dropdown-header">{t('mobile.model')}</div>
-              {models.length === 0 ? (
-                <div className="mobile-dropdown-item active">{selectedModel}</div>
-              ) : (
-                models.map((m) => (
-                  <button
-                    key={m.name || m}
-                    className={`mobile-dropdown-item ${(m.name || m) === selectedModel ? 'active' : ''}`}
-                    onClick={() => {
-                      const name = m.name || m;
-                      setSelectedModel(name);
-                      localStorage.setItem('liara_selected_model', name);
-                      setModelPickerOpen(false);
-                    }}
-                  >
-                    <span>{m.name || m}</span>
-                    {(m.name || m) === selectedModel && <span>✓</span>}
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="mobile-topbar-right">
-          <button className="mobile-icon-btn" onClick={handleNewChat} title={t('mobile.newChat')}>
-            ➕
-          </button>
-          <button
-            className="mobile-icon-btn"
-            onClick={() => setMenuOpen((v) => !v)}
-            title={t('mobile.settings')}
-          >
-            ⋮
-          </button>
-
-          {menuOpen && (
-            <div className="mobile-menu-dropdown">
-              <button
-                className="mobile-menu-item"
-                onClick={() => {
-                  setViewMode('desktop');
-                  setMenuOpen(false);
-                }}
-              >
-                <span>🖥️</span>
-                <span>{t('mobile.switchDesktop')}</span>
-              </button>
-              <button
-                className="mobile-menu-item"
-                onClick={() => {
-                  navigate('/workspace');
-                  setMenuOpen(false);
-                }}
-              >
-                <span>🗂️</span>
-                <span>{t('mobile.workspace')}</span>
-              </button>
-              <button
-                className="mobile-menu-item"
-                onClick={() => {
-                  navigate('/config');
-                  setMenuOpen(false);
-                }}
-              >
-                <span>⚙️</span>
-                <span>{t('mobile.settings')}</span>
-              </button>
-              {onLogout && (
-                <button
-                  className="mobile-menu-item danger"
-                  onClick={() => {
-                    onLogout();
-                    setMenuOpen(false);
-                  }}
-                >
-                  <span>🚪</span>
-                  <span>{t('mobile.logout')}</span>
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </header>
-
-      {/* History Slide-over Drawer */}
-      {drawerOpen && (
-        <div className="mobile-drawer-overlay" onClick={() => setDrawerOpen(false)}>
-          <aside className="mobile-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="mobile-drawer-header">
-              <button className="mobile-new-chat-btn" onClick={handleNewChat}>
-                <span>➕</span>
-                <span>{t('mobile.newChat')}</span>
-              </button>
-              <button className="mobile-icon-btn" onClick={() => setDrawerOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="mobile-drawer-search">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('mobile.searchChats')}
-              />
-            </div>
-
-            <div className="mobile-drawer-list">
-              {filteredSessions.length === 0 ? (
-                <div className="mobile-drawer-empty">{t('mobile.noChatsFound')}</div>
-              ) : (
-                filteredSessions.map((session) => (
-                  <div
-                    key={session.id}
-                    className={`mobile-session-item ${session.id === activeSessionId ? 'active' : ''}`}
-                    onClick={() => handleSelectSession(session.id)}
-                  >
-                    <span className="mobile-session-icon">💬</span>
-                    <span className="mobile-session-title">{session.title || t('mobile.newChat')}</span>
-                    <button
-                      className="mobile-session-delete"
-                      onClick={(e) => handleDeleteSession(session.id, e)}
-                      title="Löschen"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="mobile-drawer-footer">
-              <button
-                className="mobile-footer-link"
-                onClick={() => {
-                  setViewMode('desktop');
-                  setDrawerOpen(false);
-                }}
-              >
-                <span>🖥️</span>
-                <span>{t('mobile.switchDesktop')}</span>
-              </button>
-            </div>
-          </aside>
-        </div>
-      )}
+      <MobileDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        onNewChat={handleNewChat}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        sessions={filteredSessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
+        t={t}
+      />
 
       {/* Messages Feed */}
       <main className="mobile-chat-feed">
         {messages.length === 0 ? (
           <div className="mobile-chat-empty">
             <div className="mobile-empty-logo">
-              <img src={liaraLogo} alt="LIARA" className="mobile-empty-logo-img" />
+              <img src={liaraLogo} alt="LIARA" />
             </div>
-            <h2>{t('app.name')}</h2>
-            <p>{t('chat.emptyState.subtitle')}</p>
+            <h2>{t('mobile.welcomeTitle')}</h2>
+            <p>{t('mobile.welcomeSubtitle')}</p>
           </div>
         ) : (
           messages.map((msg, index) => {
@@ -777,31 +636,12 @@ export default function MobileChat({ user, onLogout }) {
                   {msg.webSources && <WebSourcesBlock sources={msg.webSources} />}
 
                   {/* Message Footer with Model & Tokens */}
-                  {!isUser && (msg.model || msg.tokens) && (
-                    <div className="mobile-bubble-footer">
-                      <div className="mobile-bubble-footer-left">
-                        {msg.model && <span className="mobile-bubble-model">🤖 {msg.model.split(':')[0]}</span>}
-                        {msg.mood && <span className="mobile-bubble-mood"> · 🌙 {msg.mood}</span>}
-                      </div>
-                      {msg.tokens && (
-                        <div
-                          className="mobile-bubble-tokens"
-                          title={`Tokens: ${msg.tokens.in ?? 0} in, ${msg.tokens.think ?? 0} think, ${msg.tokens.out ?? 0} out, ${msg.tokens.total ?? ((msg.tokens.in || 0) + (msg.tokens.think || 0) + (msg.tokens.out || 0))} gesamt`}
-                        >
-                          <span className="token-item"><span className="token-lbl">in:</span> {msg.tokens.in ?? 0}</span>
-                          {Number(msg.tokens.think) > 0 && (
-                            <>
-                              <span className="token-dot">·</span>
-                              <span className="token-item"><span className="token-lbl">think:</span> {msg.tokens.think}</span>
-                            </>
-                          )}
-                          <span className="token-dot">·</span>
-                          <span className="token-item"><span className="token-lbl">out:</span> {msg.tokens.out ?? 0}</span>
-                          <span className="token-dot">·</span>
-                          <span className="token-item token-total-item"><span className="token-lbl">gesamt:</span> {msg.tokens.total ?? ((msg.tokens.in || 0) + (msg.tokens.think || 0) + (msg.tokens.out || 0))}</span>
-                        </div>
-                      )}
-                    </div>
+                  {!isUser && (
+                    <MobileBubbleFooter
+                      model={msg.model}
+                      mood={msg.mood}
+                      tokens={msg.tokens}
+                    />
                   )}
                 </div>
               </div>
