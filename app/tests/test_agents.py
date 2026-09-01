@@ -13,23 +13,31 @@ if "redis" not in sys.modules:
 from services.agents.agent_registry import AgentRegistry
 from services.agents.base_agent import BaseAgent
 from services.agents.code_agent import CodeAgent
+from services.agents.vision_agent import VisionAgent
 
 
 class TestAgentsSubsystem(unittest.TestCase):
 
     def test_agent_registry(self):
         agents = AgentRegistry.list_agents()
-        self.assertGreaterEqual(len(agents), 2)
+        self.assertGreaterEqual(len(agents), 3)
         
         agent_ids = [a["id"] for a in agents]
         self.assertIn("code", agent_ids)
         self.assertIn("research", agent_ids)
+        self.assertIn("vision", agent_ids)
 
         # CodeAgent instanziieren
         code_agent = AgentRegistry.create_agent("code", user_id=1, session_id=2)
         self.assertIsInstance(code_agent, CodeAgent)
         self.assertIn("view_file", code_agent.tools)
         self.assertIn("replace_chunk", code_agent.tools)
+
+        # VisionAgent instanziieren
+        vision_agent = AgentRegistry.create_agent("vision", user_id=1, session_id=2)
+        self.assertIsInstance(vision_agent, VisionAgent)
+        self.assertIn("analyze_image", vision_agent.tools)
+        self.assertIn("detect_objects", vision_agent.tools)
 
     def test_react_response_parsing(self):
         agent = BaseAgent(

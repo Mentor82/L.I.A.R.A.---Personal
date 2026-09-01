@@ -7,6 +7,7 @@ from services.agents.base_agent import BaseAgent
 from services.agents.code_agent import CodeAgent
 from services.agents.research_agent import ResearchAgent
 from services.agents.productivity_agent import ProductivityAgent
+from services.agents.vision_agent import VisionAgent
 
 
 class AgentRegistry:
@@ -64,6 +65,19 @@ class AgentRegistry:
                 "search_memory"
             ],
             "class": ProductivityAgent
+        },
+        "vision": {
+            "id": "vision",
+            "name": "Vision Agent",
+            "description": "Optischer Sensor- & Wahrnehmungs-Agent mit 2-Stufen-Befund (VISION_FACTS vs. VISION_INTERPRETATION), OCR und NPU-Objekterkennung.",
+            "default_model": "qwen3.5:cloud",
+            "icon": "👁️",
+            "category": "multimodal",
+            "tools": [
+                "analyze_image",
+                "detect_objects"
+            ],
+            "class": VisionAgent
         }
     }
 
@@ -123,6 +137,13 @@ class AgentRegistry:
         elif agent_cls == ProductivityAgent:
             return ProductivityAgent(
                 user_id=uid,
+                model=chosen_model,
+                max_steps=steps
+            )
+        elif agent_cls == VisionAgent:
+            return VisionAgent(
+                user_id=uid,
+                session_id=session_id,
                 model=chosen_model,
                 max_steps=steps
             )
