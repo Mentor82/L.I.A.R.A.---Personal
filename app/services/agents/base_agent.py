@@ -18,14 +18,6 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
-# Cloud model for delegated research sub-tasks - deliberately NOT the
-# Research Agent's own small local default. Confirmed live: a 3B local model
-# (llama3.2:3b) failed to correctly synthesize an answer from real, enriched
-# SearXNG source text even when the answer was plainly present in a source
-# (Bundesliga-table-leader test) - a stronger cloud model reasons over
-# multi-source text far more reliably.
-RESEARCH_DELEGATION_MODEL = "gpt-oss:120b-cloud"
-
 
 class BaseAgent:
     """
@@ -81,16 +73,8 @@ class BaseAgent:
     async def _tool_delegate_research(self, task: str) -> Dict[str, Any]:
         # Deferred import - avoids a circular import at module load time
         # (research_agent.py imports BaseAgent from this same module).
-        from services.agents.research_agent import ResearchAgent
-
-        # 10, not a tighter budget - confirmed live that 6 was too tight for
-        # a real multi-source task (search + fetch_web_page on a couple of
-        # sources + synthesis routinely needs more than 6 ReAct turns).
-        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=10)
-        result = await sub_agent.run(task=task)
-        if result.get("success"):
-            return {"answer": result["answer"]}
-        return {"error": result.get("error", "Research Agent lieferte kein Ergebnis")}
+        from services.agents.research_agent import run_delegated_research
+        return await run_delegated_research(task)
 
     def register_tool(
         self,

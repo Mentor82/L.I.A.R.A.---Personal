@@ -471,25 +471,12 @@ class ToolExecutor:
         Spins up a ResearchAgent sub-instance and runs it to completion for
         the given task, returning just its final answer - same idea as
         base_agent.py's delegate_research tool for the Agent Hub, wired into
-        the normal chat's tool-calling loop too (multi-agent orchestration,
-        issue: "Aufgabenverteilung"). RESEARCH_DELEGATION_MODEL matches
-        base_agent.py's choice (a cloud model, not ResearchAgent's own small
-        local default) - confirmed live that llama3.2:3b failed to
-        correctly synthesize an answer from real, enriched search source
-        text even when the answer was plainly present in a source.
+        the normal chat's tool-calling loop too (multi-agent orchestration).
+        Shared with base_agent.py via run_delegated_research() so the
+        model/step-budget/prompt tuning lives in one place.
         """
-        from services.agents.research_agent import ResearchAgent
-        from services.agents.base_agent import RESEARCH_DELEGATION_MODEL
-
-        task = params.get("task", "")
-        # 10, not a tighter budget - confirmed live that 6 was too tight for
-        # a real multi-source task (search + fetch_web_page on a couple of
-        # sources + synthesis routinely needs more than 6 ReAct turns).
-        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=10)
-        result = await sub_agent.run(task=task)
-        if result.get("success"):
-            return {"answer": result["answer"]}
-        return {"error": result.get("error", "Research Agent lieferte kein Ergebnis")}
+        from services.agents.research_agent import run_delegated_research
+        return await run_delegated_research(params.get("task", ""))
 
     async def _execute_current_time(self, params: Dict[str, Any]) -> Dict:
         """Gibt aktuelle Zeit zurück"""

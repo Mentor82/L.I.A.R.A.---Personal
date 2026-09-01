@@ -160,3 +160,39 @@ class ResearchAgent(BaseAgent):
         return await get_tool_executor()._execute_fetch_web_page({"url": url})
 
 
+# Cloud model for delegated research sub-tasks, not ResearchAgent's own
+# small local default above - confirmed live that llama3.2:3b failed to
+# correctly synthesize an answer from real, enriched search source text
+# even when the answer was plainly present in a source.
+DELEGATION_MODEL = "gpt-oss:120b-cloud"
+DELEGATION_MAX_STEPS = 10
+
+
+async def run_delegated_research(task: str) -> Dict[str, Any]:
+    """
+    Runs a ResearchAgent sub-instance to completion for a delegated
+    sub-task and returns just its final answer/error - shared by both
+    delegation call sites (base_agent.py's Agent Hub tool and
+    tool_executor.py's normal-chat tool) so the behavior/tuning lives in
+    one place instead of two copies drifting apart.
+
+    Appends an explicit step-budget hint to the task text - confirmed live
+    that without it, the sub-agent can burn its whole step budget running
+    many overlapping searches instead of settling into a final answer
+    (a broad "what's new in Python 3.13" question still hit a 10-step
+    limit with no hint, even though a narrower single-fact lookup finished
+    in 2 steps).
+    """
+    budgeted_task = (
+        f"{task}\n\n"
+        "(Hinweis: Du hast ein begrenztes Schritt-Budget - fasse spätestens "
+        "nach 2-3 Tool-Aufrufen mit einer <final_answer> zusammen, auch wenn "
+        "nicht jede Facette recherchiert wurde.)"
+    )
+    sub_agent = ResearchAgent(model=DELEGATION_MODEL, max_steps=DELEGATION_MAX_STEPS)
+    result = await sub_agent.run(task=budgeted_task)
+    if result.get("success"):
+        return {"answer": result["answer"]}
+    return {"error": result.get("error", "Research Agent lieferte kein Ergebnis")}
+
+
