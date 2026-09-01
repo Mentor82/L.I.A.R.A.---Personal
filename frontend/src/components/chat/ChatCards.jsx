@@ -247,3 +247,78 @@ export function ChatBubbleFooter({ model, mood, tokens, content, thinking }) {
     </div>
   );
 }
+
+const MODEL_LIMITS = {
+  'llama3.2:1b': 8192,
+  'llama3.2:3b': 8192,
+  'llama3.1:8b': 16384,
+  'qwen2.5:0.5b': 8192,
+  'qwen2.5:1.5b': 16384,
+  'qwen2.5:7b': 32768,
+  'qwen3.5:0.8b': 16384,
+  'gpt-oss:20b-cloud': 32768,
+  'gemma4:cloud': 32768,
+  'gpt-oss:120b-cloud': 65536,
+  'deepseek-v4-flash:cloud': 65536,
+  'qwen3.5:cloud': 131072,
+  'nemotron-3-ultra:cloud': 131072,
+  'kimi-k3:cloud': 131072,
+  'deepseek-v4-pro:cloud': 131072,
+};
+
+export function getModelContextLimit(modelName) {
+  if (!modelName) return 8192;
+  const cleaned = modelName.trim().toLowerCase();
+  if (MODEL_LIMITS[cleaned]) return MODEL_LIMITS[cleaned];
+  for (const [key, limit] of Object.entries(MODEL_LIMITS)) {
+    if (cleaned.startsWith(key.split(':')[0])) return limit;
+  }
+  return 8192;
+}
+
+export function SessionContextBar({ messages, modelName }) {
+  const limit = getModelContextLimit(modelName);
+  
+  let totalTokens = 0;
+  if (messages && messages.length > 0) {
+    totalTokens = messages.reduce((acc, m) => {
+      if (m.tokens?.total) return acc + m.tokens.total;
+      if (m.tokens?.in || m.tokens?.out) return acc + (m.tokens.in || 0) + (m.tokens.out || 0) + (m.tokens.think || 0);
+      const textLen = (m.content || m.text || '').length + (m.thinking || '').length;
+      return acc + Math.max(1, Math.round(textLen / 3.8)) + 4;
+    }, 0);
+  }
+
+  const fillRatio = Math.min(1.0, totalTokens / limit);
+  const percent = Math.round(fillRatio * 100);
+  const thresholdPercent = 70;
+  const thresholdTokens = Math.round(limit * 0.7);
+
+  let statusText = 'Normal (< 55%)';
+  let fillColor = 'linear-gradient(90deg, #00e5ff, #3b82f6)';
+  if (percent >= 70) {
+    statusText = 'Kompaktierung aktiv (≥ 70%)';
+    fillColor = 'linear-gradient(90deg, #ec4899, #8b5cf6)';
+  } else if (percent >= 55) {
+    statusText = 'Vorbereitung (55–70%)';
+    fillColor = 'linear-gradient(90deg, #f59e0b, #eab308)';
+  }
+
+  const formatTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+
+  const tooltip = `📊 Kontext-Budget & Auto-Summarize:\n• Aktuell: ${totalTokens.toLocaleString()} / ${limit.toLocaleString()} Tokens (${percent}%)\n• Status: ${statusText}\n• Auto-Kompaktierung: Aktiv ab ${thresholdPercent}% (${thresholdTokens.toLocaleString()} Tokens)\n• Modell: ${modelName || 'Standard'}`;
+
+  return (
+    <div className="session-context-bar" title={tooltip}>
+      <span className="context-bar-icon">🧠</span>
+      <div className="context-bar-track">
+        <div
+          className="context-bar-fill"
+          style={{ width: `${Math.max(4, percent)}%`, background: fillColor }}
+        />
+        <div className="context-bar-threshold-marker" title="Auto-Kompaktierungs-Grenze (70%)" />
+      </div>
+      <span className="context-bar-label">{formatTok(totalTokens)}/{formatTok(limit)}</span>
+    </div>
+  );
+}

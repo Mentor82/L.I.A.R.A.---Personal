@@ -1,7 +1,7 @@
 /* Real-Time Token Statistics Display */
 .bubble-footer {
   margin-top: 0.75rem;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   opacity: 0.75;
   display: flex;
   align-items: center;
@@ -20,31 +20,90 @@
 .bubble-tokens {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  font-size: 0.75rem;
+  gap: 0.2rem;
+  font-size: 0.68rem;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
   margin-left: auto;
-  opacity: 0.85;
+  opacity: 0.75;
+  letter-spacing: 0.01em;
+  transition: opacity 0.2s ease;
+}
+
+.bubble-tokens:hover {
+  opacity: 1;
 }
 
 .bubble-tokens .token-item {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.15rem;
+  gap: 0.12rem;
 }
 
 .bubble-tokens .token-lbl {
-  opacity: 0.65;
+  opacity: 0.6;
   font-family: inherit;
-  font-size: 0.7rem;
+  font-size: 0.62rem;
 }
 
 .bubble-tokens .token-dot {
-  opacity: 0.35;
+  opacity: 0.3;
   margin: 0 1px;
 }
 
 .bubble-tokens .token-total-item {
   font-weight: 600;
-  opacity: 0.95;
+  opacity: 0.9;
+}
+
+/* Session Context & Compaction Progress Bar */
+.session-context-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  cursor: help;
+  position: relative;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.session-context-bar:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+
+.context-bar-track {
+  width: 52px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+.context-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
+}
+
+.context-bar-threshold-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 70%;
+  width: 1.5px;
+  background: rgba(255, 255, 255, 0.5);
+  z-index: 2;
+}
+
+.context-bar-label {
+  opacity: 0.85;
+  font-size: 0.66rem;
+  white-space: nowrap;
 }

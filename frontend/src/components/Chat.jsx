@@ -48,7 +48,8 @@ import {
   FactCheckBlock,
   WorkspaceProposalsBlock,
   WorkspaceArtifactsBlock,
-  ChatBubbleFooter
+  ChatBubbleFooter,
+  SessionContextBar
 } from './chat/ChatCards';
 
 function Chat() {
@@ -1128,6 +1129,7 @@ function Chat() {
           </label>
           {messages.length > 0 && (
             <>
+              <SessionContextBar messages={messages} modelName={selectedModel} />
               <span className="chat-message-count" title="Nachrichten im Verlauf">
                 💬 {messages.length}
               </span>
