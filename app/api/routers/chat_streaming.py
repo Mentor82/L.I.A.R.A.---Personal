@@ -1,494 +1,74 @@
 """
-Chat Streaming Router - Server-Sent Events (SSE) für Liara.
-
-Implementiert:
-- Streaming Responses via SSE
-- Strukturiertes Error-Handling
-- Timeout-Management
-- Memory-System Integration
+Chat Streaming Router - Server-Sent Events (SSE) für Liara (Issue #23).
+========================================================================
+Declarative router orchestrating the chat streaming stages:
+- LockGuard (Redis leasing, watchdog, zero-lag race cancellation, keepalives)
+- PromptStage (personality, temporal, memory context, search intent, workspace manifest)
+- GeneratorStage (LiNeP & Ollama-HTTP streaming, splitter pipeline, tool execution)
+- PersistenceStage (atomic turn saving under lock, 4D memory, concept graph relations)
 """
 
+import json
+import logging
+from datetime import datetime
+from typing import Optional, AsyncGenerator, List, Dict
+
+import requests
+import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, AsyncGenerator, List, Dict
-import httpx
-import requests
-import json
-import asyncio
-import logging
-from datetime import datetime
-
-logger = logging.getLogger(__name__)
-
-from core.mirko_logger import get_mirko_logger, should_log_for_user
-from liara_engine.memory.mood_system import MoodSystem
-from liara_engine.actions.intent_detector import get_intent_detector
-from liara_engine.actions.action_executor import ActionExecutor
-from core.dependencies import require_active_user
-from core.database import get_db
-from api.models.base_models import User
-from services.chat_persistence import persist_assistant_message
-from services.redis_service import get_redis_service
-from services.memory_integration import store_in_4d_memory, store_message_with_concepts, get_relevant_context
-from services.neo4j_service import get_neo4j_service
-from services.embedding_service import get_embedding_service
-from services.web_search_service import get_web_search_service
-from services.location_service import get_location_service
-from services.web_safety import get_risk_analyzer, get_content_filter
-from services.user_preferences_service import get_user_preferences
-from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_task_list_instructions, build_factcheck_instructions, build_consent_required_instructions, build_workspace_artifact_instructions
-from services.session_workspace import build_workspace_manifest, get_context_selected_files, read_session_file
-from services.thinking_splitter import ThinkingSplitter
-from services.task_splitter import TaskBlockExtractor, parse_task_items
-from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck_items
-from services.ollama_capabilities import model_supports_tools, get_model_num_predict
-from services.config_service import get_config_service
-from services.tool_registry import get_tool_registry
-from services.tool_executor import get_tool_executor
-from services.tool_parser import ToolCall, get_tool_parser
-from services.toolcall_splitter import ToolCallBlockExtractor
-from services.workspace_artifact_splitter import WorkspaceArtifactBlockExtractor, parse_workspace_artifact
-from services.workspace_artifacts import save_artifact
-from services.linep_provider import get_linep_provider, linep_enabled, LinepUnavailableError
-from api.routers.chat import _get_tool_aware_system_prompt, _format_tool_result_for_llm
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-router = APIRouter(prefix="/chat", tags=["Chat Streaming"])
+from core.database import get_db, SessionLocal
+from core.dependencies import require_active_user
+from core.mirko_logger import get_mirko_logger, should_log_for_user
+from api.models.base_models import User
+from api.models.mood_state import MoodHistoryEntry
+from liara_engine.actions.action_executor import ActionExecutor
+from liara_engine.actions.intent_detector import get_intent_detector
+from liara_engine.nlp.sentiment_analyzer import get_sentiment_analyzer
+from liara_engine.memory.mood_system import MoodSystem
+from services.config_service import get_config_service
+from services.embedding_service import get_embedding_service
+from services.memory_integration import get_relevant_context
+from services.neo4j_service import get_neo4j_service
+from services.ollama_capabilities import get_model_num_predict
+from services.redis_service import get_redis_service
+from services.thinking_splitter import ThinkingSplitter
+from services.user_preferences_service import get_user_preferences
+
+# Modular Chat Stream Stages (Issue #23)
+from services.chat_stream.lock_guard import (
+    SessionLockError,
+    SessionLockTimeoutError,
+    SessionLockUnavailableError,
+    SessionLockLostError,
+    _acquire_session_lock,
+    _renew_session_lock,
+    _session_lock_watchdog,
+    _release_session_lock,
+    _race_with_lock_lost,
+    _with_lock_lost_guard,
+    _with_sse_keepalive,
+    SESSION_GENERATION_LOCK_TTL,
+    SESSION_GENERATION_LOCK_RENEW_INTERVAL,
+    SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
+    SSE_KEEPALIVE_INTERVAL,
+)
+from services.chat_stream.prompt_stage import (
+    SEARCH_INTENTS,
+    HISTORY_TURNS_LIMIT,
+    get_location_context,
+    perform_web_search,
+    _build_agent_step_label,
+)
+from services.chat_stream.generator_stage import stream_ollama_response
+
+logger = logging.getLogger(__name__)
 mlogger = get_mirko_logger()
-
-# Web search intent list
-SEARCH_INTENTS = ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']
-
-# How many prior messages of the current session to include as real
-# conversation turns (not just long-term semantic-memory retrieval) in every
-# request to the model - see the comment at its usage for why this exists.
-HISTORY_TURNS_LIMIT = 20
-
-# issue #13 + #18 + #25: Lease-Renewal Lock Pattern:
-# Initial TTL is deliberately short (60s) for rapid crash-recovery (if a worker dies,
-# the lock expires in 60s instead of blocking for 20m).
-# While the turn is alive and actively running, a background watchdog renews the lease every 15s.
-# A contending turn can safely wait up to 1200s (20m) while keepalives flow continuously.
-SESSION_GENERATION_LOCK_TTL = 60  # seconds (short lease for quick crash recovery)
-SESSION_GENERATION_LOCK_RENEW_INTERVAL = 15.0  # seconds (heartbeat frequency: TTL / 4)
-SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 1200  # seconds (max total wait time for contending turns)
-
-
-class SessionLockError(Exception):
-    """Base exception for chat session lock failures."""
-    pass
-
-
-class SessionLockTimeoutError(SessionLockError):
-    """Raised when lock acquisition times out due to session lock contention."""
-    pass
-
-
-class SessionLockUnavailableError(SessionLockError):
-    """Raised when Redis or the lock coordination infrastructure is unavailable."""
-    pass
-
-
-class SessionLockLostError(SessionLockError):
-    """Raised when the session generation lock lease is lost mid-turn."""
-    pass
-
-
-def _acquire_session_lock(session_id: int):
-    """
-    Redis lock serializing active /chat/stream generation per session (issue #13, #18, #25).
-    Because lock acquisition runs inside stream_ollama_response while _with_sse_keepalive
-    actively sends pulses to keep HTTP proxies happy, this wait can safely block until
-    the preceding turn finishes.
-
-    Returns:
-        The acquired Redis Lock object.
-
-    Raises:
-        SessionLockUnavailableError: If Redis is unreachable or fails.
-        SessionLockTimeoutError: If the acquire timeout expires while waiting on a previous turn.
-    """
-    try:
-        redis_svc = get_redis_service()
-        if not redis_svc or not redis_svc.client:
-            raise SessionLockUnavailableError("Redis service is unavailable")
-        lock = redis_svc.client.lock(
-            f"chat_stream_lock:{session_id}",
-            timeout=SESSION_GENERATION_LOCK_TTL,
-            blocking_timeout=SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
-        )
-        if not lock.acquire(blocking=True):
-            raise SessionLockTimeoutError(f"Session lock acquisition timed out for session {session_id}")
-        return lock
-    except (SessionLockTimeoutError, SessionLockUnavailableError):
-        raise
-    except Exception as e:
-        logger.warning(f"Session generation lock error for session {session_id}: {e}")
-        raise SessionLockUnavailableError(f"Redis lock error: {e}") from e
-
-
-def _renew_session_lock(lock) -> bool:
-    """
-    Renews/extends the lease on an active Redis session lock.
-    Returns True if the lock was renewed, False if ownership was lost or error occurred.
-    """
-    if lock is None:
-        return False
-    try:
-        if hasattr(lock, "reacquire"):
-            return bool(lock.reacquire())
-        elif hasattr(lock, "extend"):
-            return bool(lock.extend(SESSION_GENERATION_LOCK_TTL, replace_ttl=True))
-        return False
-    except Exception as e:
-        logger.warning(f"Failed to renew session generation lock: {e}")
-        return False
-
-
-async def _session_lock_watchdog(lock, lock_lost_event: Optional[asyncio.Event] = None, interval: Optional[float] = None):
-    """
-    Background heartbeat task that periodically renews the session lock lease
-    while generation/tools are active. If renewal fails, signals lock_lost_event
-    so active generation immediately aborts fail-closed. Stops automatically when cancelled.
-    """
-    sleep_interval = interval if interval is not None else SESSION_GENERATION_LOCK_RENEW_INTERVAL
-    try:
-        while True:
-            await asyncio.sleep(sleep_interval)
-            renewed = await asyncio.to_thread(_renew_session_lock, lock)
-            if not renewed:
-                logger.warning("Session lock lease renewal failed - lock ownership lost! Signalling turn abort.")
-                if lock_lost_event is not None:
-                    lock_lost_event.set()
-                break
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        logger.warning(f"Session lock watchdog error: {e}")
-        if lock_lost_event is not None:
-            lock_lost_event.set()
-
-
-def _release_session_lock(lock) -> None:
-    if lock is None:
-        return
-    try:
-        lock.release()
-    except Exception as e:
-        # e.g. LockNotOwnedError if the TTL already expired and someone else
-        # acquired it in the meantime - not our lock to release anymore,
-        # not an error worth surfacing above debug.
-        logger.debug(f"Session generation lock release skipped: {e}")
-
-
-async def _race_with_lock_lost(coro_or_future, lock_lost_event: Optional[asyncio.Event]):
-    """
-    Awaits an async operation while watching lock_lost_event.
-    If lock_lost_event fires while the operation is pending, the operation
-    is immediately cancelled and SessionLockLostError is raised.
-    """
-    if lock_lost_event is None:
-        return await coro_or_future
-
-    if lock_lost_event.is_set():
-        raise SessionLockLostError("Sitzungskoordination wurde unterbrochen (Lease-Verlust).")
-
-    op_task = asyncio.ensure_future(coro_or_future)
-    lost_task = asyncio.ensure_future(lock_lost_event.wait())
-
-    done, pending = await asyncio.wait(
-        {op_task, lost_task},
-        return_when=asyncio.FIRST_COMPLETED
-    )
-
-    for p in pending:
-        p.cancel()
-        try:
-            await p
-        except (asyncio.CancelledError, Exception):
-            pass
-
-    if lost_task in done:
-        raise SessionLockLostError("Sitzungskoordination wurde während der Operation unterbrochen (Lease-Verlust).")
-
-    return await op_task
-
-
-async def _with_lock_lost_guard(async_iterable, lock_lost_event: Optional[asyncio.Event]):
-    """
-    Wraps an async generator/iterator so that every next-chunk wait is raced
-    against lock_lost_event. If the lock is lost while awaiting the next chunk,
-    the pending fetch is cancelled immediately and SessionLockLostError is raised.
-    """
-    if lock_lost_event is None:
-        async for item in async_iterable:
-            yield item
-        return
-
-    iterator = async_iterable.__aiter__()
-    while True:
-        if lock_lost_event.is_set():
-            raise SessionLockLostError("Sitzungskoordination wurde während des Streamings unterbrochen (Lease-Verlust).")
-
-        next_task = asyncio.ensure_future(iterator.__anext__())
-        lost_task = asyncio.ensure_future(lock_lost_event.wait())
-
-        done, pending = await asyncio.wait(
-            {next_task, lost_task},
-            return_when=asyncio.FIRST_COMPLETED
-        )
-
-        for p in pending:
-            p.cancel()
-            try:
-                await p
-            except (asyncio.CancelledError, Exception):
-                pass
-
-        if lost_task in done:
-            raise SessionLockLostError("Sitzungskoordination wurde während des Streamings unterbrochen (Lease-Verlust).")
-
-        try:
-            item = await next_task
-        except StopAsyncIteration:
-            break
-
-        yield item
-
-
-SSE_KEEPALIVE_INTERVAL = 10.0  # seconds - extra margin under Cloudflare's ~100s edge timeout
-
-
-async def _with_sse_keepalive(source, interval: float = SSE_KEEPALIVE_INTERVAL):
-    """
-    Interleaves ': keep-alive\\n\\n' SSE comment lines into `source` whenever
-    nothing real has been yielded for `interval` seconds.
-
-    The reverse-proxy chain in front of this app (Cloudflare's free-tier
-    edge has a ~100s idle timeout) drops the connection with a 524 if no
-    bytes arrive for that long - which happened routinely during the agent
-    loop's tool-calling turns: nothing is yielded between the initial
-    'metadata' event and the first real 'content' chunk while the model is
-    deciding on/executing a tool call, easily exceeding 100s. A comment
-    line (anything starting with ':') is part of the SSE spec precisely
-    for this - EventSource and this app's own hand-rolled SSE parsers both
-    silently ignore any line that isn't 'data: ...', so this is invisible
-    to every consumer.
-
-    Keeps the SAME pending __anext__() task across keep-alive ticks rather
-    than re-issuing it - a keep-alive tick must not cancel/restart whatever
-    the source was actually waiting on.
-    """
-    it = source.__aiter__()
-    pending = None
-    try:
-        while True:
-            if pending is None:
-                pending = asyncio.ensure_future(it.__anext__())
-            done, _ = await asyncio.wait({pending}, timeout=interval)
-            if pending in done:
-                task, pending = pending, None
-                try:
-                    yield task.result()
-                except StopAsyncIteration:
-                    break
-            else:
-                yield ": keep-alive\n\n"
-    finally:
-        # `pending.cancel()` only *requests* cancellation - without awaiting
-        # it, `source`'s own `__anext__()` hasn't actually unwound yet, so
-        # calling `source.aclose()` right after (as this used to) could hit
-        # "aclose(): asynchronous generator is already running" and abort
-        # before `source`'s own finally block (which releases the per-session
-        # Redis lock, see _release_session_lock above) has run - leaving that
-        # lock orphaned for up to SESSION_GENERATION_LOCK_TTL on every client
-        # disconnect / Cloudflare 524, observed live as stuck
-        # chat_stream_lock:* keys blocking a session's next message. Awaiting
-        # the cancellation first lets `source`'s finally complete before we
-        # touch it again.
-        if pending is not None:
-            pending.cancel()
-            try:
-                await pending
-            except (asyncio.CancelledError, StopAsyncIteration, Exception):
-                pass
-        aclose = getattr(source, "aclose", None)
-        if aclose is not None:
-            try:
-                await aclose()
-            except Exception:
-                pass
-
-
-def get_location_context(db: Session, user_id: int) -> Optional[str]:
-    """
-    Holt User Location aus DB (wenn Consent gegeben)
-    
-    Returns:
-        Location context string oder None
-    """
-    try:
-        location_service = get_location_service()
-        location = location_service.get_user_location(db, user_id)
-        
-        if location and location.get('consent_given'):
-            return f"\n\nUser-Standort: {location.get('city')}, {location.get('region')}, {location.get('country')} (Zeitzone: {location.get('timezone')})"
-        
-        return None
-    except Exception:
-        return None
-
-
-async def perform_web_search(query: str, intent: str, user_id: Optional[int] = None, db: Optional[Session] = None) -> tuple[Optional[str], Optional[Dict], Optional[str], Optional[int]]:
-    """
-    Führt Web-Suche basierend auf Intent aus mit Safety-Check
-    
-    Args:
-        query: User query
-        intent: Detected intent (SEARCH_WEATHER, SEARCH_WIKI, etc.)
-        user_id: User ID for location fallback
-        db: Database session for location lookup
-    
-    Returns:
-        Tuple of (formatted_text, raw_data, search_type, risk_score)
-    """
-    try:
-        logger.info(f"Web search triggered: intent={intent}, query={query}")
-        web_search = get_web_search_service()
-        risk_analyzer = get_risk_analyzer()
-        
-        # Default risk score for safe APIs
-        risk_score = 0
-        
-        if intent == 'SEARCH_WEATHER':
-            # Weather APIs sind immer sicher (open-meteo.com ist whitelisted)
-            risk_score = 5  # Minimal risk
-            
-            # Extract location from query. City names are reliably capitalized
-            # in German, so pull out whatever follows a preposition
-            # (in/für/von/bei/nach) rather than trying to strip every possible
-            # question phrasing - stripping broke on any wording the regex
-            # didn't anticipate (e.g. "aktuelle" in "das aktuelle Wetter").
-            import re
-            location = ""
-            prep_match = re.search(
-                r'\b(?:in|für|von|bei|nach)\s+([A-ZÄÖÜ][\wÀ-ÿ\'-]*(?:\s+[A-ZÄÖÜ][\wÀ-ÿ\'-]*)*)',
-                query
-            )
-            if prep_match:
-                location = prep_match.group(1).rstrip('?!., ')
-            else:
-                # Fallback: a capitalized word that isn't just the first word
-                # of the sentence (which is capitalized regardless of being a
-                # place name, e.g. "Wie ist das Wetter?").
-                non_location_words = {'wetter', 'temperatur', 'wie', 'was', 'wird'}
-                words = query.split()
-                capitalized = [
-                    w.strip('?!.,') for i, w in enumerate(words)
-                    if i > 0 and w[0].isupper() and len(w.strip('?!.,')) > 1
-                    and w.strip('?!.,').lower() not in non_location_words
-                ]
-                if capitalized:
-                    location = capitalized[-1]
-            
-            # FALLBACK: Wenn keine Location aus Query extrahiert, nutze gespeicherte Location
-            if len(location) < 2 and user_id and db:
-                location_service = get_location_service()
-                user_location = location_service.get_user_location(db, user_id)
-                if user_location and user_location.get('city'):
-                    location = user_location['city']
-                    logger.info(f"Using stored location for user {user_id}: {location}")
-                else:
-                    # Keine Location verfügbar - LLM soll nachfragen
-                    logger.warning(f"No location available for weather request from user {user_id}")
-                    return None, {'error': 'no_location', 'message': 'Kein Standort verfügbar'}, 'weather', risk_score
-            
-            logger.info(f"Fetching weather for location: {location}")
-            result = await web_search.get_weather_info(location)
-            logger.info(f"Weather result: {result}")
-            if 'error' not in result:
-                formatted = web_search.format_for_llm(result, 'weather')
-                return formatted, result, 'weather', risk_score
-            else:
-                logger.warning(f"Weather API error: {result.get('error')}")
-        
-        elif intent == 'SEARCH_WIKI':
-            # Wikipedia ist immer sicher (whitelisted)
-            risk_score = 5  # Minimal risk
-            
-            # Wikipedia search
-            logger.info(f"Searching Wikipedia for: {query}")
-            result = await web_search.search_wikipedia(query, language='de')
-            logger.info(f"Wikipedia result: {result}")
-            if 'error' not in result:
-                formatted = web_search.format_for_llm(result, 'wikipedia')
-                # Analyze Wikipedia URL if present
-                if result.get('url'):
-                    url_risk = risk_analyzer.analyze_url(result['url'])
-                    risk_score = url_risk.get('risk_score', 5)
-                return formatted, result, 'wikipedia', risk_score
-            else:
-                logger.warning(f"Wikipedia error: {result.get('error')}")
-        
-        elif intent in ['SEARCH_NEWS', 'SEARCH_WEB']:
-            # Real web search via SearXNG - same SearchBroker + ProxySandbox
-            # fetch-enrichment pipeline the model-driven
-            # web_search(search_type="web") tool already uses (see
-            # tool_executor.py's _execute_web_search_general, reused here
-            # rather than duplicated). DuckDuckGo's Instant Answer API only
-            # returns something for narrow infobox/definition queries and
-            # came back empty here for most real news/web queries - same
-            # class of bug fixed in research_agent.py's web_search tool.
-            logger.info(f"Searching web (SearXNG) for: {query}")
-            result = await get_tool_executor()._execute_web_search_general(query, language='de')
-            sources = result.get('sources', [])
-            logger.info(f"SearXNG result: {len(sources)} source(s)")
-            if sources:
-                formatted = "\n\n".join(
-                    f"Quelle: {s['title']} ({s['url']})\n{s['text']}"
-                    for s in sources
-                )
-
-                # Analyze the top source's URL for risk
-                url_risk = risk_analyzer.analyze_url(sources[0]['url'])
-                risk_score = url_risk.get('risk_score', 15)
-                logger.info(f"Risk analysis for {sources[0]['url']}: score={risk_score}")
-
-                return formatted, result, 'web', risk_score
-            else:
-                logger.warning("No results from SearXNG web search")
-        
-        logger.warning(f"No web search results for intent: {intent}")
-        return None, None, None, None
-    except Exception as e:
-        logger.error(f"Web search failed: {e}", exc_info=True)
-        return None, None, None, None
-
-
-def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
-    """
-    Human-readable label for an agent_steps SSE item - always built here,
-    server-side, from the tool name/arguments actually invoked. Never from
-    model text: that's the whole point of this being a separate event from
-    the model-authored 'tasks' block (see task_splitter.py's docstring).
-    """
-    if tool_name == "web_search":
-        return f'Websuche: "{arguments.get("query", "")}"'
-    if tool_name == "wikipedia_search":
-        return f'Wikipedia: "{arguments.get("query", "")}"'
-    if tool_name == "get_current_time":
-        return "Aktuelle Zeit abrufen"
-    if tool_name == "workspace_list_files":
-        return "Workspace-Dateien auflisten"
-    if tool_name == "workspace_read_file":
-        return f'Workspace-Datei lesen: "{arguments.get("filename", "")}"'
-    if tool_name == "workspace_propose_change":
-        return f'Änderung vorschlagen: "{arguments.get("filename", "")}"'
-    if tool_name == "workspace_propose_dependency_change":
-        return f'Paket-Änderung vorschlagen: "{arguments.get("package", "")}"'
-    return tool_name
+router = APIRouter(prefix="/chat", tags=["Chat Streaming"])
 
 
 class StreamChatRequest(BaseModel):
@@ -498,7 +78,12 @@ class StreamChatRequest(BaseModel):
     temperature: float = 0.7
     context: Optional[str] = None
     max_tokens: Optional[int] = 2000
-    session_id: Optional[int] = None  # NEW: Session ID for history tracking
+    session_id: Optional[int] = None
+
+
+class GuestStreamRequest(BaseModel):
+    """Request für Guest-Streaming."""
+    message: str
 
 
 class ChatError(BaseModel):
@@ -510,1170 +95,13 @@ class ChatError(BaseModel):
     suggestion: Optional[str] = None
 
 
-def _flatten_messages_for_linep(messages: List[Dict], include_tools: bool) -> str:
-    """Turns the OpenAI-style messages list into a single prompt string for
-    LiNeP's GENERATE profile - the wire protocol has no structured
-    messages/tools channel, only a plain payload string (see
-    linep_provider.py). Tool instructions/results reuse chat.py's existing
-    prompt-based tool-calling convention
-    (_get_tool_aware_system_prompt/_format_tool_result_for_llm) instead of
-    inventing a second one for this transport - see the LiNeP-switch plan.
-    """
-    parts = []
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content") or ""
-        if role == "system":
-            if include_tools:
-                content = f"{content}\n\n{_get_tool_aware_system_prompt()}"
-            parts.append(content)
-        elif role == "tool":
-            try:
-                tool_result = json.loads(content)
-            except (json.JSONDecodeError, TypeError):
-                tool_result = {"result": content}
-            parts.append(f"Tool-Ergebnis:\n{_format_tool_result_for_llm(tool_result)}")
-        elif role == "assistant":
-            if content:
-                parts.append(f"Assistant: {content}")
-        else:  # user
-            parts.append(f"User: {content}")
-    parts.append("Assistant:")
-    return "\n\n".join(parts)
-
-
-def _append_linep_tool_call(turn_tool_calls: List[Dict], raw_block: str) -> None:
-    """Parses a completed <tool_call> block (from ToolCallBlockExtractor,
-    tags already stripped) via the existing tool_parser and, if valid,
-    appends it to turn_tool_calls in the SAME shape Ollama's native
-    tool_calls use ({"function": {"name", "arguments"}}) - so the
-    tool-execution loop below needs no transport-specific branching at all.
-    Re-wrapping in tags to reuse ToolCallParser.extract_tool_call()'s full
-    match/fallback chain rather than duplicating its JSON parsing here.
-    """
-    parsed = get_tool_parser().extract_tool_call(f"<tool_call>{raw_block}</tool_call>")
-    if parsed:
-        turn_tool_calls.append({"function": {"name": parsed.tool_name, "arguments": parsed.parameters}})
-
-
-async def _handle_workspace_artifact_blocks(raw_blocks: List[str], user_id: Optional[int], session_id: Optional[int]):
-    """
-    Saves each completed <workspace_artifact> block (from
-    WorkspaceArtifactBlockExtractor) as a file in the session's Workspace and
-    yields the SSE line referencing it - shared by every artifact_extractor
-    call site in both transport branches below. Falls back to shipping the
-    raw content in the event itself if there's no session to save into, or
-    the save failed, so the frontend can still render it inline rather than
-    silently losing the content.
-    """
-    for raw_block in raw_blocks:
-        title, content = parse_workspace_artifact(raw_block)
-        filename = None
-        if user_id is not None and session_id is not None:
-            filename = await asyncio.to_thread(save_artifact, user_id, session_id, title, content, "Plan")
-        payload = {"type": "workspace_artifact", "title": title, "filename": filename}
-        if filename is None:
-            payload["content"] = content
-        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-async def stream_ollama_response(
-    message: str,
-    model: str = "llama3.2:3b",
-    temperature: float = 0.7,
-    context: Optional[str] = None,
-    web_search_intent: Optional[str] = None,
-    web_search_type: Optional[str] = None,
-    web_search_data: Optional[Dict] = None,
-    web_search_risk_score: Optional[int] = None,
-    action_result: Optional[Dict] = None,
-    memory_context: Optional[List[Dict]] = None,
-    session_id: Optional[int] = None,  # NEW: Session ID for frontend
-    user_id: int = None,
-    username: Optional[str] = None,
-    personality: Optional[str] = None,
-    custom_instructions: Optional[str] = None,
-    user_message_id: Optional[int] = None,
-    memory_enabled: bool = True,
-    used_tools: bool = False,
-    conversation_history: Optional[List[Dict]] = None,
-    session_lock=None,  # issue #13 item 2 / issue #18 - acquired inside generator if None, released in finally
-) -> AsyncGenerator[str, None]:
-    """
-    Streame Ollama-Response via Server-Sent Events.
-
-    Yields:
-        Server-Sent Event formatted strings
-    """
-    # issue #18 + #13 + #25: Acquire session lock inside the stream generator so the HTTP
-    # StreamingResponse is returned immediately to prevent reverse-proxy 524 timeouts.
-    # Strict fail-closed: never proceed lockless to preserve same-session turn serialization.
-    lock_watchdog_task = None
-    lock_lost_event = asyncio.Event()
-
-    def _check_lock_held():
-        if lock_lost_event.is_set():
-            raise SessionLockLostError("Sitzungskoordination wurde während der Anfrage unterbrochen (Lease-Verlust).")
-
-    if session_lock is None and session_id is not None:
-        try:
-            session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
-        except SessionLockTimeoutError:
-            logger.error("Session generation lock acquisition timed out for session %s - aborting turn to prevent un-serialized generation race", session_id)
-            yield f"data: {json.dumps({'type': 'error', 'error': 'Die vorherige Anfrage in dieser Sitzung läuft noch oder hat das Zeitlimit überschritten.'})}\n\n"
-            return
-        except SessionLockUnavailableError as ex:
-            logger.error("Session generation lock unavailable for session %s (%s) - fail closed to prevent un-serialized generation race", session_id, ex)
-            yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungskoordination momentan nicht verfügbar. Bitte versuche es in Kürze erneut.'})}\n\n"
-            return
-        except Exception as ex:
-            logger.error("Unexpected error acquiring session lock for session %s: %s", session_id, ex)
-            yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungsfehler aufgetreten. Bitte versuche es erneut.'})}\n\n"
-            return
-
-    # Start background heartbeat watchdog to keep extending lock lease for long-running turns
-    if session_lock is not None:
-        lock_watchdog_task = asyncio.create_task(_session_lock_watchdog(session_lock, lock_lost_event))
-
-    # Mood-Detection und System-Prompt (per-user, DB-backed)
-    mood_system = MoodSystem(user_id)
-    interaction_type = MoodSystem.detect_interaction_type(message)
-    mood_snapshot = mood_system.get_snapshot()
-    mood_modifier = mood_snapshot["modifier"]
-
-    # issue #13 + #18: Load canonical conversation history and persist user turn UNDER THE SESSION LOCK
-    # so that concurrent turns for the same session are strictly serialized, and each turn
-    # sees the fully completed canonical previous turn history.
-    if user_id is not None and session_id is not None:
-        from core.database import SessionLocal
-        db_turn = SessionLocal()
-        try:
-            if conversation_history is None:
-                history_rows = db_turn.execute(text("""
-                    SELECT role, content FROM chat_messages
-                    WHERE session_id = :session_id
-                    ORDER BY timestamp DESC, id DESC
-                    LIMIT :limit
-                """), {'session_id': session_id, 'limit': HISTORY_TURNS_LIMIT}).all()
-                conversation_history = [
-                    {'role': row.role, 'content': row.content} for row in reversed(history_rows)
-                ]
-
-            if user_message_id is None:
-                message_insert = text("""
-                    INSERT INTO chat_messages 
-                        (user_id, session_id, role, content, model, mood, timestamp)
-                    VALUES 
-                        (:user_id, :session_id, 'user', :content, :model, :mood, CURRENT_TIMESTAMP)
-                    RETURNING id
-                """)
-                result = db_turn.execute(message_insert, {
-                    'user_id': user_id,
-                    'session_id': session_id,
-                    'content': message,
-                    'model': model,
-                    'mood': mood_snapshot["mood"]
-                })
-                db_turn.commit()
-                user_message_id = result.scalar()
-
-                db_turn.execute(text("""
-                    UPDATE chat_sessions 
-                    SET updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :session_id
-                """), {'session_id': session_id})
-                db_turn.commit()
-
-                logger.info(f"Created message {user_message_id} for user {user_id} in session {session_id} under lock")
-
-                should_store_memory = memory_enabled and (not used_tools)
-                if should_store_memory:
-                    try:
-                        store_message_with_concepts(
-                            user_id=user_id,
-                            message_id=user_message_id,
-                            content=message,
-                            role='user',
-                            timestamp=datetime.utcnow(),
-                            session_id=session_id
-                        )
-                    except Exception as e:
-                        logger.error(f"Concept extraction failed: {e}")
-
-                    import threading
-                    def store_memory_async(u_id, m_id, s_id, c_mood, e_level):
-                        db_async = SessionLocal()
-                        try:
-                            store_in_4d_memory(
-                                db=db_async,
-                                user_id=u_id,
-                                content_type='message',
-                                content_id=m_id,
-                                content_text=message,
-                                session_id=s_id,
-                                mood=c_mood,
-                                energy_level=e_level,
-                                additional_context={'model': model}
-                            )
-                        except Exception as ex:
-                            logger.error(f"4D Memory async storage failed: {ex}")
-                        finally:
-                            db_async.close()
-
-                    threading.Thread(
-                        target=store_memory_async,
-                        args=(user_id, user_message_id, session_id, mood_snapshot["mood"], mood_snapshot["intensity"]),
-                        daemon=True
-                    ).start()
-        except Exception as e:
-            logger.error(f"Turn history read and user turn persistence failed: {e}")
-        finally:
-            db_turn.close()
-    
-    # System Prompt mit Mood
-    system_prompt = f"""Du bist Liara, eine warmherzige Digitalbegleiterin.
-
-Deine Art zu kommunizieren:
-- Warm und empathisch
-- Analytisch präzise
-- Leicht verspielt
-- Ruhig und stabilisierend
-
-Aktuelle Zeit: {build_temporal_context()}
-
-Aktueller Mood-Modifier: {mood_modifier}
-
-{build_personality_and_instructions_block(username, personality, custom_instructions)}
-
-WICHTIG - Formatierung deiner Antworten (Markdown):
-Formatiere deine Antworten automatisch je nach Inhalt:
-
-1. **Code-Blöcke** mit Syntax-Highlighting:
-   ```python
-   def beispiel():
-       return "Code"
-   ```
-   Unterstützte Sprachen: python, javascript, php, html, css, sql, bash, json, xml, yaml, etc.
-
-2. **Tabellen** für strukturierte Daten:
-   | Spalte 1 | Spalte 2 | Spalte 3 |
-   |----------|----------|----------|
-   | Wert 1   | Wert 2   | Wert 3   |
-
-3. **Listen** für Aufzählungen:
-   - Ungeordnete Listen mit `-`
-   - Oder nummerierte Listen mit `1.`
-
-4. **Inline-Code** für kleine Code-Snippets: `variable = wert`
-
-5. **Hervorhebungen**:
-   - **Fett** für wichtige Begriffe
-   - *Kursiv* für Betonungen
-   - > Blockquotes für Zitate
-
-6. **Überschriften** für Struktur:
-   ### Abschnitt 1
-   #### Unterabschnitt
-
-{build_diagram_instructions()}
-
-{build_safety_dimensioning_instructions()}
-
-{build_no_fabrication_instructions()}
-
-{build_task_list_instructions()}
-
-{build_factcheck_instructions()}
-
-{build_consent_required_instructions()}
-
-{build_workspace_artifact_instructions()}
-
-Wähle die Formatierung automatisch basierend auf dem Inhalt:
-- Code → Code-Block mit korrekter Sprache
-- Vergleiche → Tabelle
-- Schritte/Anleitungen → Nummerierte Liste
-- Optionen → Ungeordnete Liste
-- Technische Begriffe → Inline-Code
-
-WICHTIG - Umgang mit Web-Informationen:
-Wenn du aktuelle Informationen (Wetter, Wikipedia, etc.) im Context findest, formuliere sie 
-in natürlicher, benutzerfreundlicher Sprache um. Zeige die Informationen klar und strukturiert,
-ohne die rohen Datenfelder zu wiederholen. Sei präzise aber freundlich.
-
-WICHTIG - Bei fehlenden Standort-Daten:
-Wenn ein User nach Wetter fragt aber KEIN Standort verfügbar ist (weder in der Frage noch gespeichert),
-frage freundlich nach: "Für welchen Ort möchtest du die Wettervorhersage wissen?" 
-Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (mit Consent).
-
-{context or ''}
-"""
-    
-    messages = [
-        {"role": "system", "content": system_prompt},
-        *(conversation_history or []),
-        {"role": "user", "content": message}
-    ]
-
-    # Native Ollama tool-calling (see the "Agent" plan) - only attached when
-    # the selected model actually supports it (confirmed live: passing
-    # `tools` to a model that doesn't is a hard HTTP 400, not a graceful
-    # ignore) and only the tools ToolExecutor's consent stub doesn't
-    # unconditionally deny (get_tools_for_ollama filters to privacy_level
-    # == "low").
-    ollama_tools = None
-    if await model_supports_tools(model):
-        ollama_tools = get_tool_registry().get_tools_for_ollama()
-        logger.info("Native tools enabled for model '%s' (%d tools registered, user_id=%s, session_id=%s)", model, len(ollama_tools), user_id, session_id)
-    else:
-        logger.info("Model '%s' does not declare native tool support (user_id=%s, session_id=%s)", model, user_id, session_id)
-
-    # Defined here, not inside the try (issue #7 item 3), and initialized
-    # before it so both are always in scope for the finally block below,
-    # regardless of where inside the try a disconnect/exception happens.
-    full_response_text = ""
-    # Accumulated raw reasoning-model "thinking" text for this turn (see the
-    # feed sites below) - was only ever streamed live via SSE 'thinking'
-    # events, never kept anywhere, so a page reload had nothing to restore
-    # even though the user already saw it during generation.
-    full_thinking_text = ""
-    persisted_attempted = False
-
-    def persist_assistant_turn(interrupted: bool = False) -> bool:
-        from core.database import SessionLocal
-        db_final = SessionLocal()
-        try:
-            insert_result = db_final.execute(text("""
-                INSERT INTO chat_messages
-                    (user_id, session_id, role, content, model, mood, thinking, timestamp)
-                VALUES
-                    (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, CURRENT_TIMESTAMP)
-                RETURNING id
-            """), {
-                'user_id': user_id,
-                'session_id': session_id,
-                'content': full_response_text,
-                # Tags interrupted-turn rows distinctly (issue #7 item 3's
-                # "completed vs interrupted must be distinguishable") without
-                # a schema migration - greppable via the existing model column.
-                'model': f"{model} (interrupted)" if interrupted else model,
-                'mood': mood_snapshot["mood"],
-                # Raw, not summarized (see full_thinking_text's own comment
-                # above) - None rather than "" when there was none, so an
-                # ordinary non-reasoning-model turn stores a real NULL.
-                'thinking': full_thinking_text or None
-            })
-            db_final.commit()
-            assistant_message_id = insert_result.scalar()
-
-            db_final.execute(text("""
-                UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = :session_id
-            """), {'session_id': session_id})
-            db_final.commit()
-
-            if memory_enabled and assistant_message_id:
-                try:
-                    store_message_with_concepts(
-                        user_id=user_id,
-                        message_id=assistant_message_id,
-                        content=full_response_text,
-                        role='assistant',
-                        timestamp=datetime.utcnow(),
-                        session_id=session_id
-                    )
-                except Exception as e:
-                    logger.error(f"Assistant concept storage failed: {e}")
-
-                if user_message_id:
-                    try:
-                        get_neo4j_service().create_relationship(
-                            source_type='Message', source_id=user_message_id,
-                            target_type='Message', target_id=assistant_message_id,
-                            relation_type='RESULTED_IN', user_id=user_id,
-                            properties={
-                                'personality': personality,
-                                'mood': mood_snapshot["mood"],
-                                'model': model,
-                                # Agent's own tool_calls loop can use tools even when the
-                                # pre-LLM heuristics (used_tools, computed by the caller
-                                # before this generator even runs) found none.
-                                'used_tools': used_tools or agent_tool_used,
-                                'interrupted': interrupted,
-                            }
-                        )
-                    except Exception as e:
-                        logger.error(f"RESULTED_IN relationship failed: {e}")
-            return True
-        except Exception as e:
-            logger.error(f"Assistant message persistence failed: {e}")
-            return False
-        finally:
-            db_final.close()
-
-    try:
-        # Sende Metadata Event with session_id
-        metadata = {
-            'type': 'metadata',
-            'model': model,
-            'mood': mood_snapshot["mood"]
-        }
-        if session_id:
-            metadata['session_id'] = session_id
-        yield f"data: {json.dumps(metadata)}\n\n"
-        
-        # ✨ Send Memory Context if available
-        if memory_context:
-            yield f"data: {json.dumps({'type': 'memory_context', 'data': memory_context})}\n\n"
-        
-        # If action was executed, send result
-        if action_result:
-            yield f"data: {json.dumps({'type': 'action_result', 'result': action_result})}\n\n"
-            
-            # If action was successful, send success message and done
-            if action_result.get('success'):
-                confirmation_text = action_result.get('message', 'Aktion erfolgreich ausgeführt')
-
-                # issue #13 item 3: this shortcut used to return before ever
-                # reaching persist_assistant_turn() below, so the user's
-                # message (already inserted by the route handler) got saved
-                # but this confirmation never did - a reload showed the
-                # question with no reply. Assistant-only, not
-                # persist_chat_turn() - the user row already exists here.
-                #
-                # Own short-lived session (issue #13 item 6) rather than the
-                # route handler's request-scoped one, which callers of this
-                # generator no longer pass in at all.
-                if user_id and session_id:
-                    from core.database import SessionLocal
-                    db_shortcut = SessionLocal()
-                    try:
-                        persist_assistant_message(db_shortcut, session_id, user_id, confirmation_text)
-                    finally:
-                        db_shortcut.close()
-
-                yield f"data: {json.dumps({'type': 'content', 'text': confirmation_text})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'action_executed': True})}\n\n"
-                return  # Don't call LLM if action was successful
-        
-        # If web search was triggered, send event
-        if web_search_intent:
-            yield f"data: {json.dumps({'type': 'web_search', 'intent': web_search_intent, 'search_type': web_search_type})}\n\n"
-
-            if web_search_type == 'web' and web_search_data:
-                # SearXNG result (perform_web_search's SEARCH_NEWS/SEARCH_WEB
-                # branch) - same structured source-card event/shape as the
-                # model-driven web_search("web") tool below, not the older
-                # single-abstract WebSearchResults display (that one expects
-                # a DuckDuckGo-shaped dict, not a source list).
-                web_source_items = [
-                    {
-                        "id": f"source-{i}",
-                        "title": s.get("title", ""),
-                        "url": s.get("url", ""),
-                        "domain": s.get("domain", ""),
-                        "published_at": s.get("published_at"),
-                        "dated": s.get("dated", False)
-                    }
-                    for i, s in enumerate(web_search_data.get("sources", []))
-                ]
-                yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
-            elif web_search_data:
-                # Send web search results
-                yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type, 'risk_score': web_search_risk_score or 0})}\n\n"
-        
-        # Agent tool-calling loop: bounded re-invocation of Ollama so the
-        # model can call a real tool and see its actual result, instead of
-        # only ever getting one shot per user message. Each iteration is one
-        # full Ollama call; the last iteration always omits `tools`, forcing
-        # a model that still wants another tool call to instead answer with
-        # whatever tool results it already has - this is what guarantees the
-        # loop always ends in a real answer rather than cutting off mid-plan.
-        MAX_AGENT_ITERATIONS = 3
-        agent_tool_used = False
-        agent_steps: List[Dict] = []
-
-        # Response-length budget for this turn's Ollama/LiNeP calls - was a
-        # flat hardcoded 2000 regardless of model, which also meant the
-        # admin "Max Tokens" setting (SystemConfig.jsx/config_service.py)
-        # was dead: ConfigService.get_max_tokens() existed but was never
-        # actually called anywhere. Computed once per request (not per
-        # iteration - the model doesn't change mid-turn).
-        from core.database import SessionLocal
-        db_config = SessionLocal()
-        try:
-            configured_max_tokens = get_config_service(db_config).get_max_tokens()
-        finally:
-            db_config.close()
-        num_predict = await get_model_num_predict(model, configured_max_tokens)
-
-        # Experimental LiNeP transport switch (see the LiNeP-switch plan) -
-        # determined once per request, not per iteration, so a mid-turn
-        # tool-calling round-trip doesn't jump transports. Health-gated: a
-        # LiNeP outage falls back to the proven Ollama-HTTP path instead of
-        # breaking chat outright - this flag (LINEP_ENABLED env var) is off
-        # by default.
-        transport = "ollama"
-        logger.debug("[LiNeP-Switch] linep_enabled()=%s", linep_enabled())
-        if linep_enabled():
-            if await get_linep_provider().health():
-                # Third attempt: Mentor82/LiNeP-Ollama commit 2af68a6 made
-                # the CHAT profile use Ollama's own native model-family
-                # response parser (resp.Message.Thinking/.ToolCalls/.Content)
-                # instead of scanning raw text for <think> tags - the
-                # earlier tag-scanner (3bf5ee1) only ever helped models that
-                # literally emit such tags, which nemotron-3-nano:4b and
-                # deepseek-v4-pro:cloud don't (verified live - they just
-                # think out loud in untagged prose). linep_provider.py now
-                # uses RuntimeProfile.CHAT specifically so this native
-                # parsing path is actually reachable - re-enabling
-                # thinking-capable models here to test it live.
-                transport = "linep"
-                logger.info("[LiNeP-Switch] Chat turn (session=%s) using LiNeP transport", session_id)
-            else:
-                logger.warning("[LiNeP-Switch] LINEP_ENABLED, but linep-server unreachable -> fallback to Ollama-HTTP (session=%s)", session_id)
-
-        for iteration in range(MAX_AGENT_ITERATIONS + 1):
-            _check_lock_held()
-            iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None
-
-            if iteration_tools is None and ollama_tools:
-                # Forced final turn after using up the tool budget. Without
-                # an explicit nudge, a reasoning model can just keep
-                # reasoning about which tool it wishes it could call next
-                # and never emit real content before hitting num_predict -
-                # observed live with gpt-oss:120b-cloud. Telling it plainly
-                # that no more tools are available reliably gets a real
-                # answer instead of a silent, content-less turn.
-                messages.append({
-                    "role": "user",
-                    "content": "Es sind keine weiteren Tool-Aufrufe mehr möglich. Bitte beantworte die ursprüngliche Frage jetzt direkt mit den bisher erhaltenen Informationen."
-                })
-
-            payload = {
-                "model": model,
-                "messages": messages,
-                "stream": True,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": num_predict,
-                    # Left unset before - confirmed live that an unstable
-                    # model (e.g. gpt-oss:120b-cloud) can then repeat its
-                    # entire answer verbatim 2-3x in a single turn. LiNeP's
-                    # RequestEnvelope has no generic options field to carry
-                    # this through, so the LiNeP branch below stays affected.
-                    "repeat_penalty": 1.1
-                }
-            }
-            if iteration_tools:
-                payload["tools"] = iteration_tools
-
-            thinking_splitter = ThinkingSplitter()
-            task_extractor = TaskBlockExtractor()
-            factcheck_extractor = FactCheckBlockExtractor()
-            artifact_extractor = WorkspaceArtifactBlockExtractor()
-            toolcall_extractor = ToolCallBlockExtractor() if transport == "linep" else None
-            turn_content = ""
-            turn_tool_calls = []
-
-            if transport == "linep":
-                # LiNeP's wire protocol carries no structured messages/tools
-                # channel of its own (see linep_provider.py), so the full
-                # conversation + tool instructions are still flattened into
-                # one prompt string here - but a connected server that
-                # supports it (Mentor82/LiNeP-Ollama b1d4236+) emits
-                # REASONING_DELTA/TOOL_CALL as their own native event kinds
-                # instead of mixing them into the content text, so the
-                # tag/JSON-based extraction below is a defensive fallback for
-                # an older server, not the primary path anymore.
-                prompt_text = _flatten_messages_for_linep(messages, bool(iteration_tools))
-                # No try/except here for LinepUnavailableError - it's left
-                # to propagate to this function's own outer try/except
-                # (below, near the httpx.ConnectError handler), which already
-                # emits a proper SSE error event AND releases the session
-                # lock in its finally - a local catch-and-return here would
-                # silently skip both.
-                async for event_kind, event_payload in _with_lock_lost_guard(
-                    get_linep_provider().generate_stream(prompt_text, model, num_predict),
-                    lock_lost_event
-                ):
-                    _check_lock_held()
-                    if event_kind == "thinking":
-                        full_thinking_text += event_payload
-                        yield f"data: {json.dumps({'type': 'thinking', 'text': event_payload})}\n\n"
-                        continue
-
-                    if event_kind == "tool_call":
-                        try:
-                            native_call = json.loads(event_payload)
-                        except json.JSONDecodeError:
-                            native_call = None
-                        # Ollama's own api.ToolCall shape ({"id","function":
-                        # {"name","arguments"}}) - identical to what the
-                        # Ollama-HTTP branch's native tool_calls already use,
-                        # so it needs no normalization before appending.
-                        if isinstance(native_call, dict) and native_call.get("function"):
-                            turn_tool_calls.append(native_call)
-                        continue
-
-                    content = event_payload
-                    thinking_part, content_part = thinking_splitter.feed(content)
-                    if thinking_part:
-                        full_thinking_text += thinking_part
-                        yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
-
-                    if content_part:
-                        content_part, completed_task_blocks = task_extractor.feed(content_part)
-                        for raw_block in completed_task_blocks:
-                            yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
-
-                    if content_part:
-                        content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
-                        for raw_block in completed_factcheck_blocks:
-                            yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
-
-                    if content_part:
-                        content_part, completed_artifact_blocks = artifact_extractor.feed(content_part)
-                        async for sse_line in _handle_workspace_artifact_blocks(completed_artifact_blocks, user_id, session_id):
-                            yield sse_line
-
-                    if content_part:
-                        content_part, completed_toolcall_blocks = toolcall_extractor.feed(content_part)
-                        for raw_block in completed_toolcall_blocks:
-                            _append_linep_tool_call(turn_tool_calls, raw_block)
-
-                    if content_part:
-                        turn_content += content_part
-                        full_response_text += content_part
-                        try:
-                            if username and should_log_for_user(username):
-                                mlogger.log_sse_chunk("content", content=content_part)
-                        except:
-                            pass  # Logging-Fehler ignorieren
-                        yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
-
-                # LiNeP has no explicit 'done' chunk - the generator ending
-                # above IS done. Same flush/leftover-routing chain as the
-                # Ollama branch below (kept separate rather than shared, to
-                # avoid touching that already-verified path for this
-                # experimental transport - mirror any future change to one
-                # into the other), extended with toolcall_extractor.
-                leftover_thinking, leftover_content = thinking_splitter.flush()
-                if leftover_thinking:
-                    full_thinking_text += leftover_thinking
-                    yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
-                if leftover_content:
-                    leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
-                    for raw_block in leftover_task_blocks:
-                        yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
-                    if leftover_content:
-                        leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
-                        for raw_block in leftover_factcheck_blocks:
-                            yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
-                        if leftover_content:
-                            leftover_content, leftover_artifact_blocks = artifact_extractor.feed(leftover_content)
-                            async for sse_line in _handle_workspace_artifact_blocks(leftover_artifact_blocks, user_id, session_id):
-                                yield sse_line
-                        if leftover_content:
-                            leftover_content, leftover_toolcall_blocks = toolcall_extractor.feed(leftover_content)
-                            for raw_block in leftover_toolcall_blocks:
-                                _append_linep_tool_call(turn_tool_calls, raw_block)
-                            if leftover_content:
-                                turn_content += leftover_content
-                                full_response_text += leftover_content
-                                yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
-
-                final_task_content = task_extractor.flush()
-                if final_task_content:
-                    final_task_content, final_task_factcheck_blocks = factcheck_extractor.feed(final_task_content)
-                    for raw_block in final_task_factcheck_blocks:
-                        yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
-                    if final_task_content:
-                        final_task_content, final_task_artifact_blocks = artifact_extractor.feed(final_task_content)
-                        async for sse_line in _handle_workspace_artifact_blocks(final_task_artifact_blocks, user_id, session_id):
-                            yield sse_line
-                    if final_task_content:
-                        final_task_content, final_task_toolcall_blocks = toolcall_extractor.feed(final_task_content)
-                        for raw_block in final_task_toolcall_blocks:
-                            _append_linep_tool_call(turn_tool_calls, raw_block)
-                        if final_task_content:
-                            turn_content += final_task_content
-                            full_response_text += final_task_content
-                            yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
-
-                final_factcheck_content = factcheck_extractor.flush()
-                if final_factcheck_content:
-                    final_factcheck_content, final_fc_artifact_blocks = artifact_extractor.feed(final_factcheck_content)
-                    async for sse_line in _handle_workspace_artifact_blocks(final_fc_artifact_blocks, user_id, session_id):
-                        yield sse_line
-                if final_factcheck_content:
-                    final_factcheck_content, final_fc_toolcall_blocks = toolcall_extractor.feed(final_factcheck_content)
-                    for raw_block in final_fc_toolcall_blocks:
-                        _append_linep_tool_call(turn_tool_calls, raw_block)
-                    if final_factcheck_content:
-                        turn_content += final_factcheck_content
-                        full_response_text += final_factcheck_content
-                        yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
-
-                # artifact_extractor sits BEFORE toolcall_extractor in the
-                # per-chunk feed order above (thinking -> task -> factcheck ->
-                # artifact -> toolcall), so its leftover here must still be
-                # routed through toolcall_extractor too - same reasoning as
-                # task/factcheck's flush() above. Getting this order backwards
-                # (artifact flushed AFTER toolcall, straight to content) was a
-                # live bug: artifact_extractor's safe-tail hold-back is blind
-                # to WHICH tag it might be guarding against, so it could eat
-                # the tail end of an actual <tool_call>...</tool_call> block
-                # with no toolcall_extractor left to catch it - confirmed
-                # live as a literal `"..."d" } }\n</tool_call>` fragment
-                # leaking into the visible chat.
-                final_artifact_content = artifact_extractor.flush()
-                if final_artifact_content:
-                    final_artifact_content, final_artifact_toolcall_blocks = toolcall_extractor.feed(final_artifact_content)
-                    for raw_block in final_artifact_toolcall_blocks:
-                        _append_linep_tool_call(turn_tool_calls, raw_block)
-                    if final_artifact_content:
-                        turn_content += final_artifact_content
-                        full_response_text += final_artifact_content
-                        yield f"data: {json.dumps({'type': 'content', 'text': final_artifact_content})}\n\n"
-
-                final_toolcall_content = toolcall_extractor.flush()
-                if final_toolcall_content:
-                    turn_content += final_toolcall_content
-                    full_response_text += final_toolcall_content
-                    yield f"data: {json.dumps({'type': 'content', 'text': final_toolcall_content})}\n\n"
-
-                # Fallback for a model that emits the JSON but skips the
-                # literal <tool_call> tag (observed live: nemotron-3-nano:4b
-                # closed with </tool_call> but never opened it, so the tag
-                # extractor above never entered "in_block" and the raw JSON
-                # streamed through as visible content). tool_parser's own
-                # JSON_TOOL_PATTERN already handles bare "{tool, parameters}"
-                # JSON without tags - reused here as a last resort over the
-                # full turn so the tool still gets executed even though the
-                # raw JSON already reached the client this one time.
-                if not turn_tool_calls and iteration_tools:
-                    fallback_call = get_tool_parser().extract_tool_call(turn_content)
-                    if fallback_call:
-                        turn_tool_calls.append({
-                            "function": {"name": fallback_call.tool_name, "arguments": fallback_call.parameters}
-                        })
-
-            else:
-
-                # Streaming Request zu Ollama via httpx (NO buffering).
-                # A flat 90s timeout here used to apply to EVERY read (the gap
-                # between successive streamed chunks), not just the initial
-                # connect - on CPU-only inference, a long/detailed answer can
-                # legitimately have a quiet stretch (large context processing,
-                # slow token generation under load) exceeding 90s well before
-                # nginx's own 300s proxy_read_timeout on /api/chat/stream would
-                # ever be the limiting factor, so long responses were cut off by
-                # our own client, not by anything downstream. Connect stays
-                # short (Ollama not even accepting a connection should fail
-                # fast); read is raised to just under nginx's ceiling.
-                ollama_timeout = httpx.Timeout(connect=10.0, read=280.0, write=10.0, pool=10.0)
-                async with httpx.AsyncClient(timeout=ollama_timeout) as client:
-                    async with client.stream(
-                        "POST",
-                        "http://localhost:11434/api/chat",
-                        json=payload
-                    ) as response:
-                        response.raise_for_status()
-
-                        # Stream Response Chunks - line by line
-                        async for line in _with_lock_lost_guard(response.aiter_lines(), lock_lost_event):
-                            _check_lock_held()
-                            if line:
-                                try:
-                                    chunk = json.loads(line)
-
-                                    if "message" in chunk:
-                                        # Native tool_calls can arrive on a chunk
-                                        # with done:false (confirmed live) -
-                                        # accumulate across the whole turn, act
-                                        # once done:true arrives below.
-                                        if chunk["message"].get("tool_calls"):
-                                            turn_tool_calls.extend(chunk["message"]["tool_calls"])
-
-                                        # Ollama separates reasoning-model output into
-                                        # its own `message.thinking` field natively
-                                        # (confirmed live: deepseek-r1 chunks arrive
-                                        # as {"content": "", "thinking": "..."} while
-                                        # reasoning, then plain {"content": "..."}
-                                        # once it's done - no <think> tags in content
-                                        # at all here). thinking_splitter below is a
-                                        # fallback for setups where a model inlines
-                                        # the tags in content instead.
-                                        native_thinking = chunk["message"].get("thinking", "")
-                                        if native_thinking:
-                                            full_thinking_text += native_thinking
-                                            yield f"data: {json.dumps({'type': 'thinking', 'text': native_thinking})}\n\n"
-
-                                        content = chunk["message"].get("content", "")
-                                        if content:
-                                            thinking_part, content_part = thinking_splitter.feed(content)
-
-                                            if thinking_part:
-                                                full_thinking_text += thinking_part
-                                                yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
-
-                                            if content_part:
-                                                # <tasks> blocks (see build_task_list_instructions) are
-                                                # stripped out of content_part here and re-emitted as
-                                                # their own 'tasks' event instead - a model-authored plan
-                                                # display, not a verified execution record (see
-                                                # task_splitter.py's module docstring).
-                                                content_part, completed_task_blocks = task_extractor.feed(content_part)
-                                                for raw_block in completed_task_blocks:
-                                                    yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
-
-                                            if content_part:
-                                                # <factcheck> blocks (see build_factcheck_instructions)
-                                                # get the same treatment - stripped out and re-emitted
-                                                # as their own 'factcheck' event.
-                                                content_part, completed_factcheck_blocks = factcheck_extractor.feed(content_part)
-                                                for raw_block in completed_factcheck_blocks:
-                                                    yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
-
-                                            if content_part:
-                                                # <workspace_artifact> blocks (see
-                                                # build_workspace_artifact_instructions) get saved as a
-                                                # Workspace file and re-emitted as a short reference
-                                                # instead of streaming the full content into the chat.
-                                                content_part, completed_artifact_blocks = artifact_extractor.feed(content_part)
-                                                async for sse_line in _handle_workspace_artifact_blocks(completed_artifact_blocks, user_id, session_id):
-                                                    yield sse_line
-
-                                            if content_part:
-                                                turn_content += content_part
-                                                # Updated here, not just once at the end of the
-                                                # iteration (issue #7 item 3): a disconnect/exception
-                                                # mid-stream would otherwise see full_response_text
-                                                # still empty even though several 'content' events
-                                                # (this one included) already reached the browser.
-                                                full_response_text += content_part
-                                                # Mirko Debug Logging
-                                                try:
-                                                    if username and should_log_for_user(username):
-                                                        mlogger.log_sse_chunk("content", content=content_part)
-                                                except:
-                                                    pass  # Logging-Fehler ignorieren
-
-                                                # SSE Format: data: {json}\n\n
-                                                yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
-
-                                    # Check if done
-                                    if chunk.get("done", False):
-                                        # Flush anything the splitter is still holding
-                                        # (e.g. a <think> block that never closed).
-                                        leftover_thinking, leftover_content = thinking_splitter.flush()
-                                        if leftover_thinking:
-                                            full_thinking_text += leftover_thinking
-                                            yield f"data: {json.dumps({'type': 'thinking', 'text': leftover_thinking})}\n\n"
-                                        if leftover_content:
-                                            leftover_content, leftover_task_blocks = task_extractor.feed(leftover_content)
-                                            for raw_block in leftover_task_blocks:
-                                                yield f"data: {json.dumps({'type': 'tasks', 'items': parse_task_items(raw_block)})}\n\n"
-                                            if leftover_content:
-                                                leftover_content, leftover_factcheck_blocks = factcheck_extractor.feed(leftover_content)
-                                                for raw_block in leftover_factcheck_blocks:
-                                                    yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
-                                                if leftover_content:
-                                                    leftover_content, leftover_artifact_blocks = artifact_extractor.feed(leftover_content)
-                                                    async for sse_line in _handle_workspace_artifact_blocks(leftover_artifact_blocks, user_id, session_id):
-                                                        yield sse_line
-                                                if leftover_content:
-                                                    turn_content += leftover_content
-                                                    full_response_text += leftover_content
-                                                    yield f"data: {json.dumps({'type': 'content', 'text': leftover_content})}\n\n"
-                                        # Anything the extractor itself still had buffered (plain
-                                        # trailing content, or an incomplete <tasks>/<factcheck> block
-                                        # - the latter discarded per each extractor's flush() contract).
-                                        #
-                                        # task_extractor's own held-back "safe tail" bytes (its
-                                        # defense against a <tasks> tag split across chunks) can
-                                        # themselves be the START of a <factcheck> tag - e.g. "<fact"
-                                        # held back by task_extractor while "check>...</factcheck>"
-                                        # already went out the door separately. Observed live: without
-                                        # routing final_task_content through factcheck_extractor too,
-                                        # that fragment ("check>") leaked as literal visible text
-                                        # instead of ever being recognized as the tag it was part of.
-                                        final_task_content = task_extractor.flush()
-                                        if final_task_content:
-                                            final_task_content, final_task_factcheck_blocks = factcheck_extractor.feed(final_task_content)
-                                            for raw_block in final_task_factcheck_blocks:
-                                                yield f"data: {json.dumps({'type': 'factcheck', 'items': parse_factcheck_items(raw_block)})}\n\n"
-                                            if final_task_content:
-                                                final_task_content, final_task_artifact_blocks = artifact_extractor.feed(final_task_content)
-                                                async for sse_line in _handle_workspace_artifact_blocks(final_task_artifact_blocks, user_id, session_id):
-                                                    yield sse_line
-                                            if final_task_content:
-                                                turn_content += final_task_content
-                                                full_response_text += final_task_content
-                                                yield f"data: {json.dumps({'type': 'content', 'text': final_task_content})}\n\n"
-                                        final_factcheck_content = factcheck_extractor.flush()
-                                        if final_factcheck_content:
-                                            final_factcheck_content, final_fc_artifact_blocks = artifact_extractor.feed(final_factcheck_content)
-                                            async for sse_line in _handle_workspace_artifact_blocks(final_fc_artifact_blocks, user_id, session_id):
-                                                yield sse_line
-                                        if final_factcheck_content:
-                                            turn_content += final_factcheck_content
-                                            full_response_text += final_factcheck_content
-                                            yield f"data: {json.dumps({'type': 'content', 'text': final_factcheck_content})}\n\n"
-                                        final_artifact_content = artifact_extractor.flush()
-                                        if final_artifact_content:
-                                            turn_content += final_artifact_content
-                                            full_response_text += final_artifact_content
-                                            yield f"data: {json.dumps({'type': 'content', 'text': final_artifact_content})}\n\n"
-                                        break
-
-                                except json.JSONDecodeError:
-                                    continue
-
-            if turn_tool_calls and iteration < MAX_AGENT_ITERATIONS:
-                agent_tool_used = True
-                messages.append({
-                    "role": "assistant",
-                    "content": turn_content,
-                    "tool_calls": turn_tool_calls
-                })
-
-                tool_executor = get_tool_executor()
-                for tc in turn_tool_calls:
-                    _check_lock_held()
-                    fn = tc.get("function", {})
-                    tool_name = fn.get("name", "")
-                    arguments = fn.get("arguments") or {}
-
-                    agent_steps.append({
-                        "id": f"step-{len(agent_steps)}",
-                        "label": _build_agent_step_label(tool_name, arguments),
-                        "status": "running"
-                    })
-                    yield f"data: {json.dumps({'type': 'agent_steps', 'items': agent_steps})}\n\n"
-
-                    tool_call = ToolCall(tool_name=tool_name, parameters=arguments, raw_text="", confidence=1.0)
-                    try:
-                        tool_result = await _race_with_lock_lost(
-                            tool_executor.execute(tool_call, user_id or 0, session_id=session_id),
-                            lock_lost_event
-                        )
-                    except SessionLockLostError:
-                        raise
-                    except Exception as e:
-                        logger.error(f"Agent tool execution failed: {tool_name}: {e}")
-                        tool_result = {"success": False, "error": str(e)}
-
-                    _check_lock_held()
-
-                    agent_steps[-1]["status"] = "done" if tool_result.get("success") else "error"
-                    yield f"data: {json.dumps({'type': 'agent_steps', 'items': agent_steps})}\n\n"
-
-                    # Structured source-card UI (issue #4 phase 2) - the
-                    # model already cites sources in its own prose, but this
-                    # gives a reliable, structured display independent of
-                    # how well it happens to cite in any given answer.
-                    # Replaces wholesale on a later web_search("web") call
-                    # in the same response, same contract as agent_steps.
-                    inner_result = tool_result.get("result") or {}
-                    if tool_result.get("success") and inner_result.get("type") == "web":
-                        web_source_items = [
-                            {
-                                "id": f"source-{i}",
-                                "title": s.get("title", ""),
-                                "url": s.get("url", ""),
-                                "domain": s.get("domain", ""),
-                                "published_at": s.get("published_at"),
-                                "dated": s.get("dated", False)
-                            }
-                            for i, s in enumerate(inner_result.get("sources", []))
-                        ]
-                        yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
-
-                    # Structured proposal card (Workspace Agent-Vorbereitung
-                    # v1) - same pattern as web_sources above: the tool result
-                    # already tells the model what happened, this gives the
-                    # frontend a reliable, structured event to render a "review
-                    # in Workspace" card from, independent of chat prose.
-                    if tool_name == "workspace_propose_change" and tool_result.get("success") and inner_result.get("proposed"):
-                        yield f"data: {json.dumps({'type': 'workspace_proposal', 'proposal_id': inner_result.get('proposal_id'), 'filename': inner_result.get('filename'), 'action': inner_result.get('action'), 'session_id': session_id})}\n\n"
-
-                    # Same structured card as above, package spec standing in
-                    # for `filename` - the frontend's WorkspaceProposalsBlock
-                    # only ever reads {filename, action}, so no separate event
-                    # shape/consumer is needed for this second proposal kind.
-                    if tool_name == "workspace_propose_dependency_change" and tool_result.get("success") and inner_result.get("proposed"):
-                        yield f"data: {json.dumps({'type': 'workspace_proposal', 'proposal_id': inner_result.get('proposal_id'), 'filename': inner_result.get('package'), 'action': inner_result.get('action'), 'session_id': session_id})}\n\n"
-
-                    tool_message = {"role": "tool", "content": json.dumps(tool_result)}
-                    if tc.get("id"):
-                        tool_message["tool_call_id"] = tc["id"]
-                    messages.append(tool_message)
-
-                # full_response_text no longer needs a bulk merge here (issue
-                # #6/#7 item 3): it's now updated incrementally at each
-                # 'content' yield above, in this iteration and every earlier
-                # one, rather than only once at the end of a completed
-                # iteration - which used to mean a mid-stream disconnect saw
-                # it still empty even after several 'content' events had
-                # already reached the browser.
-                continue
-
-            break
-
-        # Mirko Debug Logging
-        try:
-            if username and should_log_for_user(username):
-                mlogger.log_sse_chunk("done", metadata={"mood_updated": True})
-        except:
-            pass  # Logging-Fehler ignorieren
-
-        # Update Mood nach Antwort
-        if user_id is not None:
-            mood_system.update_mood(interaction_type, intensity=0.5)
-
-        # Persist Liara's reply - this used to only
-        # happen client-side (POST /chat/messages/),
-        # which never set user_id and meant this
-        # server-side session_id/message_id (used
-        # for concept extraction and the RESULTED_IN
-        # link below) never matched what the user
-        # actually saw.
-        if user_id is not None and session_id is not None and full_response_text:
-            _check_lock_held()
-            # Marks that the normal path is about to attempt persistence
-            # (issue #7 item 3) - the finally block below only falls back to
-            # its own best-effort persist when this never got set, i.e. when
-            # a disconnect/exception happened before we even got here.
-            persisted_attempted = True
-
-            # 'done' fires immediately, same as before - the UI shouldn't
-            # wait on persistence to know the reply finished streaming.
-            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
-
-            # asyncio.to_thread (not a bare threading.Thread) so this stays
-            # awaitable: a reload/navigation right after 'done' could race
-            # ahead of the DB commit if persistence were truly fire-and-forget
-            # (observed live: a tester reloaded ~immediately after streaming
-            # looked finished and briefly worried the reply hadn't saved).
-            # 'persisted' gives a caller that cares a real signal to wait for.
-            persisted_ok = False
-            try:
-                persisted_ok = await asyncio.to_thread(persist_assistant_turn)
-            except Exception as e:
-                logger.error(f"Assistant message persistence task failed: {e}")
-            yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
-        else:
-            yield f"data: {json.dumps({'type': 'done', 'mood_updated': True})}\n\n"
-
-    except SessionLockLostError as e:
-        logger.error("Turn aborted due to lock lease loss (session=%s): %s", session_id, e)
-        persisted_attempted = True  # Prevent finally from persisting corrupted/orphaned state
-        yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungskoordination wurde während der Anfrage unterbrochen.'})}\n\n"
-
-    except httpx.TimeoutException:
-        error = ChatError(
-            error_type="timeout",
-            message="Ollama antwortet nicht (Timeout nach 280s)",
-            timestamp=datetime.now().isoformat(),
-            recoverable=True,
-            suggestion="Versuche es mit einem schnelleren Modell (z.B. llama3.2:1b)"
-        )
-        yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
-    
-    except httpx.ConnectError:
-        error = ChatError(
-            error_type="connection_error",
-            message="Kann nicht mit Ollama verbinden",
-            timestamp=datetime.now().isoformat(),
-            recoverable=True,
-            suggestion="Prüfe ob Ollama läuft: systemctl status ollama"
-        )
-        yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
-
-    except LinepUnavailableError as e:
-        # Experimental LiNeP transport (LINEP_ENABLED) failed mid-stream -
-        # the pre-iteration health check passed but the runtime broke
-        # during generation. Surfaced like any other transport failure;
-        # session_lock is still released via the finally below either way.
-        logger.error(f"LiNeP transport failed mid-stream: {e}")
-        error = ChatError(
-            error_type="linep_error",
-            message="LiNeP-Transport nicht erreichbar (experimentell)",
-            timestamp=datetime.now().isoformat(),
-            recoverable=True,
-            suggestion="Erneut versuchen - fällt bei Bedarf auf Ollama-HTTP zurück"
-        )
-        yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
-
-    except httpx.HTTPStatusError as e:
-        error = ChatError(
-            error_type="http_error",
-            message=f"Ollama HTTP Error: {e.response.status_code}",
-            timestamp=datetime.now().isoformat(),
-            recoverable=False,
-            suggestion="Model existiert möglicherweise nicht. Prüfe mit: ollama list"
-        )
-        yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
-    
-    except Exception as e:
-        error = ChatError(
-            error_type="unknown_error",
-            message=f"Unbekannter Fehler: {str(e)}",
-            timestamp=datetime.now().isoformat(),
-            recoverable=False,
-            suggestion="Kontaktiere System-Admin"
-        )
-        yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
-
-    finally:
-        # issue #7 item 3: the normal path above only persists the
-        # assistant's reply after the whole agent loop finishes. A
-        # disconnect or exception at any point before that (timeout,
-        # Ollama connection error, client navigating away mid-stream) used
-        # to silently drop whatever had already been streamed to and shown
-        # in the user's browser - persisted_attempted stays False in every
-        # one of those cases, so this is a last-chance best-effort save of
-        # that partial reply (done while still holding the lock, UNLESS lock ownership was lost).
-        if not lock_lost_event.is_set() and not persisted_attempted and full_response_text and user_id is not None and session_id is not None:
-            try:
-                await asyncio.to_thread(persist_assistant_turn, True)
-            except Exception as e:
-                logger.error(f"Interrupted-turn persistence failed: {e}")
-
-        # Stop the lock renewal watchdog task
-        if lock_watchdog_task is not None:
-            lock_watchdog_task.cancel()
-            try:
-                await asyncio.gather(lock_watchdog_task, return_exceptions=True)
-            except Exception:
-                pass
-
-        # Explicitly release the session lock in Redis only if we didn't lose ownership
-        if not lock_lost_event.is_set():
-            _release_session_lock(session_lock)
-
-
 @router.post("/stream")
 async def stream_chat(
     request: StreamChatRequest,
     current_user: User = Depends(require_active_user),
     db: Session = Depends(get_db)
 ):
-    """
-    🌊 Streaming Chat mit Server-Sent Events + 4D Memory + Web Search Integration.
-    
-    Returns:
-        StreamingResponse mit SSE
-        
-    Event Types:
-        - metadata: Model + Mood Info
-        - web_search: Web search triggered
-        - content: Text-Chunks
-        - done: Response komplett
-        - error: Fehler aufgetreten
-    """
-    # Mirko Debug Logging
+    """🌊 Streaming Chat mit Server-Sent Events + 4D Memory + Tool Integration."""
     if should_log_for_user(current_user.username):
         mlogger.log_request_start(
             user_id=current_user.id,
@@ -1681,17 +109,11 @@ async def stream_chat(
             message=request.message,
             session_id=request.session_id
         )
-    
-    # Per-User Preferences: Personality, Individuelle Anweisungen, Memory-Opt-in
+
     user_prefs = get_user_preferences(db, current_user.id)
 
-    # Tag the previous turn's outcome (capture-only, no automatic behavior
-    # change yet) using this new message's sentiment as a rough "how did
-    # that response land" proxy - only meaningful when continuing an
-    # existing conversation, and only when memory is enabled.
     if request.session_id and user_prefs['memory_enabled']:
         try:
-            from liara_engine.nlp.sentiment_analyzer import get_sentiment_analyzer
             neo4j_outcome = get_neo4j_service()
             last_assistant_id = neo4j_outcome.get_last_assistant_message_id(current_user.id, request.session_id)
             if last_assistant_id:
@@ -1703,187 +125,85 @@ async def stream_chat(
         except Exception as e:
             logger.warning(f"Outcome tagging failed: {e}")
 
-    # Store user message in 4D Memory BEFORE streaming response
-    session_id = f"chat_{current_user.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    mood_system = MoodSystem(current_user.id)
-    mood_snapshot = mood_system.get_snapshot()
-    current_mood = mood_snapshot["mood"]
-    energy = mood_snapshot["intensity"]
-    
-    # OPTIMIZATION: Run intent detection in parallel (non-blocking)
     message_lower = request.message.lower()
-    
-    # Fast keyword-based pre-check for web search (skip embedding if not needed)
     search_keywords = ['wetter', 'weather', 'temperatur', 'news', 'nachrichten', 'wikipedia', 'was ist', 'google', 'suche']
     needs_web_search = any(kw in message_lower for kw in search_keywords)
-    
-    # Fast keyword-based pre-check for actions
+
     action_keywords = ['erstell', 'create', 'neue task', 'neue notiz', 'neuer termin']
-    # "Zeig mir meine Aufgaben" etc. never triggered execute_list_* here at
-    # all - only chat.py's non-streaming fallback wired these up, so the
-    # default (streaming) path always fell through to the LLM, which could
-    # only mention items it happened to have in semantic memory context
-    # rather than reliably listing everything.
     list_keywords = ['zeig mir meine', 'zeig meine', 'liste meine', 'welche aufgaben', 'welche termine',
-                      'welche notizen', 'meine aufgaben', 'meine tasks', 'meine termine', 'meine notizen']
+                     'welche notizen', 'meine aufgaben', 'meine tasks', 'meine termine', 'meine notizen']
     needs_action_check = any(kw in message_lower for kw in action_keywords) or any(kw in message_lower for kw in list_keywords)
 
-    # Only run expensive intent detection if keywords match
     search_intent = None
     action_intent = None
     action_result = None
 
     if needs_web_search:
-        embedding_service = get_embedding_service()
-        search_intent = embedding_service.detect_intent(request.message)
+        search_intent = get_embedding_service().detect_intent(request.message)
 
     if needs_action_check:
         intent_detector = get_intent_detector()
         action_intent = intent_detector.detect(request.message)
 
-    # Execute action if detected
-    if action_intent and action_intent.startswith('create_'):
+    if action_intent:
         executor = ActionExecutor(db)
+        if action_intent.startswith('create_'):
+            intent_detector = get_intent_detector()
+            if action_intent == 'create_event':
+                details = intent_detector.extract_event_details(request.message)
+                details['user_id'] = current_user.id
+                action_result = await executor.execute_create_event(details)
+            elif action_intent == 'create_task':
+                details = intent_detector.extract_task_details(request.message)
+                details['user_id'] = current_user.id
+                action_result = await executor.execute_create_task(details)
+            elif action_intent == 'create_note':
+                details = intent_detector.extract_note_details(request.message)
+                details['user_id'] = current_user.id
+                action_result = await executor.execute_create_note(details)
+        elif action_intent.startswith('list_'):
+            if action_intent == 'list_tasks':
+                action_result = await executor.execute_list_tasks(current_user.id)
+            elif action_intent == 'list_events':
+                action_result = await executor.execute_list_events(current_user.id)
+            elif action_intent == 'list_notes':
+                action_result = await executor.execute_list_notes(current_user.id)
 
-        if action_intent == 'create_event':
-            details = intent_detector.extract_event_details(request.message)
-            details['user_id'] = current_user.id
-            action_result = await executor.execute_create_event(details)
-        elif action_intent == 'create_task':
-            details = intent_detector.extract_task_details(request.message)
-            details['user_id'] = current_user.id
-            action_result = await executor.execute_create_task(details)
-        elif action_intent == 'create_note':
-            details = intent_detector.extract_note_details(request.message)
-            details['user_id'] = current_user.id
-            action_result = await executor.execute_create_note(details)
-    elif action_intent and action_intent.startswith('list_'):
-        executor = ActionExecutor(db)
-
-        if action_intent == 'list_tasks':
-            action_result = await executor.execute_list_tasks(current_user.id)
-        elif action_intent == 'list_events':
-            action_result = await executor.execute_list_events(current_user.id)
-        elif action_intent == 'list_notes':
-            action_result = await executor.execute_list_notes(current_user.id)
-    
-    # Build enhanced context
     enhanced_context = request.context or ""
-    
-    # 1. Add Location Context (if consent given)
     location_context = get_location_context(db, current_user.id)
     if location_context:
         enhanced_context += location_context
 
-    # 1b. Session Workspace manifest (files the "Run" button has generated in
-    # this session) - a directory on disk isn't "visible to the LLM" by
-    # itself, this is what actually surfaces it.
-    if request.session_id:
-        try:
-            workspace_manifest = build_workspace_manifest(current_user.id, request.session_id)
-            if workspace_manifest:
-                enhanced_context += f"\n\n{workspace_manifest}"
-        except Exception as e:
-            logger.warning(f"Workspace manifest lookup failed: {e}")
-
-        # 1c. Files the user explicitly marked "add to chat context" in the
-        # Workspace tab - inlines actual content (not just name/size like the
-        # manifest above), same size/text-type cap read_session_file already
-        # enforces. Opt-in per file, never the whole workspace automatically.
-        try:
-            selected_files = get_context_selected_files(current_user.id, request.session_id)
-            for filename in selected_files:
-                file_data = read_session_file(current_user.id, request.session_id, filename)
-                if file_data.get("found") and file_data.get("content"):
-                    enhanced_context += (
-                        f"\n\n--- Workspace-Datei (vom Nutzer als Kontext markiert): {filename} ---\n"
-                        f"{file_data['content']}"
-                    )
-        except Exception as e:
-            logger.warning(f"Workspace context-selection lookup failed: {e}")
-
-    # ✨ 2. NEU: Add Semantic Context from Neo4j (Top-5 similar concepts)
-    # Gated by memory_enabled too, not just memory *creation* below - if a
-    # user turns "Erinnerung" off, retrieving old memories into context
-    # would still be using memory, just not adding to it.
     relevant_concepts = None
     if user_prefs['memory_enabled']:
         try:
-            relevant_concepts = get_relevant_context(
-                user_id=current_user.id,
-                query_text=request.message,
-                limit=5
-            )
-
+            relevant_concepts = get_relevant_context(user_id=current_user.id, query_text=request.message, limit=5)
             if relevant_concepts:
                 enhanced_context += "\n\n### Relevante Erinnerungen (basierend auf früheren Gesprächen):\n"
-                for concept_item in relevant_concepts:
-                    concept = concept_item['concept']
-                    similarity = concept_item['similarity']
-                    mentions = concept_item['mentions']
-                    messages = concept_item['related_messages']
-
-                    enhanced_context += f"\n**Konzept: {concept}** (Similarity: {similarity:.2f}, erwähnt: {mentions}x)\n"
-                    for msg in messages[:2]:  # Max 2 Messages pro Concept
+                for item in relevant_concepts:
+                    enhanced_context += f"\n**Konzept: {item['concept']}** (Similarity: {item['similarity']:.2f})\n"
+                    for msg in item['related_messages'][:2]:
                         enhanced_context += f"  - {msg['role']}: {msg['content'][:100]}...\n"
-
-                logger.info(f"Added {len(relevant_concepts)} relevant concepts to context")
         except Exception as e:
             logger.warning(f"Semantic context retrieval failed: {e}")
-            # Continue without semantic context
-    
-    # 3. Check for Web Search Intent
+
     web_search_result = None
     web_search_data = None
     web_search_type = None
     web_search_risk_score = None
-    
-    if search_intent in ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']:
+
+    if search_intent in SEARCH_INTENTS:
         web_search_result, web_search_data, web_search_type, web_search_risk_score = await perform_web_search(
-            request.message,
-            search_intent,
-            user_id=current_user.id,
-            db=db
+            request.message, search_intent, user_id=current_user.id, db=db
         )
-        
-        # Check if location is missing for weather request
         if web_search_data and web_search_data.get('error') == 'no_location':
             enhanced_context += "\n\n### HINWEIS: Kein Standort verfügbar für Wetterabfrage. Bitte den User nach seinem Standort fragen."
         elif web_search_result:
             enhanced_context += f"\n\n### Aktuelle Web-Information:\n{web_search_result}"
-            
-            # Store search in history if user has consent
-            try:
-                privacy_check = db.execute(
-                    text("SELECT store_search_history FROM user_privacy_settings WHERE user_id = :user_id"),
-                    {'user_id': current_user.id}
-                ).first()
-                
-                if privacy_check and privacy_check.store_search_history:
-                    # Store search with consent
-                    result_summary = web_search_result[:500] if len(web_search_result) > 500 else web_search_result
-                    db.execute(text("""
-                        INSERT INTO user_search_history 
-                            (user_id, query, search_type, result_summary, stored_with_consent, can_be_used_for_training, searched_at)
-                        VALUES 
-                            (:user_id, :query, :search_type, :result_summary, true, false, CURRENT_TIMESTAMP)
-                    """), {
-                        'user_id': current_user.id,
-                        'query': request.message,
-                        'search_type': web_search_type,
-                        'result_summary': result_summary
-                    })
-                    db.commit()
-                    logger.info(f"Search history stored for user {current_user.id}")
-            except Exception as e:
-                logger.error(f"Failed to store search history: {e}")
-                # Continue even if storage fails
-    
+
     used_tools = bool(web_search_result) or bool(action_result)
 
-    # Get or create session_id
     if not request.session_id:
-        # Create new session with title from first message
         title = request.message[:50] + "..." if len(request.message) > 50 else request.message
         session_result = db.execute(text("""
             INSERT INTO chat_sessions (user_id, title, created_at, updated_at)
@@ -1893,20 +213,13 @@ async def stream_chat(
         db.commit()
         session_id = session_result.scalar()
     else:
-        # Verify session belongs to user
         session_check = db.execute(text("""
-            SELECT id FROM chat_sessions 
-            WHERE id = :session_id AND user_id = :user_id
+            SELECT id FROM chat_sessions WHERE id = :session_id AND user_id = :user_id
         """), {'session_id': request.session_id, 'user_id': current_user.id}).first()
-        
         if not session_check:
             raise HTTPException(status_code=404, detail="Session not found or access denied")
-
         session_id = request.session_id
 
-    # issue #18 + #13: Return StreamingResponse immediately so keepalive comments prevent
-    # 524 timeouts, while conversation history reading and user turn persistence happen
-    # strictly under the session lock inside stream_ollama_response.
     return StreamingResponse(
         _with_sse_keepalive(stream_ollama_response(
             message=request.message,
@@ -1934,109 +247,25 @@ async def stream_chat(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
+            "X-Accel-Buffering": "no"
         }
     )
 
 
-@router.get("/stream/test")
-async def test_stream():
-    """Test SSE Streaming."""
-    async def test_generator():
-        for i in range(5):
-            yield f"data: {json.dumps({'count': i, 'message': f'Test {i}'})}\n\n"
-            await asyncio.sleep(0.5)
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-    
-    return StreamingResponse(
-        test_generator(),
-        media_type="text/event-stream"
-    )
-
-
-@router.get("/health")
-async def chat_health():
-    """
-    Health-Check für Chat-System.
-    
-    Returns:
-        Status von Ollama + Models + Mood-System + Memory
-    """
-    # Check Ollama
-    ollama_available = False
-    model_count = 0
-    
+async def stream_guest_response(query: str, model: str = "llama3.2:1b") -> AsyncGenerator[str, None]:
+    """Streaming Response für Guest-Modus."""
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=2)
-        if response.status_code == 200:
-            ollama_available = True
-            model_count = len(response.json().get("models", []))
-    except:
-        pass
-    
-    # Check Mood System (system-wide count only - mood itself is per-user now)
-    from core.database import SessionLocal
-    from api.models.mood_state import MoodHistoryEntry
-    db = SessionLocal()
-    try:
-        mood_history_total = db.query(MoodHistoryEntry).count()
-    finally:
-        db.close()
-
-    return {
-        "status": "healthy" if ollama_available else "degraded",
-        "timestamp": datetime.now().isoformat(),
-        "components": {
-            "ollama": {
-                "available": ollama_available,
-                "models_loaded": model_count
-            },
-            "mood_system": {
-                "available": True,
-                "scope": "per_user",
-                "history_entries_total": mood_history_total
-            }
-        },
-        "capabilities": {
-            "streaming": True,
-            "error_recovery": True,
-            "mood_detection": True
-        }
-    }
-
-
-# ============================================
-# GUEST STREAMING ENDPOINT
-# ============================================
-
-class GuestStreamRequest(BaseModel):
-    message: str
-
-async def stream_guest_response(
-    query: str,
-    model: str = "llama3.2:1b"
-) -> AsyncGenerator[str, None]:
-    """
-    Streaming Response für Guest-Modus.
-    Unterstützt Web-Search für einfache Anfragen.
-    """
-    try:
-        # Detect intent for web search
         embedding_service = get_embedding_service()
         intent = embedding_service.detect_intent(query)
-        
-        # Web search if needed
         web_search_result = None
         web_search_data = None
         web_search_type = None
-        
+
         if intent in SEARCH_INTENTS:
             yield f"data: {json.dumps({'type': 'web_search', 'intent': intent})}\n\n"
             web_search_result, web_search_data, web_search_type, _ = await perform_web_search(query, intent)
 
             if web_search_type == 'web' and web_search_data:
-                # SearXNG result - same structured source-card shape as the
-                # authenticated chat path above, see stream_ollama_response.
                 web_source_items = [
                     {
                         "id": f"source-{i}",
@@ -2051,34 +280,28 @@ async def stream_guest_response(
                 yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
             elif web_search_data:
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type})}\n\n"
-        
-        # Einfacher System-Prompt für Gäste
+
         guest_prompt = """Du bist Liara, eine freundliche Digitalbegleiterin.
-        
 Du sprichst mit einem Gast. Sei hilfsbereit und kurz (max 150 Wörter).
 Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registrierte Nutzer verfügbar sind."""
 
-        # Build context
         context = guest_prompt
         if web_search_result:
             context += f"\n\nAktuelle Information:\n{web_search_result}"
-        
-        # Stream Ollama response
-        ollama_url = "http://localhost:11434/api/generate"
+
         payload = {
             "model": model,
             "prompt": f"{context}\n\nUser: {query}\nLiara:",
             "stream": True,
             "options": {
                 "temperature": 0.7,
-                "num_predict": 300,  # Kürzere Antworten für Gäste
-                "repeat_penalty": 1.1  # see stream_ollama_response's payload for why
+                "num_predict": 300,
+                "repeat_penalty": 1.1
             }
         }
-        
-        response = requests.post(ollama_url, json=payload, stream=True, timeout=60)
-        response.raise_for_status()
 
+        response = requests.post("http://localhost:11434/api/generate", json=payload, stream=True, timeout=60)
+        response.raise_for_status()
         guest_thinking_splitter = ThinkingSplitter()
 
         for line in response.iter_lines():
@@ -2105,10 +328,9 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
                             yield f"data: {json.dumps({'type': 'thinking', 'text': thinking_part})}\n\n"
                         if content_part:
                             yield f"data: {json.dumps({'type': 'content', 'text': content_part})}\n\n"
-
                 except json.JSONDecodeError:
                     continue
-                    
+
     except requests.Timeout:
         yield f"data: {json.dumps({'type': 'error', 'error': 'Timeout - Anfrage dauerte zu lange'})}\n\n"
     except Exception as e:
@@ -2117,30 +339,13 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
 
 @router.post("/guest/stream")
 async def guest_stream_chat(request: GuestStreamRequest):
-    """
-    🌙 Guest-Chat mit SSE Streaming.
-    
-    Schnellere Antworten durch:
-    - Kleines Modell (1b)
-    - Kürzere Antworten (max 300 tokens)
-    - Web-Search Support für Wetter, Wikipedia, etc.
-    
-    Limitierungen:
-    - Max 500 Zeichen Input
-    - Kein Memory über Session hinaus
-    - Vereinfachter System-Prompt
-    """
+    """🌙 Guest-Chat mit SSE Streaming."""
     message = request.message.strip()
-    
     if not message:
         raise HTTPException(status_code=400, detail="Nachricht darf nicht leer sein")
-    
     if len(message) > 500:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Nachricht zu lang. Maximum: 500 Zeichen. Du hast {len(message)} Zeichen."
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Nachricht zu lang. Maximum: 500 Zeichen.")
+
     return StreamingResponse(
         _with_sse_keepalive(stream_guest_response(message)),
         media_type="text/event-stream",
@@ -2152,3 +357,43 @@ async def guest_stream_chat(request: GuestStreamRequest):
     )
 
 
+@router.get("/stream/test")
+async def test_stream():
+    """Test SSE Streaming."""
+    import asyncio
+    async def test_generator():
+        for i in range(5):
+            yield f"data: {json.dumps({'count': i, 'message': f'Test {i}'})}\n\n"
+            await asyncio.sleep(0.5)
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(test_generator(), media_type="text/event-stream")
+
+
+@router.get("/health")
+async def chat_health():
+    """Health-Check für Chat-System."""
+    try:
+        import requests
+        resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+        ollama_available = resp.status_code == 200
+        model_count = len(resp.json().get('models', [])) if ollama_available else 0
+    except Exception:
+        ollama_available = False
+        model_count = 0
+
+    db = SessionLocal()
+    try:
+        mood_history_total = db.query(MoodHistoryEntry).count()
+    finally:
+        db.close()
+
+    return {
+        "status": "healthy" if ollama_available else "degraded",
+        "timestamp": datetime.now().isoformat(),
+        "components": {
+            "ollama": {"available": ollama_available, "models_loaded": model_count},
+            "mood_system": {"available": True, "scope": "per_user", "history_entries_total": mood_history_total}
+        },
+        "capabilities": {"streaming": True, "error_recovery": True, "mood_detection": True}
+    }
