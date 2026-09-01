@@ -290,7 +290,10 @@ def run_code(
     os.chmod(workspace_dir, 0o777)
     # Same reasoning for .venv (issue #5) - see ensure_session_venv_dir's
     # docstring for why this can't just be liara-runner creating it itself.
-    ensure_session_venv_dir(session_dir)
+    py_ver = None
+    if normalized.startswith("python3."):
+        py_ver = normalized.replace("python", "")
+    ensure_session_venv_dir(session_dir, py_ver=py_ver)
     # metadata/ (issue #6) - pre-created here too so a brand-new session's
     # very first run already has it at the right (0o700, backend-only)
     # permissions, same as workspace_dir/.venv above. Not strictly required

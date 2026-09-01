@@ -97,30 +97,25 @@ def _metadata_dir(user_id: int, session_id: int) -> Path:
     return _session_dir(user_id, session_id) / "metadata"
 
 
-def ensure_session_venv_dir(session_dir: Path) -> Path:
+def ensure_session_venv_dir(session_dir: Path, py_ver: Optional[str] = None) -> Path:
     """
-    Pre-creates (if missing) and world-writes SESSION_DIR/.venv, mirroring
-    exactly why workspace_dir itself gets chmod 0o777 elsewhere: session_dir
-    is only 0o755 (owner rwx, everyone else r-x/traverse-only), so the
-    unprivileged liara-runner OS user - who actually populates .venv via
-    `python -m venv` in run_sandboxed.sh/manage_venv.sh - has no permission
-    to CREATE a new entry directly under session_dir on its own. Creating the
-    (empty) directory here as the backend's own user, which does own
-    session_dir, sidesteps that entirely: liara-runner only ever needs to
-    WRITE INTO an already-existing, already-world-writable directory, the
-    same shape as the workspace_dir/run_dir pattern already in
-    code_sandbox.py. Called from both code_sandbox.run_code() (before a
-    script might trigger venv creation) and session_environment.py's
-    manage_venv.sh caller (before an install/remove/list, which may be the
-    very first thing that ever touches this session). Takes session_dir
-    directly (not user_id/session_id) since both callers already have it.
+    Pre-creates (if missing) and world-writes SESSION_DIR/.venv (and .venv_<py_ver>),
+    mirroring why workspace_dir itself gets chmod 0o777 elsewhere.
     """
-    venv_dir = session_dir / ".venv"
+    venv_name = f".venv_{py_ver}" if py_ver else ".venv"
+    venv_dir = session_dir / venv_name
     venv_dir.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(venv_dir, 0o777)
     except OSError:
         pass
+    if py_ver:
+        default_venv = session_dir / ".venv"
+        default_venv.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(default_venv, 0o777)
+        except OSError:
+            pass
     return venv_dir
 
 
