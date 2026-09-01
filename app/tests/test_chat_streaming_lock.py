@@ -11,9 +11,12 @@ for mod in ("sentence_transformers", "neo4j"):
 from api.routers.chat_streaming import (
     _with_sse_keepalive,
     _acquire_session_lock,
+    _renew_session_lock,
+    _session_lock_watchdog,
     _release_session_lock,
     stream_ollama_response,
     SESSION_GENERATION_LOCK_TTL,
+    SESSION_GENERATION_LOCK_RENEW_INTERVAL,
     SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
     SessionLockTimeoutError,
     SessionLockUnavailableError,
@@ -22,9 +25,10 @@ from api.routers.chat_streaming import (
 class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
 
     def test_lock_constants(self):
-        """Verify that acquire timeout matches lock TTL so long turns can wait without 15s cutoff."""
+        """Verify that lease TTL is short for fast crash-recovery, while acquire timeout allows long turns."""
+        self.assertLessEqual(SESSION_GENERATION_LOCK_TTL, 120)  # Crash-recovery TTL <= 120s
+        self.assertLess(SESSION_GENERATION_LOCK_RENEW_INTERVAL, SESSION_GENERATION_LOCK_TTL)
         self.assertGreaterEqual(SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT, 600)
-        self.assertEqual(SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT, SESSION_GENERATION_LOCK_TTL)
 
     async def test_with_sse_keepalive_emits_pulse(self):
         """Verify that _with_sse_keepalive emits ': keep-alive\n\n' during pauses."""
@@ -58,6 +62,138 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         failing_lock = MagicMock()
         failing_lock.release.side_effect = Exception("Lock error")
         _release_session_lock(failing_lock)
+
+    def test_renew_session_lock(self):
+        """Verify _renew_session_lock reacquires or extends lock lease."""
+        mock_lock = MagicMock()
+        mock_lock.reacquire.return_value = True
+        self.assertTrue(_renew_session_lock(mock_lock))
+        mock_lock.reacquire.assert_called_once()
+
+        # None lock returns False safely
+        self.assertFalse(_renew_session_lock(None))
+
+        # Failing reacquire returns False without raising
+        failing_lock = MagicMock()
+        failing_lock.reacquire.side_effect = Exception("Redis error")
+        self.assertFalse(_renew_session_lock(failing_lock))
+
+    async def test_session_lock_watchdog_renews_and_stops(self):
+        """Verify watchdog task renews lease periodically and exits cleanly upon cancellation."""
+        renew_count = 0
+        mock_lock = MagicMock()
+        def mock_reacquire():
+            nonlocal renew_count
+            renew_count += 1
+            return True
+        mock_lock.reacquire.side_effect = mock_reacquire
+
+        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, interval=0.02))
+        await asyncio.sleep(0.065)
+        watchdog_task.cancel()
+        await asyncio.gather(watchdog_task, return_exceptions=True)
+
+        self.assertGreaterEqual(renew_count, 2)
+
+    async def test_lease_renewal_protects_turn_longer_than_ttl(self):
+        """
+        Verify that an active turn running longer than initial TTL is protected by
+        watchdog lease renewal, preventing a concurrent turn from acquiring the lock mid-turn.
+        """
+        active_owner = None
+        ttl_expiry_time = 0.0
+
+        import time
+
+        class TimeAwareMockLock:
+            def __init__(self, owner_id):
+                self.owner_id = owner_id
+
+            def acquire(self, blocking=True):
+                nonlocal active_owner, ttl_expiry_time
+                now = time.monotonic()
+                if active_owner is not None and now < ttl_expiry_time:
+                    if active_owner != self.owner_id:
+                        return False
+                active_owner = self.owner_id
+                ttl_expiry_time = now + 0.08  # 80ms initial TTL
+                return True
+
+            def reacquire(self):
+                nonlocal active_owner, ttl_expiry_time
+                now = time.monotonic()
+                if active_owner == self.owner_id:
+                    ttl_expiry_time = now + 0.08  # Reset TTL by 80ms
+                    return True
+                return False
+
+            def release(self):
+                nonlocal active_owner, ttl_expiry_time
+                if active_owner == self.owner_id:
+                    active_owner = None
+                    ttl_expiry_time = 0.0
+
+        lock_a = TimeAwareMockLock("worker_A")
+        lock_b = TimeAwareMockLock("worker_B")
+
+        # Worker A acquires lock (initial TTL = 80ms)
+        self.assertTrue(lock_a.acquire())
+        # Start watchdog renewing every 30ms
+        watchdog_a = asyncio.create_task(_session_lock_watchdog(lock_a, interval=0.03))
+
+        # Worker A runs for 180ms (> 2x initial TTL of 80ms)
+        await asyncio.sleep(0.18)
+
+        # Worker B tries to acquire lock while Worker A is still running
+        # Because watchdog kept renewing, Worker B CANNOT acquire lock
+        self.assertFalse(lock_b.acquire())
+
+        # Worker A finishes, cancels watchdog, and releases lock
+        watchdog_a.cancel()
+        await asyncio.gather(watchdog_a, return_exceptions=True)
+        lock_a.release()
+
+        # Now Worker B can immediately acquire lock
+        self.assertTrue(lock_b.acquire())
+        lock_b.release()
+
+    async def test_dead_worker_allows_subsequent_acquire_after_ttl(self):
+        """
+        Verify Crash Recovery: if a worker dies without releasing the lock (and without renewing),
+        the lock expires after TTL and a subsequent request can take over.
+        """
+        import time
+        active_owner = None
+        ttl_expiry_time = 0.0
+
+        class TimeAwareMockLock:
+            def __init__(self, owner_id):
+                self.owner_id = owner_id
+
+            def acquire(self, blocking=True):
+                nonlocal active_owner, ttl_expiry_time
+                now = time.monotonic()
+                if active_owner is not None and now < ttl_expiry_time:
+                    if active_owner != self.owner_id:
+                        return False
+                active_owner = self.owner_id
+                ttl_expiry_time = now + 0.05  # 50ms TTL
+                return True
+
+        lock_a = TimeAwareMockLock("dead_worker_A")
+        lock_b = TimeAwareMockLock("worker_B")
+
+        # Worker A acquires lock with 50ms TTL, then 'crashes' (no watchdog, no release)
+        self.assertTrue(lock_a.acquire())
+
+        # Immediately, Worker B cannot acquire
+        self.assertFalse(lock_b.acquire())
+
+        # Wait 70ms (> 50ms TTL)
+        await asyncio.sleep(0.07)
+
+        # Worker B can now acquire because Worker A's un-renewed lock expired
+        self.assertTrue(lock_b.acquire())
 
     async def test_concurrent_turn_history_serialized_under_lock(self):
         """

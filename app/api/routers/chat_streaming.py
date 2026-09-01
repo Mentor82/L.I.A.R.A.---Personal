@@ -66,17 +66,14 @@ SEARCH_INTENTS = ['SEARCH_WEATHER', 'SEARCH_WIKI', 'SEARCH_NEWS', 'SEARCH_WEB']
 # request to the model - see the comment at its usage for why this exists.
 HISTORY_TURNS_LIMIT = 20
 
-# issue #13 item 2: generously above the worst-case generation time (280s
-# Ollama read timeout * up to MAX_AGENT_ITERATIONS+1 rounds - see the agent
-# loop below), so a crashed/never-released lock can't wedge a session shut
-# indefinitely, while a legitimately slow turn never gets its lock yanked
-# out from under it mid-generation.
-SESSION_GENERATION_LOCK_TTL = 1200  # seconds
-
-# issue #18 + #13: Because StreamingResponse is opened immediately and _with_sse_keepalive
-# sends keep-alive pulses every 10s while waiting, a new turn can wait for a previous long-running
-# turn (tools, web search, reasoning models) for up to SESSION_GENERATION_LOCK_TTL without 524 timeouts.
-SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 1200  # seconds
+# issue #13 + #18 + #25: Lease-Renewal Lock Pattern:
+# Initial TTL is deliberately short (60s) for rapid crash-recovery (if a worker dies,
+# the lock expires in 60s instead of blocking for 20m).
+# While the turn is alive and actively running, a background watchdog renews the lease every 15s.
+# A contending turn can safely wait up to 1200s (20m) while keepalives flow continuously.
+SESSION_GENERATION_LOCK_TTL = 60  # seconds (short lease for quick crash recovery)
+SESSION_GENERATION_LOCK_RENEW_INTERVAL = 15.0  # seconds (heartbeat frequency: TTL / 4)
+SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 1200  # seconds (max total wait time for contending turns)
 
 
 class SessionLockError(Exception):
@@ -125,6 +122,42 @@ def _acquire_session_lock(session_id: int):
     except Exception as e:
         logger.warning(f"Session generation lock error for session {session_id}: {e}")
         raise SessionLockUnavailableError(f"Redis lock error: {e}") from e
+
+
+def _renew_session_lock(lock) -> bool:
+    """
+    Renews/extends the lease on an active Redis session lock.
+    Returns True if the lock was renewed, False if ownership was lost or error occurred.
+    """
+    if lock is None:
+        return False
+    try:
+        if hasattr(lock, "reacquire"):
+            return bool(lock.reacquire())
+        elif hasattr(lock, "extend"):
+            return bool(lock.extend(SESSION_GENERATION_LOCK_TTL, replace_ttl=True))
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to renew session generation lock: {e}")
+        return False
+
+
+async def _session_lock_watchdog(lock, interval: float = SESSION_GENERATION_LOCK_RENEW_INTERVAL):
+    """
+    Background heartbeat task that periodically renews the session lock lease
+    while generation/tools are active. Stops automatically when cancelled.
+    """
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            renewed = await asyncio.to_thread(_renew_session_lock, lock)
+            if not renewed:
+                logger.warning("Session lock lease renewal failed - lock ownership may have been lost")
+                break
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.warning(f"Session lock watchdog error: {e}")
 
 
 def _release_session_lock(lock) -> None:
@@ -486,9 +519,10 @@ async def stream_ollama_response(
     Yields:
         Server-Sent Event formatted strings
     """
-    # issue #18 + #13: Acquire session lock inside the stream generator so the HTTP
+    # issue #18 + #13 + #25: Acquire session lock inside the stream generator so the HTTP
     # StreamingResponse is returned immediately to prevent reverse-proxy 524 timeouts.
     # Strict fail-closed: never proceed lockless to preserve same-session turn serialization.
+    lock_watchdog_task = None
     if session_lock is None and session_id is not None:
         try:
             session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
@@ -504,6 +538,10 @@ async def stream_ollama_response(
             logger.error("Unexpected error acquiring session lock for session %s: %s", session_id, ex)
             yield f"data: {json.dumps({'type': 'error', 'error': 'Sitzungsfehler aufgetreten. Bitte versuche es erneut.'})}\n\n"
             return
+
+    # Start background heartbeat watchdog to keep extending lock lease for long-running turns
+    if session_lock is not None:
+        lock_watchdog_task = asyncio.create_task(_session_lock_watchdog(session_lock))
 
     # Mood-Detection und System-Prompt (per-user, DB-backed)
     mood_system = MoodSystem(user_id)
@@ -1477,12 +1515,6 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         yield f"data: {json.dumps({'type': 'error', 'error': error.dict()})}\n\n"
 
     finally:
-        # issue #13 item 2 - covers every exit from the try above: the
-        # action-shortcut early return, the normal completion path, and all
-        # four except branches, including a client disconnecting mid-stream
-        # (Starlette closes the generator, which runs this finally too).
-        _release_session_lock(session_lock)
-
         # issue #7 item 3: the normal path above only persists the
         # assistant's reply after the whole agent loop finishes. A
         # disconnect or exception at any point before that (timeout,
@@ -1490,13 +1522,23 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # to silently drop whatever had already been streamed to and shown
         # in the user's browser - persisted_attempted stays False in every
         # one of those cases, so this is a last-chance best-effort save of
-        # that partial reply, distinguishable from a normal turn via the
-        # "(interrupted)" model suffix persist_assistant_turn() adds.
+        # that partial reply (done while still holding the lock).
         if not persisted_attempted and full_response_text and user_id is not None and session_id is not None:
             try:
                 await asyncio.to_thread(persist_assistant_turn, True)
             except Exception as e:
                 logger.error(f"Interrupted-turn persistence failed: {e}")
+
+        # Stop the lock renewal watchdog task
+        if lock_watchdog_task is not None:
+            lock_watchdog_task.cancel()
+            try:
+                await asyncio.gather(lock_watchdog_task, return_exceptions=True)
+            except Exception:
+                pass
+
+        # Explicitly release the session lock in Redis
+        _release_session_lock(session_lock)
 
 
 @router.post("/stream")
