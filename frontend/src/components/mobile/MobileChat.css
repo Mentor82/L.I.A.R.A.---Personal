@@ -729,3 +729,16 @@
   border: 1px solid rgba(0, 229, 255, 0.3);
   object-fit: cover;
 }
+
+/* Shown when no DB chat session could be created - the backend creates the
+   session with the first message and the UI adopts its id from SSE metadata. */
+.mobile-session-warning {
+  margin: 0.5rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--color-text-muted, #94a3b8);
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+}
