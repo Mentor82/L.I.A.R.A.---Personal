@@ -1,0 +1,24 @@
+[Unit]
+Description=Liara Backend (Gunicorn + Uvicorn Workers)
+Requires=liara-backend.socket
+After=network.target postgresql.service docker.service liara-backend.socket
+Wants=postgresql.service docker.service
+
+[Service]
+Type=simple
+User=mirko
+Group=mirko
+SupplementaryGroups=www-data
+WorkingDirectory=/opt/liara/app
+RuntimeDirectory=liara
+RuntimeDirectoryMode=0775
+Environment="PATH=/opt/liara/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/opt/liara/venv/bin/gunicorn main:app --workers 6 --worker-class uvicorn.workers.UvicornWorker --bind unix:/run/liara/liara-backend.sock --bind 127.0.0.1:8100 --timeout 300 --graceful-timeout 120 --keep-alive 5 --worker-connections 500 --max-requests 500 --max-requests-jitter 50 --log-level info --access-logfile /var/log/liara/access.log --error-logfile /var/log/liara/error.log
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

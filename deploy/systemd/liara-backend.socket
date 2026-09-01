@@ -1,0 +1,13 @@
+[Unit]
+Description=Liara Backend Unix Domain Socket
+PartOf=liara-backend.service
+
+[Socket]
+ListenStream=/run/liara/liara-backend.sock
+SocketUser=mirko
+SocketGroup=www-data
+SocketMode=0660
+Backlog=2048
+
+[Install]
+WantedBy=sockets.target
