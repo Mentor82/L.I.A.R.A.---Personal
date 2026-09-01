@@ -50,7 +50,7 @@ from services.chat_stream.persistence_stage import (
     persist_assistant_turn,
 )
 from services.chat_persistence import persist_assistant_message
-from api.routers.chat import _format_tool_result_for_llm, _get_tool_aware_system_prompt
+from services.prompt_builder import _format_tool_result_for_llm, _get_tool_aware_system_prompt
 
 logger = logging.getLogger(__name__)
 mlogger = get_mirko_logger()

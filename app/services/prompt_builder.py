@@ -249,3 +249,57 @@ Inhalt:
 </workspace_artifact>
 Für normale, kurze Antworten (auch mehrere Sätze) gilt das NICHT - nur für eigenständige, längere
 Pläne/Dokumente. Du kannst davor/danach ganz normal im Chat kommentieren."""
+
+
+def _get_tool_aware_system_prompt() -> str:
+    """
+    Erstellt Tool-aware System-Prompt mit Tool-Definitionen
+    """
+    from services.tool_registry import get_tool_registry
+    registry = get_tool_registry()
+    tool_descriptions = registry.get_tool_descriptions_for_llm()
+    
+    return f"""
+{tool_descriptions}
+
+WICHTIG:
+- Nutze Tools NUR wenn du aktuelle/externe Daten brauchst
+- Bei Wetter, Standort, Web-Suche → Tool verwenden
+- Bei allgemeinen Fragen → OHNE Tool antworten
+- Wenn Tool verwendet: Antworte ERST mit <tool_call>, dann warte auf Result
+- Nach Tool-Result: Beantworte die Frage mit den erhaltenen Daten
+
+{build_consent_required_instructions()}
+"""
+
+
+def _format_tool_result_for_llm(tool_result: dict) -> str:
+    """
+    Formatiert Tool-Result für LLM-Konsum
+    """
+    if not tool_result.get("success"):
+        return f"Tool-Fehler: {tool_result.get('error', 'Unbekannter Fehler')}"
+    
+    result_data = tool_result.get("result", {})
+    tool_name = tool_result.get("tool", "unknown")
+    
+    if tool_name == "web_search":
+        summary = result_data.get("summary", "")
+        return f"Web-Suche Ergebnis:\n{summary}"
+    
+    elif tool_name == "get_weather":
+        temp = result_data.get("temperature", "?")
+        condition = result_data.get("condition", "unbekannt")
+        city = result_data.get("city", "")
+        return f"Wetter in {city}: {temp}°C, {condition}"
+    
+    elif tool_name == "detect_location":
+        city = result_data.get("city", "")
+        country = result_data.get("country", "")
+        return f"Standort: {city}, {country}"
+    
+    elif tool_name == "get_current_time":
+        formatted = result_data.get("formatted", "")
+        return f"Aktuelle Zeit: {formatted}"
+    
+    return str(result_data)

@@ -26,13 +26,13 @@ from services.prompt_builder import (
     build_factcheck_instructions,
     build_consent_required_instructions,
     build_workspace_artifact_instructions,
+    _get_tool_aware_system_prompt,
 )
 from services.session_workspace import (
     build_workspace_manifest,
     get_context_selected_files,
     read_session_file,
 )
-from api.routers.chat import _get_tool_aware_system_prompt
 
 logger = logging.getLogger(__name__)
 
