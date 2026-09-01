@@ -22,8 +22,11 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('mermaid') || id.includes('cytoscape') || id.includes('dagre') || id.includes('d3')) {
+            if (id.includes('mermaid')) {
               return 'mermaid-vendor';
+            }
+            if (id.includes('cytoscape')) {
+              return 'cytoscape-vendor';
             }
             if (id.includes('katex')) {
               return 'katex-vendor';
@@ -56,6 +59,6 @@ export default defineConfig({
         }
       }
     },
-    chunkSizeWarningLimit: 1000
+    chunkSizeWarningLimit: 1200
   }
 })
