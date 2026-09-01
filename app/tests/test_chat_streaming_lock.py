@@ -92,8 +92,8 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         mock_lock.reacquire.side_effect = mock_reacquire
 
         lock_lost_event = asyncio.Event()
-        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, lock_lost_event, interval=0.02))
-        await asyncio.sleep(0.065)
+        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, lock_lost_event, interval=0.01))
+        await asyncio.sleep(0.1)
         watchdog_task.cancel()
         await asyncio.gather(watchdog_task, return_exceptions=True)
 
