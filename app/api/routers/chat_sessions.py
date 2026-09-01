@@ -7,8 +7,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
-from typing import List, Optional
+import json
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -16,6 +16,7 @@ from core.dependencies import require_active_user
 from core.database import get_db
 from api.models.base_models import User
 from services.session_workspace import delete_session_workspace
+from services.context import TokenEstimator
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class ChatMessage(BaseModel):
     model: Optional[str]
     mood: Optional[str]
     thinking: Optional[str] = None
+    tokens: Optional[Dict[str, Any]] = None
     timestamp: datetime
 
     class Config:
@@ -173,22 +175,52 @@ async def get_session_messages(
     if not session_check:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    result = db.execute(text("""
-        SELECT id, role, content, model, mood, thinking, timestamp
-        FROM chat_messages
-        WHERE session_id = :session_id
-        ORDER BY timestamp ASC, id ASC
-    """), {'session_id': session_id})
+    try:
+        result = db.execute(text("""
+            SELECT id, role, content, model, mood, thinking, tokens, timestamp
+            FROM chat_messages
+            WHERE session_id = :session_id
+            ORDER BY timestamp ASC, id ASC
+        """), {'session_id': session_id})
+        has_tokens_col = True
+    except Exception:
+        db.rollback()
+        result = db.execute(text("""
+            SELECT id, role, content, model, mood, thinking, timestamp
+            FROM chat_messages
+            WHERE session_id = :session_id
+            ORDER BY timestamp ASC, id ASC
+        """), {'session_id': session_id})
+        has_tokens_col = False
 
     messages = []
     for row in result:
+        tok_data = None
+        if has_tokens_col and getattr(row, 'tokens', None):
+            raw_tok = row.tokens
+            if isinstance(raw_tok, dict):
+                tok_data = raw_tok
+            elif isinstance(raw_tok, str):
+                try:
+                    tok_data = json.loads(raw_tok)
+                except Exception:
+                    tok_data = None
+        
+        # Fallback-Berechnung für ältere / unvollständige Messages
+        if not tok_data and row.role == 'assistant' and (row.content or getattr(row, 'thinking', None)):
+            tok_data = TokenEstimator.estimate_turn_tokens(
+                response_text=row.content or "",
+                thinking_text=getattr(row, 'thinking', "") or ""
+            )
+
         messages.append({
             'id': row.id,
             'role': row.role,
             'content': row.content,
             'model': row.model,
             'mood': row.mood,
-            'thinking': row.thinking,
+            'thinking': getattr(row, 'thinking', None),
+            'tokens': tok_data,
             'timestamp': row.timestamp
         })
     

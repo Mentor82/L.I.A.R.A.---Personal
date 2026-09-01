@@ -1312,7 +1312,13 @@ function Chat() {
                   Ich warte noch, du kannst aber auch abbrechen und es später erneut versuchen.
                 </div>
               )}
-              <ChatBubbleFooter model={msg.model} mood={msg.mood} tokens={msg.tokens} />
+              <ChatBubbleFooter
+                model={msg.model}
+                mood={msg.mood}
+                tokens={msg.tokens}
+                content={msg.content}
+                thinking={msg.thinking}
+              />
             </div>
           </div>
         ))}

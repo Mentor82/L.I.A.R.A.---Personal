@@ -641,6 +641,8 @@ export default function MobileChat({ user, onLogout }) {
                       model={msg.model}
                       mood={msg.mood}
                       tokens={msg.tokens}
+                      content={text}
+                      thinking={msg.thinking}
                     />
                   )}
                 </div>

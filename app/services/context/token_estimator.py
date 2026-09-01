@@ -99,3 +99,23 @@ class TokenEstimator:
         if limit <= 0:
             return 0.0
         return round(prompt_tokens / limit, 4)
+
+    @classmethod
+    def estimate_turn_tokens(
+        cls,
+        response_text: str = "",
+        thinking_text: str = "",
+        prompt_text: str = "",
+        estimated_in: Optional[int] = None
+    ) -> Dict[str, int]:
+        """Ermittelt oder schätzt Turn-Tokens für historische oder unvollständige Messages."""
+        resp_tok = cls.estimate_text_tokens(response_text)
+        think_tok = cls.estimate_text_tokens(thinking_text) if thinking_text else 0
+        in_tok = estimated_in if estimated_in is not None else (cls.estimate_text_tokens(prompt_text) if prompt_text else max(60, resp_tok + think_tok))
+        total_tok = in_tok + think_tok + resp_tok
+        return {
+            "in": in_tok,
+            "think": think_tok,
+            "out": resp_tok,
+            "total": total_tok
+        }

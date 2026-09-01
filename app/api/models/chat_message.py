@@ -15,6 +15,8 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     model = Column(String(100), nullable=True)
     mood = Column(String(50), nullable=True)
+    thinking = Column(Text, nullable=True)
+    tokens = Column(JSON, nullable=True)
     action_result = Column(JSON, nullable=True)
     web_search_results = Column(JSON, nullable=True)
     search_type = Column(String(50), nullable=True)

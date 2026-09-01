@@ -202,8 +202,23 @@ export function WorkspaceArtifactsBlock({ artifacts }) {
   );
 }
 
-export function ChatBubbleFooter({ model, mood, tokens }) {
-  if (!model && !tokens) return null;
+export function ChatBubbleFooter({ model, mood, tokens, content, thinking }) {
+  if (!model && !tokens && !content) return null;
+
+  let tok = tokens;
+  if (!tok && (content || thinking)) {
+    const cLen = (content || '').length;
+    const tLen = (thinking || '').length;
+    const outTok = Math.max(1, Math.round(cLen / 3.8));
+    const thinkTok = tLen > 0 ? Math.max(1, Math.round(tLen / 3.8)) : 0;
+    const inTok = Math.max(60, outTok + thinkTok);
+    tok = {
+      in: inTok,
+      think: thinkTok,
+      out: outTok,
+      total: inTok + thinkTok + outTok
+    };
+  }
 
   return (
     <div className="bubble-footer">
@@ -211,22 +226,22 @@ export function ChatBubbleFooter({ model, mood, tokens }) {
         {model && <span className="bubble-model">🤖 {model}</span>}
         {mood && <span className="bubble-mood"> · 🌙 {mood}</span>}
       </div>
-      {tokens && (
+      {tok && (
         <div
           className="bubble-tokens"
-          title={`Tokens: ${tokens.in ?? 0} in, ${tokens.think ?? 0} think, ${tokens.out ?? 0} out, ${tokens.total ?? ((tokens.in || 0) + (tokens.think || 0) + (tokens.out || 0))} gesamt`}
+          title={`Tokens: ${tok.in ?? 0} in, ${tok.think ?? 0} think, ${tok.out ?? 0} out, ${tok.total ?? ((tok.in || 0) + (tok.think || 0) + (tok.out || 0))} gesamt`}
         >
-          <span className="token-item"><span className="token-lbl">in:</span> {tokens.in ?? 0}</span>
-          {Number(tokens.think) > 0 && (
+          <span className="token-item"><span className="token-lbl">in:</span> {tok.in ?? 0}</span>
+          {Number(tok.think) > 0 && (
             <>
               <span className="token-dot">·</span>
-              <span className="token-item"><span className="token-lbl">think:</span> {tokens.think}</span>
+              <span className="token-item"><span className="token-lbl">think:</span> {tok.think}</span>
             </>
           )}
           <span className="token-dot">·</span>
-          <span className="token-item"><span className="token-lbl">out:</span> {tokens.out ?? 0}</span>
+          <span className="token-item"><span className="token-lbl">out:</span> {tok.out ?? 0}</span>
           <span className="token-dot">·</span>
-          <span className="token-item token-total-item"><span className="token-lbl">gesamt:</span> {tokens.total ?? ((tokens.in || 0) + (tokens.think || 0) + (tokens.out || 0))}</span>
+          <span className="token-item token-total-item"><span className="token-lbl">gesamt:</span> {tok.total ?? ((tok.in || 0) + (tok.think || 0) + (tok.out || 0))}</span>
         </div>
       )}
     </div>

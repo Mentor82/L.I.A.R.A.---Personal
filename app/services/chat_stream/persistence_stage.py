@@ -5,6 +5,7 @@ Handles atomic database persistence for user messages, canonical history,
 assistant turns, 4D memory integration, and Neo4j concept relations under the session lock.
 """
 
+import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -114,6 +115,7 @@ def persist_assistant_turn(
     full_thinking_text: Optional[str],
     model: str,
     mood_snapshot: Dict[str, Any],
+    tokens: Optional[Dict[str, Any]] = None,
     user_message_id: Optional[int] = None,
     personality: Optional[str] = None,
     memory_enabled: bool = True,
@@ -128,20 +130,39 @@ def persist_assistant_turn(
 
     db = SessionLocal()
     try:
-        insert_result = db.execute(text("""
-            INSERT INTO chat_messages
-                (user_id, session_id, role, content, model, mood, thinking, timestamp)
-            VALUES
-                (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, CURRENT_TIMESTAMP)
-            RETURNING id
-        """), {
-            'user_id': user_id,
-            'session_id': session_id,
-            'content': full_response_text,
-            'model': f"{model} (interrupted)" if interrupted else model,
-            'mood': mood_snapshot.get("mood", "neutral"),
-            'thinking': full_thinking_text or None
-        })
+        tokens_json = json.dumps(tokens) if tokens else None
+        try:
+            insert_result = db.execute(text("""
+                INSERT INTO chat_messages
+                    (user_id, session_id, role, content, model, mood, thinking, tokens, timestamp)
+                VALUES
+                    (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, :tokens, CURRENT_TIMESTAMP)
+                RETURNING id
+            """), {
+                'user_id': user_id,
+                'session_id': session_id,
+                'content': full_response_text,
+                'model': f"{model} (interrupted)" if interrupted else model,
+                'mood': mood_snapshot.get("mood", "neutral"),
+                'thinking': full_thinking_text or None,
+                'tokens': tokens_json
+            })
+        except Exception:
+            db.rollback()
+            insert_result = db.execute(text("""
+                INSERT INTO chat_messages
+                    (user_id, session_id, role, content, model, mood, thinking, timestamp)
+                VALUES
+                    (:user_id, :session_id, 'assistant', :content, :model, :mood, :thinking, CURRENT_TIMESTAMP)
+                RETURNING id
+            """), {
+                'user_id': user_id,
+                'session_id': session_id,
+                'content': full_response_text,
+                'model': f"{model} (interrupted)" if interrupted else model,
+                'mood': mood_snapshot.get("mood", "neutral"),
+                'thinking': full_thinking_text or None
+            })
         db.commit()
         assistant_message_id = insert_result.scalar()
 

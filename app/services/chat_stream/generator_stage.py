@@ -206,7 +206,7 @@ async def stream_ollama_response(
     total_eval_tokens = 0
     persisted_attempted = False
 
-    def _persist_turn(interrupted: bool = False) -> bool:
+    def _persist_turn(interrupted: bool = False, tokens_data: Optional[Dict[str, Any]] = None) -> bool:
         return persist_assistant_turn(
             user_id=user_id,
             session_id=session_id,
@@ -214,6 +214,7 @@ async def stream_ollama_response(
             full_thinking_text=full_thinking_text,
             model=model,
             mood_snapshot=mood_snapshot,
+            tokens=tokens_data,
             user_message_id=user_message_id,
             personality=personality,
             memory_enabled=memory_enabled,
@@ -653,7 +654,7 @@ async def stream_ollama_response(
 
             persisted_ok = False
             try:
-                persisted_ok = await asyncio.to_thread(_persist_turn, False)
+                persisted_ok = await asyncio.to_thread(_persist_turn, False, usage_info)
             except Exception as e:
                 logger.error(f"Assistant message persistence task failed: {e}")
             yield f"data: {json.dumps({'type': 'persisted', 'success': persisted_ok})}\n\n"
