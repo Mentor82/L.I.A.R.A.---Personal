@@ -662,32 +662,14 @@ function WorkspacePage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
   const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
-  // Sandboxed interactive shell (WorkspaceTerminal) - shares the single
-  // right-hand panel slot with Agent-Chat/Agent Hub rather than adding a
-  // 4th grid column, so opening any one of the three closes the other two.
+  // Sandboxed interactive shell (WorkspaceTerminal) - docks below the editor
+  // (like a normal IDE terminal), not in the right-hand panel column, so it
+  // doesn't need to fight Agent-Chat/Agent Hub for a slot.
   const [shellOpen, setShellOpen] = useState(false);
 
-  const toggleAgentPanel = () => {
-    setAgentPanelOpen((v) => {
-      const next = !v;
-      if (next) { setAgentDrawerOpen(false); setShellOpen(false); }
-      return next;
-    });
-  };
-  const toggleAgentDrawer = () => {
-    setAgentDrawerOpen((v) => {
-      const next = !v;
-      if (next) { setAgentPanelOpen(false); setShellOpen(false); }
-      return next;
-    });
-  };
-  const toggleShell = () => {
-    setShellOpen((v) => {
-      const next = !v;
-      if (next) { setAgentPanelOpen(false); setAgentDrawerOpen(false); }
-      return next;
-    });
-  };
+  const toggleAgentPanel = () => setAgentPanelOpen((v) => !v);
+  const toggleAgentDrawer = () => setAgentDrawerOpen((v) => !v);
+  const toggleShell = () => setShellOpen((v) => !v);
 
   useEffect(() => {
     (async () => {
@@ -1416,7 +1398,7 @@ function WorkspacePage() {
         </div>
       )}
 
-      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${(agentPanelOpen || shellOpen) ? 'agent-open' : ''} ${agentDrawerOpen ? 'agent-drawer-open' : ''}`}>
+      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''} ${agentDrawerOpen ? 'agent-drawer-open' : ''}`}>
         {!sidebarCollapsed && (
         <aside
           className={`workspace-sidebar ${dragOverTarget === 'root' ? 'workspace-drag-over' : ''}`}
@@ -1524,6 +1506,7 @@ function WorkspacePage() {
         </aside>
         )}
 
+        <div className="workspace-editor-column">
         <div className="workspace-editor-row">
           <EditorPane
             tabs={tabs}
@@ -1577,6 +1560,11 @@ function WorkspacePage() {
           )}
         </div>
 
+        {shellOpen && sessionId && (
+          <WorkspaceTerminal sessionId={sessionId} onClose={() => setShellOpen(false)} />
+        )}
+        </div>
+
         {agentPanelOpen && (
           <AgentChatPanel
             sessionId={sessionId}
@@ -1595,10 +1583,6 @@ function WorkspacePage() {
             }}
             onOpenFile={openFile}
           />
-        )}
-
-        {shellOpen && sessionId && (
-          <WorkspaceTerminal sessionId={sessionId} onClose={() => setShellOpen(false)} />
         )}
       </div>
 

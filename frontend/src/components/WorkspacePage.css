@@ -800,11 +800,24 @@
 
 /* Split editor - .workspace-body's second grid column holds this row, which
    lays out one (normal) or two (split) .workspace-main panes side by side. */
+/* Wraps .workspace-editor-row + the optional interactive shell panel below
+   it - lets the shell dock underneath the editor (normal IDE convention)
+   inside the SAME grid column, instead of competing with Agent-Chat/Agent
+   Hub for the right-hand column. */
+.workspace-editor-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
+}
+
 .workspace-editor-row {
   display: flex;
   gap: 1rem;
   min-width: 0;
   min-height: 0;
+  flex: 1;
 }
 
 .workspace-main {

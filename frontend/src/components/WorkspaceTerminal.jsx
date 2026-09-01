@@ -24,9 +24,12 @@ export default function WorkspaceTerminal({ sessionId, onClose }) {
     const term = new XTerm({
       cursorBlink: true,
       cursorStyle: 'block',
-      fontFamily: '"Fira Code", "Courier New", monospace',
-      fontSize: 13,
-      lineHeight: 1.2,
+      // Matches this project's other monospace UI (workspace file search
+      // etc.) - JetBrains Mono reads noticeably crisper than Fira Code at
+      // small sizes for lookalike characters (l/1/I, 0/O).
+      fontFamily: '"JetBrains Mono", "Fira Code", "Courier New", monospace',
+      fontSize: 12,
+      lineHeight: 1.3,
       scrollback: 2000,
       convertEol: true,
       theme: {
