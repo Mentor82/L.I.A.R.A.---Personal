@@ -20,21 +20,42 @@ export default defineConfig({
     cssMinify: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Core React libraries
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          
-          // i18n
-          'i18n': ['react-i18next', 'i18next', 'i18next-browser-languagedetector'],
-          
-          // Markdown rendering
-          'markdown': ['react-markdown', 'remark-gfm', 'rehype-raw'],
-          
-          // Terminal components (xterm is large)
-          'terminal': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('mermaid') || id.includes('cytoscape') || id.includes('dagre') || id.includes('d3')) {
+              return 'mermaid-vendor';
+            }
+            if (id.includes('katex')) {
+              return 'katex-vendor';
+            }
+            if (id.includes('@xterm')) {
+              return 'terminal-vendor';
+            }
+            if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) {
+              return 'syntax-highlighter-vendor';
+            }
+            if (id.includes('@codemirror') || id.includes('@uiw/react-codemirror')) {
+              return 'codemirror-vendor';
+            }
+            if (id.includes('lexical') || id.includes('@lexical')) {
+              return 'lexical-vendor';
+            }
+            if (id.includes('lucide-react')) {
+              return 'lucide-vendor';
+            }
+            if (id.includes('react-markdown') || id.includes('remark-') || id.includes('rehype-')) {
+              return 'markdown-vendor';
+            }
+            if (id.includes('react-router-dom') || id.includes('react-dom') || id.includes('/react/')) {
+              return 'react-vendor';
+            }
+            if (id.includes('i18next') || id.includes('react-i18next')) {
+              return 'i18n-vendor';
+            }
+          }
         }
       }
     },
-    chunkSizeWarningLimit: 600
+    chunkSizeWarningLimit: 1000
   }
 })
