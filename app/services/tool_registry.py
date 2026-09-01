@@ -145,6 +145,44 @@ class ToolRegistry:
             privacy_level="low"
         ))
 
+        # 📋 Task Checklist (multi-step plan display, NOT the persistent
+        # /tasks feature) - a real callable tool instead of hoping the model
+        # spontaneously emits a <tasks> text tag on its own (see
+        # build_task_list_instructions in prompt_builder.py): confirmed live
+        # that several models either ignored that tag convention entirely or
+        # confused it with the persistent create_task tool. Calling this
+        # tool is far more reliable since native tool-calling is a stronger,
+        # explicitly-trained affordance than "notice this instruction buried
+        # in the system prompt and remember to emit these exact tags".
+        self.register_tool(ToolDefinition(
+            name="update_task_checklist",
+            description=(
+                "Zeigt eine abhakbare Schritt-Checkliste direkt in dieser Chat-Antwort an - NICHT "
+                "die persistente Tasks-Verwaltung unter /tasks (dafür ist create_task da), sondern "
+                "eine Plan-Übersicht für eine mehrschrittige Anleitung/Antwort in diesem Chat. Rufe "
+                "das Tool mit der VOLLSTÄNDIGEN, aktuellen Liste auf (auch bereits erledigte Schritte "
+                "als '[x]'), keine Teil-Updates - bei einer Statusänderung das Tool erneut mit der "
+                "kompletten aktualisierten Liste aufrufen. Nur für wirklich mehrschrittige Anfragen, "
+                "nicht für kurze/einfache Antworten."
+            ),
+            category=ToolCategory.UTILITY,
+            parameters=[
+                ToolParameter(
+                    name="markdown",
+                    type="string",
+                    description=(
+                        "Eine Aufgabe pro Zeile im Format '- [ ] Label' (offen) oder "
+                        "'- [x] Label' (erledigt), z.B.:\n- [ ] Erster Schritt\n"
+                        "- [x] Zweiter Schritt\n- [ ] Dritter Schritt"
+                    ),
+                    required=True
+                )
+            ],
+            function=self._task_checklist_stub,
+            requires_consent=False,
+            privacy_level="low"
+        ))
+
         # 🔍 Delegate to the specialized Research Agent (multi-agent
         # orchestration) - a multi-step research sub-task (several
         # searches, cross-referencing sources, following links) that a
@@ -467,6 +505,10 @@ class ToolRegistry:
     async def _delegate_research_stub(self, **kwargs):
         """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
         return {"error": "Not implemented", "tool": "delegate_research"}
+
+    async def _task_checklist_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "update_task_checklist"}
 
     async def _time_stub(self, **kwargs):
         """Placeholder für Time"""

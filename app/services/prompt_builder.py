@@ -128,24 +128,36 @@ def build_memory_contract_instructions() -> str:
 
 def build_task_list_instructions() -> str:
     """
-    Tells the model it may open a multi-step answer with a <tasks> checklist block.
+    Tells the model it may open a multi-step answer with a <tasks> checklist block, or (preferred,
+    for models with native tool-calling) call the update_task_checklist tool instead - see that
+    tool's own description in tool_registry.py. Confirmed live that several models either ignored
+    the text-tag convention entirely or confused it with the persistent create_task tool - a real
+    tool call is a much stronger, more reliably-followed affordance than a convention buried in the
+    system prompt.
     """
     return """WICHTIG - Aufgaben-Checkliste bei mehrschrittigen Anfragen:
 Wenn eine Anfrage aus mehreren klar abgrenzbaren Schritten besteht (z.B. eine Anleitung mit mehreren
-Etappen, eine Frage mit mehreren Teilaufgaben), kannst du deine Antwort mit einem <tasks>-Block
-einleiten, der die Schritte als Checkliste auflistet:
+Etappen, eine Frage mit mehreren Teilaufgaben), zeige die Schritte als abhakbare Checkliste - NICHT
+als reine Aufzählung im Fließtext.
+
+Bevorzugt (falls dir Tools zur Verfügung stehen): Rufe das Tool `update_task_checklist` auf, mit der
+vollständigen Schritt-Liste als Markdown-Checkbox-Zeilen. Das ist zuverlässiger als die Tag-Variante
+unten und wird garantiert korrekt als Checkliste im Chat angezeigt.
+
+Alternative (falls kein Tool-Calling verfügbar ist): Leite deine Antwort mit einem <tasks>-Block ein:
 <tasks>
 - [ ] Erster Schritt
 - [ ] Zweiter Schritt
 - [ ] Dritter Schritt
 </tasks>
 
-Du darfst später in derselben Antwort einen aktualisierten <tasks>-Block erneut ausgeben, um bereits
-behandelte Schritte mit [x] abzuhaken - gib dabei immer die VOLLSTÄNDIGE, aktuelle Liste aus, keine
-Teil-Updates. Nutze das sparsam (höchstens ein paar Mal pro Antwort, nicht nach jedem Absatz) und nur
-bei wirklich mehrschrittigen Anfragen - für kurze oder einfache Antworten ist kein <tasks>-Block nötig.
-Der Block erscheint als eigene Checkliste im Chat, nicht im normalen Antworttext - schreibe die
-eigentliche Antwort trotzdem vollständig und normal weiter."""
+In beiden Fällen gilt: Bei einer späteren Statuänderung (Schritt erledigt) die VOLLSTÄNDIGE,
+aktuelle Liste erneut ausgeben/aufrufen (mit [x] für erledigte Schritte), keine Teil-Updates. Nutze
+das sparsam (höchstens ein paar Mal pro Antwort) und nur bei wirklich mehrschrittigen Anfragen - für
+kurze oder einfache Antworten ist keine Checkliste nötig. Verwechsle das NICHT mit `create_task`
+(das legt einen echten, dauerhaften Eintrag unter /tasks an - nur nutzen, wenn der Nutzer explizit
+darum bittet, etwas dauerhaft zu speichern). Die Checkliste erscheint separat im Chat, nicht im
+normalen Antworttext - schreibe die eigentliche Antwort trotzdem vollständig und normal weiter."""
 
 
 def build_factcheck_instructions() -> str:

@@ -620,6 +620,10 @@ async def stream_ollama_response(
                         ]
                         yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
 
+                    if tool_result.get("success") and inner_result.get("type") == "tasks":
+                        full_tasks_items = inner_result.get("items", [])
+                        yield f"data: {json.dumps({'type': 'tasks', 'items': full_tasks_items})}\n\n"
+
                     if tool_name == "workspace_propose_change" and tool_result.get("success") and inner_result.get("proposed"):
                         yield f"data: {json.dumps({'type': 'workspace_proposal', 'proposal_id': inner_result.get('proposal_id'), 'filename': inner_result.get('filename'), 'action': inner_result.get('action'), 'session_id': session_id})}\n\n"
 

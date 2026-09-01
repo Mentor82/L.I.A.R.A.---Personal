@@ -205,6 +205,13 @@ class ToolExecutor:
         elif tool_def.name == "delegate_research":
             return await self._execute_delegate_research(parameters)
 
+        # 📋 Task Checklist - reuses task_splitter.py's own markdown-checkbox
+        # parser so a tool-called checklist and a text-tag-emitted one
+        # produce byte-identical item shapes ({id: "step-N", label, done}).
+        elif tool_def.name == "update_task_checklist":
+            from services.task_splitter import parse_task_items
+            return {"type": "tasks", "items": parse_task_items(parameters.get("markdown", ""))}
+
         # 🐙 GitHub Search
         elif tool_def.name == "github_search":
             from services.github_service import get_github_service
