@@ -305,6 +305,9 @@ export default function MobileChat({ user, onLogout }) {
       } catch (err) {
         console.warn('Could not delete chat session:', err);
       }
+    } else {
+      // The placeholder the banner refers to is gone, so the banner must go too.
+      setSessionError(false);
     }
     setChatSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== sessionId);
@@ -692,7 +695,7 @@ export default function MobileChat({ user, onLogout }) {
         {messages.length === 0 ? (
           <div className="mobile-chat-empty">
             <div className="mobile-empty-logo">
-              <img src={liaraLogo} alt="LIARA" />
+              <img src={liaraLogo} alt="LIARA" className="mobile-empty-logo-img" />
             </div>
             <h2>{t('mobile.welcomeTitle')}</h2>
             <p>{t('mobile.welcomeSubtitle')}</p>

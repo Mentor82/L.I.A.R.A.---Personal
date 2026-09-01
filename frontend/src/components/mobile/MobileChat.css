@@ -341,6 +341,9 @@
 .mobile-chat-feed {
   flex: 1;
   overflow-y: auto;
+  /* Nothing in the feed should ever be able to scroll it sideways - that
+     drags the whole chat background off with it on touch devices. */
+  overflow-x: hidden;
   padding: 1rem 0.85rem;
   display: flex;
   flex-direction: column;
@@ -352,6 +355,10 @@
   margin: auto;
   text-align: center;
   padding: 2rem 1rem;
+  max-width: 100%;
+  /* Without this the empty state can be sized by its content (the logo)
+     instead of the viewport, which scrolls the whole feed sideways. */
+  min-width: 0;
   color: var(--color-text-muted, #94a3b8);
 }
 
@@ -363,11 +370,34 @@
 }
 
 .mobile-empty-logo-img {
-  width: 64px;
-  height: 64px;
+  /* Scales with the viewport on small phones and in landscape, where a
+     fixed 64px next to the welcome text pushed the greeting off-screen. */
+  width: clamp(48px, 18vmin, 88px);
+  height: clamp(48px, 18vmin, 88px);
+  max-width: 100%;
   object-fit: contain;
   filter: drop-shadow(0 0 16px rgba(0, 229, 255, 0.6));
   animation: float 3s ease-in-out infinite;
+}
+
+/* The empty state is the one place the logo is rendered large enough for
+   the animation to be noticeable - respect a reduced-motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-empty-logo-img {
+    animation: none;
+  }
+}
+
+.mobile-chat-empty h2 {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.05rem, 5vw, 1.35rem);
+  color: var(--color-text, #f1f5f9);
+}
+
+.mobile-chat-empty p {
+  margin: 0;
+  font-size: clamp(0.82rem, 3.6vw, 0.95rem);
+  line-height: 1.4;
 }
 
 @keyframes float {
