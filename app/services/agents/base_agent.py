@@ -162,9 +162,8 @@ class BaseAgent:
 
     async def call_llm(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
-        Sendet Chat-Nachrichten an Ollama. Gibt das komplette message-Objekt
-        zurück (nicht nur .content) - der native Tool-Pfad in run() braucht
-        auch .tool_calls, die reine Text-Konvention liest nur .content.
+        Sendet Chat-Nachrichten an Ollama asynchron via httpx. Gibt das komplette
+        message-Objekt zurück. Unterstützt saubere Task-Cancellation.
         """
         payload = {
             "model": self.model,
@@ -178,14 +177,15 @@ class BaseAgent:
         if tools:
             payload["tools"] = tools
 
-        def _request():
-            res = requests.post(f"{self.ollama_url}/api/chat", json=payload, timeout=90)
-            res.raise_for_status()
-            data = res.json()
-            return data.get("message", {})
-
         try:
-            return await asyncio.to_thread(_request)
+            import httpx
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                res = await client.post(f"{self.ollama_url}/api/chat", json=payload)
+                res.raise_for_status()
+                data = res.json()
+                return data.get("message", {})
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             logger.error(f"Ollama API Fehler: {e}")
             raise RuntimeError(f"Ollama Verbindung fehlgeschlagen ({self.model}): {str(e)}")
@@ -291,6 +291,16 @@ class BaseAgent:
                     # turn - execute all of them before the next LLM call,
                     # same as chat_streaming.py's native-tool loop.
                     for tc in native_tool_calls:
+                        if is_cancelled and await is_cancelled():
+                            await emit("cancelled", {"step": step})
+                            return {
+                                "success": False,
+                                "error": "Task durch Benutzer abgebrochen",
+                                "steps": step,
+                                "history": history_log,
+                                "cancelled": True
+                            }
+
                         fn = tc.get("function", {})
                         t_name = fn.get("name")
                         t_args = fn.get("arguments") or {}
@@ -342,6 +352,16 @@ class BaseAgent:
 
             # Wenn Tool Call
             if parsed["type"] == "tool_call":
+                if is_cancelled and await is_cancelled():
+                    await emit("cancelled", {"step": step})
+                    return {
+                        "success": False,
+                        "error": "Task durch Benutzer abgebrochen",
+                        "steps": step,
+                        "history": history_log,
+                        "cancelled": True
+                    }
+
                 t_name = parsed["tool_name"]
                 t_args = parsed["arguments"]
 

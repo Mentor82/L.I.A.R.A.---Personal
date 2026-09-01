@@ -5,7 +5,7 @@ Real interactive terminal with full TTY support (su, vim, etc.)
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from api.models.base_models import User
-from core.dependencies import get_current_user_ws
+from core.dependencies import get_admin_user_ws
 from core.database import SessionLocal
 import pty
 import os
@@ -34,7 +34,7 @@ async def websocket_pty(
     2. SSH: Connect to remote server via SSH (?type=ssh&ssh_host=...&ssh_user=...&ssh_port=...)
 
     Requires admin authentication via the Sec-WebSocket-Protocol header
-    (see core.dependencies.get_current_user_ws).
+    (see core.dependencies.get_admin_user_ws).
     """
     # Authenticate BEFORE accept() (issue #10) - websocket.headers/query_params
     # are already populated from the ASGI scope at this point, no need to
@@ -56,9 +56,9 @@ async def websocket_pty(
     # an ACCESS EXCLUSIVE lock) until the terminal tab was closed.
     auth_db = SessionLocal()
     try:
-        user = await get_current_user_ws(websocket, auth_db)
+        user = await get_admin_user_ws(websocket, auth_db)
     except Exception as e:
-        logger.error(f"WebSocket auth failed: {e}")
+        logger.error(f"WebSocket admin auth failed: {e}")
         await websocket.close(code=1008)  # Policy Violation
         return
     finally:

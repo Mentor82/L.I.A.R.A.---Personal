@@ -88,6 +88,15 @@ async def _run_agent_task_worker(
     async def is_cancelled() -> bool:
         return await asyncio.to_thread(agent_task_store.is_cancel_requested, task_id)
 
+    if await is_cancelled():
+        finished_at = datetime.now(timezone.utc).isoformat()
+        await asyncio.to_thread(agent_task_store.update_task, task_id, status="cancelled", finished_at=finished_at, error="Task vor Start abgebrochen")
+        await asyncio.to_thread(
+            agent_task_store.append_event, task_id,
+            {"event": "cancelled", "data": {"message": "Task durch Benutzer vor Start abgebrochen"}, "timestamp": finished_at}
+        )
+        return
+
     await asyncio.to_thread(agent_task_store.update_task, task_id, status="running")
 
     try:
@@ -272,8 +281,17 @@ def cancel_task(
     if task_entry["user_id"] != user.id and getattr(user, "role", "") != "admin":
         raise HTTPException(status_code=403, detail="Kein Zugriff auf diesen Task.")
 
+    if task_entry["status"] == "cancelling":
+        return {"success": True, "message": "Abbruch bereits angefordert."}
+
     if task_entry["status"] not in ("pending", "running"):
         return {"success": False, "message": "Task läuft nicht mehr."}
 
     agent_task_store.request_cancel(task_id)
+    agent_task_store.update_task(task_id, status="cancelling")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    agent_task_store.append_event(
+        task_id,
+        {"event": "status", "data": {"status": "cancelling", "message": "Abbruch angefordert"}, "timestamp": now_iso}
+    )
     return {"success": True, "message": "Abbruch angefordert."}

@@ -92,10 +92,10 @@ async def get_current_user_ws(
     the subprotocol list is the only way to carry an auth-like value off
     the URL. Query-string bearer tokens are far more likely to leak into
     reverse-proxy/access logs, browser diagnostics, or monitoring than a
-    protocol value, and this is an admin-only PTY endpoint.
+    protocol value.
 
     Raises:
-        Exception: Invalid or expired token, user not found
+        Exception: Invalid or expired token, user not found, inactive user
     """
     protocols = websocket.headers.get("sec-websocket-protocol", "")
     token = protocols.split(",")[0].strip() if protocols else None
@@ -127,10 +127,23 @@ async def get_current_user_ws(
     if not user.is_active:
         raise Exception("Inactive user")
     
-    # Check if user is admin
+    return user
+
+
+async def get_admin_user_ws(
+    websocket: WebSocket,
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Get current authenticated admin user from WebSocket connection.
+    Used for server-level administrative PTY terminals (terminal_pty.py).
+
+    Raises:
+        Exception: Invalid token, inactive user, or non-admin user
+    """
+    user = await get_current_user_ws(websocket, db)
     if user.role != UserRole.ADMIN:
         raise Exception("Admin privileges required")
-    
     return user
 
 

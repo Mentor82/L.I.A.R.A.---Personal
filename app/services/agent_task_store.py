@@ -42,7 +42,26 @@ def _now_iso() -> str:
 
 
 def create_task(task_id: str, agent_id: str, task_text: str, user_id: int, session_id: Optional[int]) -> Dict[str, Any]:
-    task = {
+    now = _now_iso()
+    mapping = {
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "status": "pending",
+        "task": task_text,
+        "current_step": "0",
+        "user_id": str(user_id),
+        "session_id": str(session_id) if session_id is not None else "",
+        "created_at": now,
+        "finished_at": "",
+        "result": "",
+        "error": "",
+        "cancel_requested": "0",
+    }
+    client = get_redis_service().client
+    key = _task_key(task_id)
+    client.hset(key, mapping=mapping)
+    client.expire(key, TASK_TTL_SECONDS)
+    return {
         "task_id": task_id,
         "agent_id": agent_id,
         "status": "pending",
@@ -50,47 +69,104 @@ def create_task(task_id: str, agent_id: str, task_text: str, user_id: int, sessi
         "current_step": 0,
         "user_id": user_id,
         "session_id": session_id,
-        "created_at": _now_iso(),
+        "created_at": now,
         "finished_at": None,
         "result": None,
         "error": None,
         "cancel_requested": False,
     }
-    get_redis_service().client.setex(_task_key(task_id), timedelta(seconds=TASK_TTL_SECONDS), json.dumps(task))
-    return task
 
 
 def get_task(task_id: str) -> Optional[Dict[str, Any]]:
-    data = get_redis_service().client.get(_task_key(task_id))
-    return json.loads(data) if data else None
+    client = get_redis_service().client
+    raw = client.hgetall(_task_key(task_id))
+    if not raw:
+        return None
+
+    data = {
+        (k.decode("utf-8") if isinstance(k, bytes) else k): (v.decode("utf-8") if isinstance(v, bytes) else v)
+        for k, v in raw.items()
+    }
+    if not data or "task_id" not in data:
+        return None
+
+    session_id_str = data.get("session_id", "")
+    session_id = int(session_id_str) if session_id_str else None
+
+    result_raw = data.get("result", "")
+    result_val = None
+    if result_raw:
+        try:
+            result_val = json.loads(result_raw)
+        except Exception:
+            result_val = result_raw
+
+    return {
+        "task_id": data.get("task_id", task_id),
+        "agent_id": data.get("agent_id", ""),
+        "status": data.get("status", "pending"),
+        "task": data.get("task", ""),
+        "current_step": int(data.get("current_step", 0)),
+        "user_id": int(data.get("user_id", 0)),
+        "session_id": session_id,
+        "created_at": data.get("created_at"),
+        "finished_at": data.get("finished_at") or None,
+        "result": result_val,
+        "error": data.get("error") or None,
+        "cancel_requested": data.get("cancel_requested") in ("1", "true", "True", True),
+    }
 
 
 def update_task(task_id: str, **fields: Any) -> None:
-    """Read-modify-write - safe here because only the single worker running
-    this task's agent loop ever writes status/result/error/current_step;
-    request_cancel() is the only other writer and touches a different field,
-    so there's no concurrent-writer race to guard against (unlike
-    redis_service.py's add_to_context, which needed a Lua script)."""
-    client = get_redis_service().client
-    task = get_task(task_id)
-    if task is None:
+    """Atomic field-level updates via Redis Hashes (HSET).
+    
+    Eliminates read-modify-write races across concurrent workers.
+    Updates to fields like current_step by a running worker cannot
+    overwrite or clear a concurrent cancel_requested=True written
+    by a cancellation request on another worker.
+    """
+    if not fields:
         return
-    task.update(fields)
-    client.setex(_task_key(task_id), timedelta(seconds=TASK_TTL_SECONDS), json.dumps(task))
+    client = get_redis_service().client
+    key = _task_key(task_id)
+    if not client.exists(key):
+        return
+
+    mapping = {}
+    for k, v in fields.items():
+        if v is None:
+            mapping[k] = ""
+        elif isinstance(v, bool):
+            mapping[k] = "1" if v else "0"
+        elif isinstance(v, (int, float, str)):
+            mapping[k] = str(v)
+        else:
+            mapping[k] = json.dumps(v, ensure_ascii=False)
+
+    client.hset(key, mapping=mapping)
+    client.expire(key, TASK_TTL_SECONDS)
 
 
 def request_cancel(task_id: str) -> bool:
-    task = get_task(task_id)
-    if task is None:
+    """Atomically sets cancel_requested=1 in the task Hash."""
+    client = get_redis_service().client
+    key = _task_key(task_id)
+    if not client.exists(key):
         return False
-    task["cancel_requested"] = True
-    get_redis_service().client.setex(_task_key(task_id), timedelta(seconds=TASK_TTL_SECONDS), json.dumps(task))
+    client.hset(key, mapping={"cancel_requested": "1"})
+    client.expire(key, TASK_TTL_SECONDS)
     return True
 
 
 def is_cancel_requested(task_id: str) -> bool:
-    task = get_task(task_id)
-    return bool(task and task.get("cancel_requested"))
+    """Atomically reads the cancel_requested field."""
+    client = get_redis_service().client
+    val = client.hget(_task_key(task_id), "cancel_requested")
+    if val is None:
+        return False
+    if isinstance(val, bytes):
+        val = val.decode("utf-8")
+    return val in ("1", "true", "True")
 
 
 def append_event(task_id: str, event: Dict[str, Any]) -> None:

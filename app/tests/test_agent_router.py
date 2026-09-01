@@ -27,13 +27,29 @@ if "redis" not in sys.modules:
 
 class InMemoryRedis:
     def __init__(self):
-        self.data = {}
+        self.hashes = {}
+        self.streams = {}
 
-    def setex(self, name, time, value):
-        self.data[name] = value
+    def exists(self, key):
+        return key in self.hashes or key in self.streams
 
-    def get(self, name):
-        return self.data.get(name)
+    def hset(self, key, mapping=None, key_field=None, value=None):
+        if key not in self.hashes:
+            self.hashes[key] = {}
+        if mapping:
+            for k, v in mapping.items():
+                self.hashes[key][str(k)] = str(v)
+        elif key_field is not None and value is not None:
+            self.hashes[key][str(key_field)] = str(value)
+        return len(self.hashes[key])
+
+    def hget(self, key, field):
+        if key not in self.hashes:
+            return None
+        return self.hashes[key].get(str(field))
+
+    def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
 
     def xadd(self, name, fields):
         pass
