@@ -30,20 +30,28 @@ class AgentRegistry:
                 "replace_chunk",
                 "create_file",
                 "delete_file",
-                "validate_syntax"
+                "validate_syntax",
+                "delegate_research"
             ],
             "class": CodeAgent
         },
         "research": {
             "id": "research",
             "name": "Research Agent",
-            "description": "Faktenbasierte Recherche mit Quellenverifizierung über SearXNG und Wikipedia.",
-            "default_model": "llama3.2:3b",
+            "description": "Faktenbasierte Recherche mit Quellenverifizierung über SearXNG, Wikipedia und GitHub.",
+            # Cloud model, not a small local one - confirmed live that
+            # llama3.2:3b failed to correctly synthesize an answer from real,
+            # enriched search source text even when the answer was plainly
+            # present in a source.
+            "default_model": "gpt-oss:120b-cloud",
             "icon": "🔍",
             "category": "information",
             "tools": [
                 "web_search",
-                "wikipedia_search"
+                "wikipedia_search",
+                "github_search",
+                "github_repo_readme",
+                "fetch_web_page"
             ],
             "class": ResearchAgent
         },
@@ -62,7 +70,8 @@ class AgentRegistry:
                 "update_task_status",
                 "create_calendar_event",
                 "list_calendar_events",
-                "search_memory"
+                "search_memory",
+                "delegate_research"
             ],
             "class": ProductivityAgent
         },
@@ -75,7 +84,8 @@ class AgentRegistry:
             "category": "multimodal",
             "tools": [
                 "analyze_image",
-                "detect_objects"
+                "detect_objects",
+                "delegate_research"
             ],
             "class": VisionAgent
         }

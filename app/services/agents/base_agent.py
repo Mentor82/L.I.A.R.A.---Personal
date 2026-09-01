@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
+# Cloud model for delegated research sub-tasks - deliberately NOT the
+# Research Agent's own small local default. Confirmed live: a 3B local model
+# (llama3.2:3b) failed to correctly synthesize an answer from real, enriched
+# SearXNG source text even when the answer was plainly present in a source
+# (Bundesliga-table-leader test) - a stronger cloud model reasons over
+# multi-source text far more reliably.
+RESEARCH_DELEGATION_MODEL = "gpt-oss:120b-cloud"
+
 
 class BaseAgent:
     """
@@ -40,6 +48,46 @@ class BaseAgent:
         self.max_steps = max_steps
         self.ollama_url = ollama_url
         self.tools: Dict[str, Dict[str, Any]] = {}
+
+        # Every agent (except the Research Agent itself, to avoid a
+        # pointless self-delegation loop) can hand a research question off
+        # to the specialized Research Agent instead of guessing/hallucinating
+        # facts it has no real way to know.
+        if name != "ResearchAgent":
+            self._register_research_delegation_tool()
+
+    def _register_research_delegation_tool(self):
+        self.register_tool(
+            name="delegate_research",
+            description=(
+                "Delegiert eine Recherche-Teilaufgabe an den spezialisierten Research Agent "
+                "(echte Websuche via SearXNG + Wikipedia, mit Quellenangaben und Faktencheck). "
+                "Nutze dies für aktuelle Fakten, Dokumentation oder Web-Informationen, die du "
+                "nicht sicher weißt - statt zu raten oder zu halluzinieren."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "Die konkrete Recherche-Frage/Aufgabe für den Research Agent"
+                    }
+                },
+                "required": ["task"]
+            },
+            handler=self._tool_delegate_research
+        )
+
+    async def _tool_delegate_research(self, task: str) -> Dict[str, Any]:
+        # Deferred import - avoids a circular import at module load time
+        # (research_agent.py imports BaseAgent from this same module).
+        from services.agents.research_agent import ResearchAgent
+
+        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=6)
+        result = await sub_agent.run(task=task)
+        if result.get("success"):
+            return {"answer": result["answer"]}
+        return {"error": result.get("error", "Research Agent lieferte kein Ergebnis")}
 
     def register_tool(
         self,

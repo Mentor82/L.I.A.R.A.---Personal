@@ -33,7 +33,11 @@ class ResearchAgent(BaseAgent):
 
     def __init__(
         self,
-        model: str = "llama3.2:3b",
+        # Cloud model, not a small local one - confirmed live that
+        # llama3.2:3b failed to correctly synthesize an answer from real,
+        # enriched SearXNG source text even when the answer was plainly
+        # present in a source (Bundesliga-table-leader test).
+        model: str = "gpt-oss:120b-cloud",
         max_steps: int = 10
     ):
         super().__init__(
