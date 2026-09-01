@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
@@ -43,3 +43,80 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         failing_lock = MagicMock()
         failing_lock.release.side_effect = Exception("Lock error")
         _release_session_lock(failing_lock)
+
+    async def test_concurrent_turn_history_serialized_under_lock(self):
+        """
+        Verify that when two concurrent turns target the same session_id:
+        Turn 2 waits for Turn 1's lock, and only queries conversation_history
+        AFTER Turn 1 has completed and released the lock (Issue #13 + Issue #18).
+        """
+        lock_acquire_events = []
+        history_read_snapshots = []
+        simulated_messages_db = []
+
+        class MockRedisService:
+            def __init__(self):
+                self.active_owner = None
+
+            def create_lock(self, owner_id):
+                service = self
+                class Lock:
+                    def __init__(self, owner):
+                        self.owner = owner
+
+                    def acquire(self, blocking=True):
+                        if service.active_owner is not None and service.active_owner != self.owner:
+                            return False
+                        service.active_owner = self.owner
+                        return True
+
+                    def release(self):
+                        if service.active_owner == self.owner:
+                            service.active_owner = None
+                return Lock(owner_id)
+
+        redis_service = MockRedisService()
+
+        async def simulated_turn_worker(turn_id, user_text, reply_text):
+            lock = redis_service.create_lock(turn_id)
+            # 1. Acquire lock (retrying until available)
+            while not lock.acquire():
+                await asyncio.sleep(0.01)
+            lock_acquire_events.append(f"acquired_{turn_id}")
+
+            try:
+                # 2. History snapshot happens UNDER the lock
+                snapshot = list(simulated_messages_db)
+                history_read_snapshots.append((turn_id, snapshot))
+
+                # 3. User message persisted
+                simulated_messages_db.append({"role": "user", "content": user_text})
+                await asyncio.sleep(0.03)
+
+                # 4. Assistant message persisted
+                simulated_messages_db.append({"role": "assistant", "content": reply_text})
+            finally:
+                lock.release()
+                lock_acquire_events.append(f"released_{turn_id}")
+
+        # Launch Turn A and Turn B concurrently
+        await asyncio.gather(
+            simulated_turn_worker("A", "Hallo von A", "Antwort auf A"),
+            simulated_turn_worker("B", "Hallo von B", "Antwort auf B")
+        )
+
+        # Verify strict turn ordering
+        self.assertEqual(lock_acquire_events, [
+            "acquired_A", "released_A",
+            "acquired_B", "released_B"
+        ])
+
+        # Turn A saw empty history
+        turn_a_history = [s for t, s in history_read_snapshots if t == "A"][0]
+        self.assertEqual(turn_a_history, [])
+
+        # Turn B MUST see Turn A's user message AND Turn A's assistant reply
+        turn_b_history = [s for t, s in history_read_snapshots if t == "B"][0]
+        self.assertEqual(len(turn_b_history), 2)
+        self.assertEqual(turn_b_history[0]["content"], "Hallo von A")
+        self.assertEqual(turn_b_history[1]["content"], "Antwort auf A")

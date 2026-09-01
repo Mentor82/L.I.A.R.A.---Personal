@@ -495,6 +495,95 @@ async def stream_ollama_response(
     interaction_type = MoodSystem.detect_interaction_type(message)
     mood_snapshot = mood_system.get_snapshot()
     mood_modifier = mood_snapshot["modifier"]
+
+    # issue #13 + #18: Load canonical conversation history and persist user turn UNDER THE SESSION LOCK
+    # so that concurrent turns for the same session are strictly serialized, and each turn
+    # sees the fully completed canonical previous turn history.
+    if user_id is not None and session_id is not None:
+        from core.database import SessionLocal
+        db_turn = SessionLocal()
+        try:
+            if conversation_history is None:
+                history_rows = db_turn.execute(text("""
+                    SELECT role, content FROM chat_messages
+                    WHERE session_id = :session_id
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT :limit
+                """), {'session_id': session_id, 'limit': HISTORY_TURNS_LIMIT}).all()
+                conversation_history = [
+                    {'role': row.role, 'content': row.content} for row in reversed(history_rows)
+                ]
+
+            if user_message_id is None:
+                message_insert = text("""
+                    INSERT INTO chat_messages 
+                        (user_id, session_id, role, content, model, mood, timestamp)
+                    VALUES 
+                        (:user_id, :session_id, 'user', :content, :model, :mood, CURRENT_TIMESTAMP)
+                    RETURNING id
+                """)
+                result = db_turn.execute(message_insert, {
+                    'user_id': user_id,
+                    'session_id': session_id,
+                    'content': message,
+                    'model': model,
+                    'mood': mood_snapshot["mood"]
+                })
+                db_turn.commit()
+                user_message_id = result.scalar()
+
+                db_turn.execute(text("""
+                    UPDATE chat_sessions 
+                    SET updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :session_id
+                """), {'session_id': session_id})
+                db_turn.commit()
+
+                logger.info(f"Created message {user_message_id} for user {user_id} in session {session_id} under lock")
+
+                should_store_memory = memory_enabled and (not used_tools)
+                if should_store_memory:
+                    try:
+                        store_message_with_concepts(
+                            user_id=user_id,
+                            message_id=user_message_id,
+                            content=message,
+                            role='user',
+                            timestamp=datetime.utcnow(),
+                            session_id=session_id
+                        )
+                    except Exception as e:
+                        logger.error(f"Concept extraction failed: {e}")
+
+                    import threading
+                    def store_memory_async(u_id, m_id, s_id, c_mood, e_level):
+                        db_async = SessionLocal()
+                        try:
+                            store_in_4d_memory(
+                                db=db_async,
+                                user_id=u_id,
+                                content_type='message',
+                                content_id=m_id,
+                                content_text=message,
+                                session_id=s_id,
+                                mood=c_mood,
+                                energy_level=e_level,
+                                additional_context={'model': model}
+                            )
+                        except Exception as ex:
+                            logger.error(f"4D Memory async storage failed: {ex}")
+                        finally:
+                            db_async.close()
+
+                    threading.Thread(
+                        target=store_memory_async,
+                        args=(user_id, user_message_id, session_id, mood_snapshot["mood"], mood_snapshot["intensity"]),
+                        daemon=True
+                    ).start()
+        except Exception as e:
+            logger.error(f"Turn history read and user turn persistence failed: {e}")
+        finally:
+            db_turn.close()
     
     # System Prompt mit Mood
     system_prompt = f"""Du bist Liara, eine warmherzige Digitalbegleiterin.
@@ -1620,153 +1709,34 @@ async def stream_chat(
                 logger.error(f"Failed to store search history: {e}")
                 # Continue even if storage fails
     
-    # Safe defaults in case the storage block below fails before setting
-    # these - stream_ollama_response() must never NameError on them.
-    message_id = None
-    used_tools = False
-    conversation_history = []
-    # issue #13 item 2: only ever acquired for an EXISTING session (below) -
-    # a brand-new session's very first message has no prior history/turn
-    # for a second request to race against, since nothing else can
-    # reference a session_id that doesn't exist yet.
-    session_lock = None
+    used_tools = bool(web_search_result) or bool(action_result)
 
-    try:
-        # Get or create session_id
-        if not request.session_id:
-            # Create new session with title from first message
-            title = request.message[:50] + "..." if len(request.message) > 50 else request.message
-            session_result = db.execute(text("""
-                INSERT INTO chat_sessions (user_id, title, created_at, updated_at)
-                VALUES (:user_id, :title, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                RETURNING id
-            """), {'user_id': current_user.id, 'title': title})
-            db.commit()
-            session_id = session_result.scalar()
-        else:
-            # Verify session belongs to user
-            session_check = db.execute(text("""
-                SELECT id FROM chat_sessions 
-                WHERE id = :session_id AND user_id = :user_id
-            """), {'session_id': request.session_id, 'user_id': current_user.id}).first()
-            
-            if not session_check:
-                raise HTTPException(status_code=404, detail="Session not found or access denied")
-
-            session_id = request.session_id
-
-        # Short-term conversational history: without this, every request sent
-        # only (system prompt + the single current message) with no prior
-        # turns at all - the model had zero visibility into anything said
-        # earlier in the same session beyond whatever the *long-term* Neo4j
-        # semantic-similarity search (min_similarity=0.6) happened to surface,
-        # which a short/generic follow-up often doesn't clear. Confirmed live:
-        # telling Liara a custom nickname, then one message later asking for
-        # it back, got answered with "Liara" instead of the actual name.
-        history_rows = db.execute(text("""
-            SELECT role, content FROM chat_messages
-            WHERE session_id = :session_id
-            ORDER BY timestamp DESC, id DESC
-            LIMIT :limit
-        """), {'session_id': session_id, 'limit': HISTORY_TURNS_LIMIT}).all()
-        conversation_history = [
-            {'role': row.role, 'content': row.content} for row in reversed(history_rows)
-        ]
-
-        # Create message record in PostgreSQL
-        message_insert = text("""
-            INSERT INTO chat_messages 
-                (user_id, session_id, role, content, model, mood, timestamp)
-            VALUES 
-                (:user_id, :session_id, 'user', :content, :model, :mood, CURRENT_TIMESTAMP)
+    # Get or create session_id
+    if not request.session_id:
+        # Create new session with title from first message
+        title = request.message[:50] + "..." if len(request.message) > 50 else request.message
+        session_result = db.execute(text("""
+            INSERT INTO chat_sessions (user_id, title, created_at, updated_at)
+            VALUES (:user_id, :title, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
-        """)
-        
-        result = db.execute(message_insert, {
-            'user_id': current_user.id,
-            'session_id': session_id,
-            'content': request.message,
-            'model': request.model,
-            'mood': current_mood
-        })
+        """), {'user_id': current_user.id, 'title': title})
         db.commit()
-        message_id = result.scalar()
+        session_id = session_result.scalar()
+    else:
+        # Verify session belongs to user
+        session_check = db.execute(text("""
+            SELECT id FROM chat_sessions 
+            WHERE id = :session_id AND user_id = :user_id
+        """), {'session_id': request.session_id, 'user_id': current_user.id}).first()
         
-        # Update session timestamp
-        db.execute(text("""
-            UPDATE chat_sessions 
-            SET updated_at = CURRENT_TIMESTAMP
-            WHERE id = :session_id
-        """), {'session_id': session_id})
-        db.commit()
-        
-        logger.info(f"Created message {message_id} for user {current_user.id} in session {session_id}")
+        if not session_check:
+            raise HTTPException(status_code=404, detail="Session not found or access denied")
 
-        # Memory creation opt-in/out (Präferenzen > Erinnerung): tool-assisted
-        # messages (web search or an executed action) are separately gated by
-        # tool_memory_enabled, since that content is more likely to include
-        # third-party/external data the user may not want remembered.
-        used_tools = bool(web_search_result) or bool(action_result)
-        should_store_memory = user_prefs['memory_enabled'] and (not used_tools or user_prefs['tool_memory_enabled'])
+        session_id = request.session_id
 
-        if should_store_memory:
-            # ✨ NEU: Store in Neo4j with auto-concept extraction (sync für Testing)
-            try:
-                store_message_with_concepts(
-                    user_id=current_user.id,
-                    message_id=message_id,
-                    content=request.message,
-                    role='user',
-                    timestamp=datetime.utcnow(),
-                    session_id=session_id
-                )
-                logger.info(f"Stored concepts for message {message_id}")
-            except Exception as e:
-                logger.error(f"Concept extraction failed: {e}")
-
-            # Store in 4D Memory ASYNC (non-blocking) - don't wait for completion
-            import threading
-
-            def store_memory_async():
-                """Async Memory Storage mit eigener DB-Session"""
-                from core.database import SessionLocal
-                db_async = SessionLocal()
-                try:
-                    store_in_4d_memory(
-                        db=db_async,
-                        user_id=current_user.id,
-                        content_type='message',
-                        content_id=message_id,
-                        content_text=request.message,
-                        session_id=session_id,
-                        mood=current_mood,
-                        energy_level=energy,
-                        additional_context={
-                            'model': request.model,
-                            'temperature': request.temperature,
-                            'search_intent': search_intent,
-                            'action_intent': action_intent,
-                            'web_search_used': web_search_result is not None
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"4D Memory async storage failed: {e}")
-                finally:
-                    db_async.close()
-
-            threading.Thread(target=store_memory_async, daemon=True).start()
-
-    except HTTPException:
-        # The session-ownership check above deliberately raises 404 for a
-        # session the user doesn't own - without this, the bare except
-        # below swallowed it as a mere "storage failed" log line and chat
-        # continued anyway, so a request for someone else's session_id
-        # would silently degrade instead of actually failing.
-        raise
-    except Exception as e:
-        logger.error(f"Message storage failed: {e}")
-        # Continue with chat even if message storage fails
-    
+    # issue #18 + #13: Return StreamingResponse immediately so keepalive comments prevent
+    # 524 timeouts, while conversation history reading and user turn persistence happen
+    # strictly under the session lock inside stream_ollama_response.
     return StreamingResponse(
         _with_sse_keepalive(stream_ollama_response(
             message=request.message,
@@ -1779,16 +1749,16 @@ async def stream_chat(
             web_search_risk_score=web_search_risk_score,
             action_result=action_result,
             memory_context=relevant_concepts,
-            conversation_history=conversation_history,
-            session_id=session_id,  # NEW: Send session_id to frontend
+            conversation_history=None,
+            session_id=session_id,
             user_id=current_user.id,
             username=current_user.username,
             personality=user_prefs['personality'],
             custom_instructions=user_prefs['custom_instructions'],
-            user_message_id=message_id,
+            user_message_id=None,
             memory_enabled=user_prefs['memory_enabled'],
             used_tools=used_tools,
-            session_lock=session_lock
+            session_lock=None
         )),
         media_type="text/event-stream",
         headers={
