@@ -22,12 +22,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('mermaid')) {
-              return 'mermaid-vendor';
-            }
-            if (id.includes('cytoscape')) {
-              return 'cytoscape-vendor';
-            }
             if (id.includes('katex')) {
               return 'katex-vendor';
             }
@@ -59,6 +53,8 @@ export default defineConfig({
         }
       }
     },
-    chunkSizeWarningLimit: 1200
+    // Mermaid and Cynefin stand-alone engines are ~675kB minified by design.
+    // Setting limit to 800kB cleanly accommodates them without false-positive warnings.
+    chunkSizeWarningLimit: 800
   }
 })
