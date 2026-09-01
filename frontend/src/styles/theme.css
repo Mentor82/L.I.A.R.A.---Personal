@@ -139,6 +139,18 @@
   --z-modal-backdrop: 900;
   --z-modal: 1000;
   --z-toast: 1100;
+
+  /* Bidirectional Aliases for modern-design tokens (Dark) */
+  --bg-primary: var(--color-bg);
+  --bg-secondary: var(--color-bg-alt);
+  --bg-tertiary: var(--color-bg-tertiary);
+  --text-primary: var(--color-text);
+  --text-secondary: var(--color-text-muted);
+  --text-tertiary: var(--color-text-faint);
+  --border-primary: var(--color-border);
+  --border-secondary: rgba(255, 255, 255, 0.04);
+  --primary: var(--color-primary);
+  --accent: var(--color-cyan);
 }
 
 /* Light Theme */
@@ -173,10 +185,10 @@
   --bg-active: rgba(0, 0, 0, 0.08);
   --bg-subtle: rgba(0, 0, 0, 0.02);
   --bg-muted: rgba(0, 0, 0, 0.03);
-  --bg-card: rgba(0, 0, 0, 0.05);
-  --bg-input: rgba(0, 0, 0, 0.05);
-  --bg-input-hover: rgba(0, 0, 0, 0.08);
-  --bg-dropdown: rgba(255, 255, 255, 0.95);
+  --bg-card: rgba(0, 0, 0, 0.04);
+  --bg-input: rgba(0, 0, 0, 0.04);
+  --bg-input-hover: rgba(0, 0, 0, 0.07);
+  --bg-dropdown: #FFFFFF;
   
   /* Accent Backgrounds (keep similar alpha for consistency) */
   --bg-primary-subtle: rgba(2, 132, 199, 0.1);
@@ -198,6 +210,18 @@
   /* Shadows */
   --shadow-soft: 0 4px 14px rgba(0, 0, 0, 0.1);
   --shadow-glow: 0 0 12px rgba(2, 132, 199, 0.3);
+
+  /* Bidirectional Aliases for modern-design tokens (Light) */
+  --bg-primary: var(--color-bg);
+  --bg-secondary: var(--color-bg-alt);
+  --bg-tertiary: var(--color-bg-tertiary);
+  --text-primary: var(--color-text);
+  --text-secondary: var(--color-text-muted);
+  --text-tertiary: var(--color-text-faint);
+  --border-primary: var(--color-border);
+  --border-secondary: rgba(0, 0, 0, 0.08);
+  --primary: var(--color-primary);
+  --accent: var(--color-cyan);
 }
 
 /* ==================== RESET & BASE ==================== */

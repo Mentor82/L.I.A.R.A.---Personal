@@ -1426,9 +1426,9 @@
   margin: 0 1rem;
   cursor: pointer;
   font-size: 0.9rem;
-  background: rgba(229, 62, 62, 0.15);
-  color: #ff8080;
-  border: 1px solid rgba(229, 62, 62, 0.3);
+  background: var(--bg-danger-subtle);
+  color: var(--color-danger);
+  border: 1px solid var(--bg-danger-muted);
 }
 
 .chat-banner-dismiss {
@@ -1442,7 +1442,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-dark);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1452,9 +1452,9 @@
 
 .chat-modal {
   background: var(--color-bg-alt, #1a1a2e);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  border: 1px solid var(--color-border);
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-soft);
   max-width: 500px;
   width: 90%;
 }
@@ -1464,7 +1464,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem 2rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .chat-modal-header h3 {
@@ -1474,9 +1474,9 @@
 }
 
 .chat-modal-close-btn {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: rgba(239, 68, 68, 1);
+  background: var(--bg-danger-subtle);
+  border: 1px solid var(--bg-danger-muted);
+  color: var(--color-danger);
   width: 36px;
   height: 36px;
   border-radius: 8px;
@@ -1490,7 +1490,7 @@
 }
 
 .chat-modal-close-btn:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: var(--bg-danger-muted);
   transform: scale(1.05);
 }
 
@@ -1519,7 +1519,7 @@
 .chat-btn-secondary {
   background: var(--bg-hover);
   color: var(--color-text);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--color-border);
 }
 
 .chat-btn-secondary:hover {
@@ -1527,10 +1527,11 @@
 }
 
 .chat-btn-danger {
-  background: #e53e3e;
+  background: var(--color-danger);
   color: #fff;
 }
 
 .chat-btn-danger:hover {
-  background: #c53030;
+  background: var(--color-danger);
+  filter: brightness(0.9);
 }
