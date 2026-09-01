@@ -6,6 +6,7 @@ Manages chat conversation sessions and message history
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import json
 from typing import List, Optional, Dict, Any
