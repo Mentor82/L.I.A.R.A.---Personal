@@ -80,9 +80,15 @@ class TestAgentRouter(unittest.TestCase):
         self.app = FastAPI()
         self.app.include_router(agent_router)
         self.app.dependency_overrides[require_active_user] = mock_require_active_user
-        self.client = TestClient(self.app)
+        try:
+            import httpx
+            self.client = httpx.Client(transport=httpx.ASGITransport(app=self.app), base_url="http://testserver")
+        except Exception:
+            self.client = TestClient(self.app)
 
     def tearDown(self):
+        if hasattr(self, "client") and hasattr(self.client, "close"):
+            self.client.close()
         self.app.dependency_overrides.clear()
 
     def test_get_agent_types(self):
