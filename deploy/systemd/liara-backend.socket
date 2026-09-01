@@ -6,7 +6,8 @@ PartOf=liara-backend.service
 ListenStream=/run/liara/liara-backend.sock
 SocketUser=mirko
 SocketGroup=www-data
-SocketMode=0660
+SocketMode=0666
+DirectoryMode=0775
 Backlog=2048
 
 [Install]

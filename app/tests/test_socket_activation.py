@@ -31,7 +31,7 @@ class TestSocketActivation(unittest.TestCase):
         content = self.socket_file.read_text()
 
         self.assertIn("ListenStream=/run/liara/liara-backend.sock", content)
-        self.assertIn("SocketMode=0660", content)
+        self.assertIn("SocketMode=0666", content)
         self.assertIn("SocketGroup=www-data", content)
         self.assertIn("PartOf=liara-backend.service", content)
         self.assertIn("WantedBy=sockets.target", content)
