@@ -183,6 +183,81 @@ def _release_session_lock(lock) -> None:
         logger.debug(f"Session generation lock release skipped: {e}")
 
 
+async def _race_with_lock_lost(coro_or_future, lock_lost_event: Optional[asyncio.Event]):
+    """
+    Awaits an async operation while watching lock_lost_event.
+    If lock_lost_event fires while the operation is pending, the operation
+    is immediately cancelled and SessionLockLostError is raised.
+    """
+    if lock_lost_event is None:
+        return await coro_or_future
+
+    if lock_lost_event.is_set():
+        raise SessionLockLostError("Sitzungskoordination wurde unterbrochen (Lease-Verlust).")
+
+    op_task = asyncio.ensure_future(coro_or_future)
+    lost_task = asyncio.ensure_future(lock_lost_event.wait())
+
+    done, pending = await asyncio.wait(
+        {op_task, lost_task},
+        return_when=asyncio.FIRST_COMPLETED
+    )
+
+    for p in pending:
+        p.cancel()
+        try:
+            await p
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    if lost_task in done:
+        raise SessionLockLostError("Sitzungskoordination wurde während der Operation unterbrochen (Lease-Verlust).")
+
+    return await op_task
+
+
+async def _with_lock_lost_guard(async_iterable, lock_lost_event: Optional[asyncio.Event]):
+    """
+    Wraps an async generator/iterator so that every next-chunk wait is raced
+    against lock_lost_event. If the lock is lost while awaiting the next chunk,
+    the pending fetch is cancelled immediately and SessionLockLostError is raised.
+    """
+    if lock_lost_event is None:
+        async for item in async_iterable:
+            yield item
+        return
+
+    iterator = async_iterable.__aiter__()
+    while True:
+        if lock_lost_event.is_set():
+            raise SessionLockLostError("Sitzungskoordination wurde während des Streamings unterbrochen (Lease-Verlust).")
+
+        next_task = asyncio.ensure_future(iterator.__anext__())
+        lost_task = asyncio.ensure_future(lock_lost_event.wait())
+
+        done, pending = await asyncio.wait(
+            {next_task, lost_task},
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for p in pending:
+            p.cancel()
+            try:
+                await p
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if lost_task in done:
+            raise SessionLockLostError("Sitzungskoordination wurde während des Streamings unterbrochen (Lease-Verlust).")
+
+        try:
+            item = await next_task
+        except StopAsyncIteration:
+            break
+
+        yield item
+
+
 SSE_KEEPALIVE_INTERVAL = 10.0  # seconds - extra margin under Cloudflare's ~100s edge timeout
 
 
@@ -1017,7 +1092,10 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # emits a proper SSE error event AND releases the session
                 # lock in its finally - a local catch-and-return here would
                 # silently skip both.
-                async for event_kind, event_payload in get_linep_provider().generate_stream(prompt_text, model, num_predict):
+                async for event_kind, event_payload in _with_lock_lost_guard(
+                    get_linep_provider().generate_stream(prompt_text, model, num_predict),
+                    lock_lost_event
+                ):
                     _check_lock_held()
                     if event_kind == "thinking":
                         full_thinking_text += event_payload
@@ -1203,7 +1281,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                         response.raise_for_status()
 
                         # Stream Response Chunks - line by line
-                        async for line in response.aiter_lines():
+                        async for line in _with_lock_lost_guard(response.aiter_lines(), lock_lost_event):
                             _check_lock_held()
                             if line:
                                 try:
@@ -1376,7 +1454,12 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
 
                     tool_call = ToolCall(tool_name=tool_name, parameters=arguments, raw_text="", confidence=1.0)
                     try:
-                        tool_result = await tool_executor.execute(tool_call, user_id or 0, session_id=session_id)
+                        tool_result = await _race_with_lock_lost(
+                            tool_executor.execute(tool_call, user_id or 0, session_id=session_id),
+                            lock_lost_event
+                        )
+                    except SessionLockLostError:
+                        raise
                     except Exception as e:
                         logger.error(f"Agent tool execution failed: {tool_name}: {e}")
                         tool_result = {"success": False, "error": str(e)}

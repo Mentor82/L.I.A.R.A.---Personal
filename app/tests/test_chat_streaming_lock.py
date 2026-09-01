@@ -10,6 +10,8 @@ for mod in ("sentence_transformers", "neo4j"):
 
 from api.routers.chat_streaming import (
     _with_sse_keepalive,
+    _race_with_lock_lost,
+    _with_lock_lost_guard,
     _acquire_session_lock,
     _renew_session_lock,
     _session_lock_watchdog,
@@ -419,3 +421,74 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
                 any("Sitzungskoordination wurde während der Anfrage unterbrochen" in err for err in parsed_errors),
                 f"Events yielded: {events}"
             )
+
+    async def test_race_with_lock_lost_normal_completion(self):
+        """Verify _race_with_lock_lost completes normally when lock is held."""
+        lock_lost_event = asyncio.Event()
+
+        async def quick_coro():
+            await asyncio.sleep(0.01)
+            return "success_result"
+
+        result = await _race_with_lock_lost(quick_coro(), lock_lost_event)
+        self.assertEqual(result, "success_result")
+
+    async def test_race_with_lock_lost_aborts_blocking_operation(self):
+        """Verify _race_with_lock_lost immediately cancels a slow pending operation upon lock loss."""
+        lock_lost_event = asyncio.Event()
+        was_cancelled = False
+
+        async def slow_blocking_op():
+            nonlocal was_cancelled
+            try:
+                await asyncio.sleep(10.0)  # Long blocking operation (e.g. tool execution)
+            except asyncio.CancelledError:
+                was_cancelled = True
+                raise
+
+        async def trigger_loss():
+            await asyncio.sleep(0.03)
+            lock_lost_event.set()
+
+        asyncio.create_task(trigger_loss())
+
+        with self.assertRaises(SessionLockLostError):
+            await _race_with_lock_lost(slow_blocking_op(), lock_lost_event)
+
+        self.assertTrue(was_cancelled)
+
+    async def test_with_lock_lost_guard_normal_iteration(self):
+        """Verify _with_lock_lost_guard yields all items when lock is held."""
+        lock_lost_event = asyncio.Event()
+
+        async def item_generator():
+            for i in range(3):
+                yield f"item_{i}"
+
+        yielded = []
+        async for item in _with_lock_lost_guard(item_generator(), lock_lost_event):
+            yielded.append(item)
+
+        self.assertEqual(yielded, ["item_0", "item_1", "item_2"])
+
+    async def test_with_lock_lost_guard_aborts_blocking_anext(self):
+        """Verify _with_lock_lost_guard cancels a blocked aiter_lines() wait immediately when lease is lost."""
+        lock_lost_event = asyncio.Event()
+
+        async def slow_stream():
+            yield "chunk_1"
+            await asyncio.sleep(10.0)  # Blocking network wait (e.g. Ollama token gap)
+            yield "chunk_2"
+
+        async def trigger_loss():
+            await asyncio.sleep(0.03)
+            lock_lost_event.set()
+
+        asyncio.create_task(trigger_loss())
+
+        yielded = []
+        with self.assertRaises(SessionLockLostError):
+            async for chunk in _with_lock_lost_guard(slow_stream(), lock_lost_event):
+                yielded.append(chunk)
+
+        self.assertEqual(yielded, ["chunk_1"])
