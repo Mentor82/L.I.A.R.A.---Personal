@@ -187,6 +187,14 @@ def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
         return f'🌐 Webseite lesen: "{arguments.get("url", "")}"'
     if tool_name == "get_system_health":
         return "🩺 System-Status & Hardware-Metriken abrufen"
+    if tool_name == "delegate_research":
+        # Shows which model actually ran the delegated sub-agent (always
+        # research_agent.DELEGATION_MODEL, not the outer chat's own model) -
+        # requested live after watching delegate_research fail/retry in the
+        # agent_steps log with no way to tell which model was involved.
+        from services.agents.research_agent import DELEGATION_MODEL
+        task_preview = (arguments.get("task") or "")[:60]
+        return f'🔍 Research Agent ({DELEGATION_MODEL}): "{task_preview}"'
     return tool_name
 
 
