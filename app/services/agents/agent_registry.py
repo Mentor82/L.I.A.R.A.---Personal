@@ -31,6 +31,7 @@ class AgentRegistry:
                 "create_file",
                 "delete_file",
                 "validate_syntax",
+                "run_terminal_command",
                 "delegate_research"
             ],
             "class": CodeAgent

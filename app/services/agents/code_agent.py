@@ -160,6 +160,34 @@ class CodeAgent(BaseAgent):
             handler=lambda code: aci.validate_python_syntax(code)
         )
 
+        # 8. run_terminal_command - reuses code_sandbox.py's run_code()
+        # (same sandbox as the Workspace "Run" button: unprivileged
+        # liara-runner user, network-isolated, time/memory/process limits)
+        # with language="bash" instead of an interpreter, so no new sudoers
+        # rule was needed - run_sandboxed.sh already whitelists this exact
+        # invocation shape, just with a new bash|sh case added to its own
+        # language dispatch.
+        self.register_tool(
+            name="run_terminal_command",
+            description=(
+                "Führt einen einzelnen Shell-Befehl in der sandboxed Session-Umgebung aus "
+                "(unprivilegierter Nutzer, netzwerk-isoliert, Zeit-/Speicher-/Prozess-Limits, "
+                "KEIN Internetzugriff). Nutze dies z.B. zum Ausführen von Tests, Inspizieren von "
+                "Dateien (find/wc/grep/cat) oder kurzen Berechnungen. NICHT für 'pip install' "
+                "(dafür workspace_propose_dependency_change nutzen, das braucht Netzzugriff) und "
+                "NICHT für interaktive Programme (kein stdin-Dialog möglich, nur ein Aufruf mit "
+                "vollständigem Ergebnis)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Der auszuführende Shell-Befehl"}
+                },
+                "required": ["command"]
+            },
+            handler=self._tool_run_terminal_command
+        )
+
     # Tool Handlers
     def _tool_view_file(self, filename: str, start_line: int = 1, end_line: Optional[int] = None):
         return aci.view_file(
@@ -216,3 +244,25 @@ class CodeAgent(BaseAgent):
             session_id=self.session_id,
             filename=filename
         )
+
+    def _tool_run_terminal_command(self, command: str) -> Dict[str, Any]:
+        if not self.user_id or not self.session_id:
+            return {"error": "Kein aktiver Workspace (keine Chat-Session) - run_terminal_command braucht eine Session."}
+
+        from services.session_workspace import SESSION_FILES_DIR
+        from services.code_sandbox import run_code
+
+        session_dir = SESSION_FILES_DIR / str(self.user_id) / str(self.session_id)
+        result = run_code(
+            "bash", command, session_dir,
+            user_id=self.user_id, session_id=self.session_id,
+        )
+        if result.error:
+            return {"error": result.error}
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.exit_code,
+            "timed_out": result.timed_out,
+            "files_changed": [f.name for f in result.files],
+        }

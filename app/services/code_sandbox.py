@@ -68,6 +68,9 @@ MEMORY_LIMITS = {
     "python3.12": 1 * 1024 * 1024 * 1024,
     "python3.11": 1 * 1024 * 1024 * 1024,
     "julia": 4 * 1024 * 1024 * 1024,
+    # A bit more headroom than plain Python - shell commands can chain
+    # several processes (pipes) each needing their own address space.
+    "bash": 2 * 1024 * 1024 * 1024,
 }
 
 LANGUAGE_ALIASES = {
@@ -88,6 +91,13 @@ LANGUAGE_ALIASES = {
     "3.11": "python3.11",
     "jl": "julia",
     "julia": "julia",
+    # For the Code Agent's run_terminal_command tool (arbitrary shell
+    # commands) - reuses the exact same run_code() pipeline as Python/Julia,
+    # just with run_sandboxed.sh's new bash|sh case instead of an interpreter.
+    "bash": "bash",
+    "sh": "bash",
+    "shell": "bash",
+    "terminal": "bash",
 }
 
 AVAILABLE_RUNTIMES = [
@@ -100,6 +110,8 @@ AVAILABLE_RUNTIMES = [
 
 def get_interpreter_binary(normalized_lang: str) -> str:
     """Returns candidate interpreter binary for pre-flight availability check."""
+    if normalized_lang == "bash":
+        return "bash"
     if normalized_lang.startswith("python3."):
         ver = normalized_lang.replace("python", "")
         cand = f"/opt/liara/runner-venvs/{ver}/bin/python3"
@@ -121,6 +133,8 @@ def get_interpreter_binary(normalized_lang: str) -> str:
 def get_script_filename(normalized_lang: str) -> str:
     if normalized_lang.startswith("python") or normalized_lang == "python":
         return "script.py"
+    if normalized_lang == "bash":
+        return "script.sh"
     return "script.jl"
 
 def normalize_language(language: str) -> Optional[str]:

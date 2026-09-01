@@ -99,6 +99,22 @@ case "$LANGUAGE" in
     julia "$SCRIPT_PATH"
     CODE=$?
     ;;
+  bash|sh)
+    # Code Agent's run_terminal_command tool - an arbitrary shell command,
+    # not an LLM-authored script file in the usual sense, but written to
+    # $SCRIPT_PATH by code_sandbox.py the same way Python/Julia code is, so
+    # it goes through the exact same sudoers-whitelisted invocation with no
+    # separate rule needed. Same network isolation as every other language
+    # here (no exceptions) - this is NOT where `pip install` runs; that's
+    # workspace_propose_dependency_change's job, via manage_venv.sh.
+    ulimit -v 2097152   # 2 GiB - shell pipelines can chain several processes
+    if [ -x "$SESSION_VENV/bin/python3" ]; then
+      export PATH="$SESSION_VENV/bin:$PATH"
+      export VIRTUAL_ENV="$SESSION_VENV"
+    fi
+    bash "$SCRIPT_PATH"
+    CODE=$?
+    ;;
   *)
     echo "Unknown language: $LANGUAGE" >&2
     exit 1
