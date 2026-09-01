@@ -21,7 +21,10 @@ import contextlib
 import logging
 import mimetypes
 import os
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 import shutil
 import signal
 import subprocess
@@ -59,22 +62,66 @@ NPROC_LIMIT = 32
 # address space without using it proportionally, so a Python-sized limit
 # would kill it at startup/package-load.
 MEMORY_LIMITS = {
-    "python": 1 * 1024 * 1024 * 1024,   # 1 GiB
-    "julia": 4 * 1024 * 1024 * 1024,    # 4 GiB - tune empirically during rollout
+    "python": 1 * 1024 * 1024 * 1024,
+    "python3.14": 1 * 1024 * 1024 * 1024,
+    "python3.13": 1 * 1024 * 1024 * 1024,
+    "python3.12": 1 * 1024 * 1024 * 1024,
+    "python3.11": 1 * 1024 * 1024 * 1024,
+    "julia": 4 * 1024 * 1024 * 1024,
 }
 
 LANGUAGE_ALIASES = {
-    "py": "python", "python": "python", "python3": "python",
-    "jl": "julia", "julia": "julia",
+    "py": "python3.14",
+    "python": "python3.14",
+    "python3": "python3.14",
+    "python3.14": "python3.14",
+    "py314": "python3.14",
+    "3.14": "python3.14",
+    "python3.13": "python3.13",
+    "py313": "python3.13",
+    "3.13": "python3.13",
+    "python3.12": "python3.12",
+    "py312": "python3.12",
+    "3.12": "python3.12",
+    "python3.11": "python3.11",
+    "py311": "python3.11",
+    "3.11": "python3.11",
+    "jl": "julia",
+    "julia": "julia",
 }
-# The shared runner-venv is now only the *bootstrap* interpreter used to
-# create each session's own venv (see run_sandboxed.sh, issue #5) and the
-# pre-flight "is Python installed at all" sanity check below - it is no
-# longer necessarily the interpreter that actually executes a script, which
-# instead runs from that session's own SESSION_DIR/.venv once it exists.
-INTERPRETER_BINARY = {"python": "/opt/liara/runner-venv/bin/python3", "julia": "julia"}
-SCRIPT_FILENAME = {"python": "script.py", "julia": "script.jl"}
 
+AVAILABLE_RUNTIMES = [
+    {"id": "python3.14", "name": "Python 3.14 (Standard)", "version": "3.14.7", "language": "python", "default": True},
+    {"id": "python3.13", "name": "Python 3.13", "version": "3.13.15", "language": "python", "default": False},
+    {"id": "python3.12", "name": "Python 3.12", "version": "3.12.14", "language": "python", "default": False},
+    {"id": "python3.11", "name": "Python 3.11", "version": "3.11.16", "language": "python", "default": False},
+    {"id": "julia", "name": "Julia", "version": "1.x", "language": "julia", "default": False},
+]
+
+def get_interpreter_binary(normalized_lang: str) -> str:
+    """Returns candidate interpreter binary for pre-flight availability check."""
+    if normalized_lang.startswith("python3."):
+        ver = normalized_lang.replace("python", "")
+        cand = f"/opt/liara/runner-venvs/{ver}/bin/python3"
+        if os.path.exists(cand):
+            return cand
+        cand_global = f"/opt/liara/runner-venv/bin/python3"
+        if os.path.exists(cand_global):
+            return cand_global
+        return os.sys.executable
+    elif normalized_lang.startswith("python"):
+        cand_314 = "/opt/liara/runner-venvs/3.14/bin/python3"
+        if os.path.exists(cand_314):
+            return cand_314
+        return os.sys.executable
+    elif normalized_lang == "julia":
+        return "julia"
+    return os.sys.executable
+
+def get_script_filename(normalized_lang: str) -> str:
+    if normalized_lang.startswith("python") or normalized_lang == "python":
+        return "script.py"
+    return "script.jl"
 
 def normalize_language(language: str) -> Optional[str]:
     return LANGUAGE_ALIASES.get((language or "").strip().lower())
@@ -161,22 +208,17 @@ def _diff_snapshot(
 
 def _preexec(language: str):
     def _apply():
-        os.setsid()  # own process group, so a timeout can kill the whole tree
-        try:
-            resource.setrlimit(resource.RLIMIT_CPU, (CPU_LIMIT_SECONDS, CPU_LIMIT_SECONDS))
-            resource.setrlimit(resource.RLIMIT_NPROC, (NPROC_LIMIT, NPROC_LIMIT))
-            mem_limit = MEMORY_LIMITS[language]
-            resource.setrlimit(resource.RLIMIT_AS, (mem_limit, mem_limit))
-            # Defense-in-depth for the Workspace per-file quota (issue #8) -
-            # a single write attempting to grow a file past this raises
-            # SIGXFSZ, so a runaway script physically cannot produce a file
-            # larger than the Workspace would ever accept anyway. Mirrored
-            # in run_sandboxed.sh's own `ulimit -f` in case sudo strips this.
-            resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_SESSION_FILE, MAX_SESSION_FILE))
-        except (ValueError, OSError) as e:
-            # Best-effort outer layer - run_sandboxed.sh's own ulimits are the
-            # authoritative limit if this fails for some reason.
-            logger.warning(f"code_sandbox: preexec rlimit setup failed: {e}")
+        if hasattr(os, "setsid"):
+            os.setsid()  # own process group, so a timeout can kill the whole tree
+        if resource is not None:
+            try:
+                resource.setrlimit(resource.RLIMIT_CPU, (CPU_LIMIT_SECONDS, CPU_LIMIT_SECONDS))
+                resource.setrlimit(resource.RLIMIT_NPROC, (NPROC_LIMIT, NPROC_LIMIT))
+                mem_limit = MEMORY_LIMITS[language]
+                resource.setrlimit(resource.RLIMIT_AS, (mem_limit, mem_limit))
+                resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_SESSION_FILE, MAX_SESSION_FILE))
+            except (ValueError, OSError) as e:
+                logger.warning(f"code_sandbox: preexec rlimit setup failed: {e}")
     return _apply
 
 
@@ -208,9 +250,9 @@ def run_code(
     if not normalized:
         return SandboxResult(run_id=run_id, error=f"Nicht unterstützte Sprache: {language}")
 
-    interpreter = INTERPRETER_BINARY[normalized]
-    if not shutil.which(interpreter):
-        label = "Python" if normalized == "python" else "Julia"
+    interpreter = get_interpreter_binary(normalized)
+    if not shutil.which(interpreter) and not os.path.exists(interpreter):
+        label = f"Python ({normalized})" if "python" in normalized else "Julia"
         return SandboxResult(run_id=run_id, error=f"{label} ist auf dem Server nicht installiert.")
 
     if not shutil.which("unshare") and REQUIRE_NETWORK_ISOLATION:
@@ -236,7 +278,7 @@ def run_code(
         except OSError:
             pass
 
-    script_path = run_dir / SCRIPT_FILENAME[normalized]
+    script_path = run_dir / get_script_filename(normalized)
     script_path.write_text(code, encoding="utf-8")
     # liara-runner needs to read this script - world-readable/traversable,
     # but not writable, since nothing writes back into run_dir.

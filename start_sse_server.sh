@@ -7,7 +7,11 @@
 # ============================================================================
 
 cd /opt/liara/app
-source /opt/liara/venv/bin/activate
+if [ -d "/opt/liara/venv314" ]; then
+    source /opt/liara/venv314/bin/activate
+else
+    source /opt/liara/venv/bin/activate
+fi
 
 # Fixed worker count for stability
 WORKERS=3

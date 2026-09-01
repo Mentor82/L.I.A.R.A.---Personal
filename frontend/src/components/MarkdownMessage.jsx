@@ -12,7 +12,10 @@ import './MarkdownMessage.css';
 
 // Languages the "Run" button supports - matches the sandboxed executor's
 // language aliases on the backend (app/services/code_sandbox.py).
-const RUNNABLE_LANGUAGES = new Set(['python', 'py', 'python3', 'julia', 'jl']);
+const RUNNABLE_LANGUAGES = new Set([
+  'python', 'py', 'python3', 'python3.11', 'python3.12', 'python3.13', 'python3.14',
+  'py311', 'py312', 'py313', 'py314', 'julia', 'jl'
+]);
 
 // LLMs commonly write LaTeX using \( \)/\[ \] (common in OpenAI-style
 // training data) instead of the $ $/$$ $$ delimiters remark-math expects.
@@ -104,9 +107,10 @@ const useLazySyntax = () => {
     const normalized = language.toLowerCase();
 
     if (!syntaxHighlighter) return false;
-    if (registeredLanguages.current.has(normalized)) return true;
-
-    const loader = prismLanguageImports[normalized];
+    let loader = prismLanguageImports[normalized];
+    if (!loader && (normalized.startsWith('py') || normalized.startsWith('python'))) {
+      loader = prismLanguageImports.python;
+    }
     if (!loader) return false;
 
     const mod = await loader();
@@ -156,7 +160,11 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
             setRunning(true);
             setRunResult(null);
             try {
-              const result = await codeExecAPI.run(sessionId, normalizedLanguage, codeText);
+              let targetLang = normalizedLanguage;
+              if (['python', 'py', 'python3'].includes(targetLang)) {
+                targetLang = localStorage.getItem('liara_sandbox_python_version') || 'python3.14';
+              }
+              const result = await codeExecAPI.run(sessionId, targetLang, codeText);
               setRunResult(result);
             } catch (err) {
               setRunResult({ error: err.message || 'Ausführung fehlgeschlagen.' });

@@ -13,6 +13,7 @@ import DiffView from './DiffView';
 import MarkdownMessage from './MarkdownMessage';
 import AgentDrawer from './AgentDrawer';
 import WorkspaceTerminal from './WorkspaceTerminal';
+import EditorPane from './EditorPane';
 import './WorkspacePage.css';
 
 const PROPOSAL_ACTION_LABELS = {
@@ -236,127 +237,6 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
   );
 }
 
-function formatClockTime(date) {
-  return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-/**
- * Terminal-styled execution panel: the scrollback of every run in this pane
- * (not just the last one), each entry labeled with what was run and when.
- * Purely a UX change on top of the exact same sandboxed codeExecAPI.run()
- * call the old single-result view already used - no new execution
- * capability, no shell, just remembering more than one result at a time.
- */
-function TerminalPanel({ history, onClear, sessionId }) {
-  const [expanded, setExpanded] = useState(true);
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    if (expanded && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [history.length, expanded]);
-
-  return (
-    <div className="workspace-terminal">
-      <div className="workspace-terminal-header">
-        <button className="workspace-terminal-toggle" onClick={() => setExpanded((v) => !v)}>
-          <span className="workspace-tree-chevron">{expanded ? '▾' : '▸'}</span>
-          <span>🖥 Terminal{history.length > 0 ? ` (${history.length})` : ''}</span>
-        </button>
-        {history.length > 0 && (
-          <button className="workspace-icon-btn" title="Terminal leeren" onClick={onClear}>🗑️</button>
-        )}
-      </div>
-      {expanded && (
-        <div className="workspace-terminal-body" ref={scrollRef}>
-          {history.length === 0 ? (
-            <p className="workspace-hint">Noch keine Ausführung in dieser Ansicht.</p>
-          ) : (
-            history.map((entry) => (
-              <div key={entry.id} className="workspace-terminal-entry">
-                <div className="workspace-terminal-prompt">
-                  <span className="workspace-terminal-prompt-symbol">$</span> {entry.filename}
-                  <span className="workspace-terminal-timestamp">{formatClockTime(entry.timestamp)}</span>
-                </div>
-                <CodeRunResult result={entry.result} sessionId={sessionId} />
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * One editor group (tab strip + toolbar + CodeMirror + terminal panel). The
- * Workspace renders one of these normally, or two side by side once split -
- * both panes share the same global `tabs` pool, each just tracking its own
- * active tab, so the same or different files can sit in either pane.
- */
-function EditorPane({
-  tabs, activeTabName, tabData, activeLang,
-  onSelectTab, onCloseTab, onChangeContent, onCreateEditor,
-  running, runHistory, onClearHistory, onSave, onRun,
-  sessionId, isSecondary, onSplit, onCloseSplitPane,
-  cmTheme, fontSizeExtension, isActivePane,
-}) {
-  return (
-    <section className={`workspace-main ${isActivePane ? 'active-pane' : ''}`}>
-      {isSecondary && (
-        <div className="workspace-split-header">
-          <span>Geteilte Ansicht</span>
-          <button className="workspace-icon-btn" title="Geteilte Ansicht schließen" onClick={onCloseSplitPane}>✕</button>
-        </div>
-      )}
-      <div className="workspace-tabs">
-        {tabs.map((t) => (
-          <button
-            key={t.name}
-            className={`workspace-tab ${activeTabName === t.name ? 'active' : ''}`}
-            onClick={() => onSelectTab(t.name)}
-          >
-            {t.name}{t.dirty ? ' •' : ''}
-            <span className="workspace-tab-close" onClick={(e) => { e.stopPropagation(); onCloseTab(t.name); }}>✕</span>
-          </button>
-        ))}
-      </div>
-
-      {tabData ? (
-        <>
-          <div className="workspace-toolbar">
-            <button className="workspace-btn-secondary" onClick={onSave} disabled={!tabData.dirty}>💾 Speichern</button>
-            <button className="workspace-btn-primary" onClick={onRun} disabled={!activeLang || running}>
-              {running ? 'Läuft…' : '▶ Ausführen'}
-            </button>
-            {!isSecondary && (
-              <button className="workspace-btn-secondary" onClick={onSplit} title="Datei zusätzlich rechts daneben öffnen">🗗 Teilen</button>
-            )}
-          </div>
-          <div className="workspace-editor-wrapper">
-            <CodeMirror
-              value={tabData.content}
-              height="100%"
-              theme={cmTheme}
-              extensions={activeLang ? [activeLang.cm, fontSizeExtension] : [fontSizeExtension]}
-              onChange={onChangeContent}
-              onCreateEditor={onCreateEditor}
-            />
-          </div>
-          <TerminalPanel history={runHistory} onClear={onClearHistory} sessionId={sessionId} />
-        </>
-      ) : (
-        <div className="workspace-empty">
-          <div className="workspace-empty-icon">📄</div>
-          <p className="workspace-empty-title">Keine Datei geöffnet</p>
-          <p className="workspace-empty-subtitle">Datei aus der Liste öffnen oder eine neue anlegen.</p>
-        </div>
-      )}
-    </section>
-  );
-}
-
 /**
  * Right-hand chat panel scoped to the Workspace's current session - reuses
  * the exact same /api/chat/stream agent Chat.jsx talks to (same session_id,
@@ -563,6 +443,14 @@ function WorkspacePage() {
   const [tabs, setTabs] = useState([]); // [{name, content, dirty}]
   const [activeTab, setActiveTab] = useState(null);
   const [running, setRunning] = useState(false);
+  const [pythonVersion, setPythonVersion] = useState(
+    () => localStorage.getItem('liara_sandbox_python_version') || 'python3.14'
+  );
+
+  const handlePythonVersionChange = (ver) => {
+    setPythonVersion(ver);
+    localStorage.setItem('liara_sandbox_python_version', ver);
+  };
   // Terminal scrollback for this pane - every run, not just the last one
   // (see runTab below). Capped client-side; nothing persisted server-side.
   const [runHistory, setRunHistory] = useState([]);
@@ -980,7 +868,8 @@ function WorkspacePage() {
     if (!tabData || !lang) return;
     setRunningState(true);
     try {
-      const result = await codeExecAPI.run(sessionId, lang.runLanguage, tabData.content);
+      const targetLang = lang.runLanguage === 'python' ? pythonVersion : lang.runLanguage;
+      const result = await codeExecAPI.run(sessionId, targetLang, tabData.content);
       setHistoryState((prev) => [
         ...prev,
         { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, filename, timestamp: new Date(), result },
@@ -1527,6 +1416,8 @@ function WorkspacePage() {
             cmTheme={cmTheme}
             fontSizeExtension={fontSizeExtension}
             isActivePane={!!splitTab && activePane === 'primary'}
+            pythonVersion={pythonVersion}
+            onPythonVersionChange={handlePythonVersionChange}
           />
           {splitTab && (
             <EditorPane
@@ -1552,6 +1443,8 @@ function WorkspacePage() {
               cmTheme={cmTheme}
               fontSizeExtension={fontSizeExtension}
               isActivePane={activePane === 'split'}
+              pythonVersion={pythonVersion}
+              onPythonVersionChange={handlePythonVersionChange}
             />
           )}
         </div>

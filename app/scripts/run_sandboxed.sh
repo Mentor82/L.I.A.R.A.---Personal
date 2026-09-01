@@ -40,8 +40,13 @@ cd "$WORKSPACE_DIR"
 # below rather than failing every future run in this session forever.
 # shellcheck source=_ensure_session_venv.sh
 source "$(dirname "$0")/_ensure_session_venv.sh"
-SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
-ensure_session_venv "$SESSION_VENV" || true
+
+PY_VER="3.14"
+if [[ "$LANGUAGE" =~ 3\.([0-9]+) ]]; then
+  PY_VER="3.${BASH_REMATCH[1]}"
+fi
+SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv_$PY_VER"
+ensure_session_venv "$SESSION_VENV" "$PY_VER" || true
 
 # Resource limits - last line of defense if the caller's preexec_fn rlimits
 # somehow don't apply (e.g. sudo policy strips them). CPU seconds, max
@@ -65,28 +70,18 @@ ulimit -f 204800
 # can manage.
 set +e
 case "$LANGUAGE" in
-  python)
+  python*|py*)
     ulimit -v 1048576   # 1 GiB
-    # The script itself lives under .runs/{run_id}/, not $WORKSPACE_DIR, so
-    # Python's default sys.path[0] (the running script's own directory)
-    # never includes sibling workspace files - `from stack import Stack`
-    # fails with ModuleNotFoundError even though stack.py sits right next
-    # to test_stack.py in the Explorer. Adding $WORKSPACE_DIR to PYTHONPATH
-    # lets same-workspace local imports resolve without changing where the
-    # script itself is read from.
-    # sandbox_sitecustomize/ is a sibling of this script - its sitecustomize.py
-    # is auto-imported by Python's `site` module before the script itself runs
-    # (see that file's docstring for why: it makes plt.show() actually produce
-    # a visible file on this headless server instead of silently no-op'ing).
     SANDBOX_SITECUSTOMIZE_DIR="$(cd "$(dirname "$0")/sandbox_sitecustomize" && pwd)"
     export PYTHONPATH="$SANDBOX_SITECUSTOMIZE_DIR:$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
-    # This session's own venv (see above) if it exists, else the shared
-    # runner-venv as a fallback - never the bare system python3 or the LIARA
-    # backend's own venv, keeps sandboxed deps isolated from both.
     if [ -x "$SESSION_VENV/bin/python3" ]; then
       "$SESSION_VENV/bin/python3" "$SCRIPT_PATH"
-    else
+    elif [ -x "/opt/liara/runner-venvs/$PY_VER/bin/python3" ]; then
+      "/opt/liara/runner-venvs/$PY_VER/bin/python3" "$SCRIPT_PATH"
+    elif [ -x "/opt/liara/runner-venv/bin/python3" ]; then
       /opt/liara/runner-venv/bin/python3 "$SCRIPT_PATH"
+    else
+      python3 "$SCRIPT_PATH"
     fi
     CODE=$?
     ;;

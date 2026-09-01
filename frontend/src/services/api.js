@@ -565,6 +565,13 @@ export const codeExecAPI = {
   },
 
   /**
+   * Listet verfügbare Python/Julia Sandbox-Laufzeitumgebungen.
+   */
+  async getRuntimes() {
+    return apiFetch('/code-exec/runtimes');
+  },
+
+  /**
    * Listet die Workspace-Dateien einer Session.
    */
   async listFiles(sessionId) {

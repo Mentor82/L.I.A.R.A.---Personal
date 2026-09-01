@@ -83,6 +83,18 @@ def _get_session_run_lock(user_id: int, session_id: int) -> asyncio.Lock:
     return lock
 
 
+@router.get("/runtimes")
+@router.get("/versions")
+async def list_available_runtimes(
+    current_user: User = Depends(require_active_user),
+):
+    """Listet verfügbare Sandbox-Laufzeitumgebungen (Python 3.11-3.14, Julia)."""
+    return {
+        "default": "python3.14",
+        "runtimes": code_sandbox.AVAILABLE_RUNTIMES,
+    }
+
+
 @router.post("/run", response_model=RunResponse)
 async def run_code(
     req: RunRequest,
