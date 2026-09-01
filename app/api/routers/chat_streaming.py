@@ -73,49 +73,26 @@ HISTORY_TURNS_LIMIT = 20
 # out from under it mid-generation.
 SESSION_GENERATION_LOCK_TTL = 1200  # seconds
 
-# Deliberately much shorter than SESSION_GENERATION_LOCK_TTL above: this is
-# how long a NEW request waits trying to acquire an already-held lock, not
-# how long a held lock lives. This wait happens before StreamingResponse
-# even exists, so the SSE keep-alive wrapper can't send anything during it -
-# every second here is a second of dead air Cloudflare's ~100s edge timeout
-# is counting down against. Blocking anywhere near the old value (which
-# reused SESSION_GENERATION_LOCK_TTL for both) guaranteed a 524 the moment a
-# previous turn's lock was still held for any reason (crash, a genuinely
-# slow generation, or a cleanup bug like the one this file's keep-alive
-# wrapper had). Proceeding lock-less after this timeout just reopens the
-# pre-fix race (see _acquire_session_lock's docstring) instead of blocking
-# past the point where the connection is doomed anyway.
-SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 15  # seconds
+# issue #18 + #13: Because StreamingResponse is opened immediately and _with_sse_keepalive
+# sends keep-alive pulses every 10s while waiting, a new turn can wait for a previous long-running
+# turn (tools, web search, reasoning models) for up to SESSION_GENERATION_LOCK_TTL without 524 timeouts.
+SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT = 1200  # seconds
 
 
 def _acquire_session_lock(session_id: int):
     """
-    Best-effort Redis lock serializing one active /chat/stream generation
-    per session (issue #13 item 2). Without this, two concurrent requests
-    for the SAME session could both read the same pre-turn history and
-    generate independently, letting assistant-completion order diverge
-    from user-message order (a slower first request's reply could get
-    persisted after a faster second request's).
+    Redis lock serializing active /chat/stream generation per session (issue #13, #18).
+    Because lock acquisition runs inside stream_ollama_response while _with_sse_keepalive
+    actively sends pulses to keep HTTP proxies happy, this wait can safely block until
+    the preceding turn finishes.
 
-    A Redis lock rather than an in-process asyncio.Lock (the pattern
-    code_exec_router.py uses for issue #8) because gunicorn runs multiple
-    worker processes - an in-process lock only serializes requests that
-    happen to land on the same worker, not the two that actually race.
-
-    Blocks (via the caller's asyncio.to_thread) for up to
-    SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT waiting for a concurrent turn on
-    the same session to finish, matching "serialize" rather than "reject"
-    semantics - but only briefly, since this wait happens before any bytes
-    can be sent to the client (see that constant's own comment).
-
-    Returns None (never raises) if Redis is unavailable or the wait times
-    out - matching this file's existing "storage/memory side-effects are
-    best-effort, never block the actual reply" posture (see the bare
-    `except Exception` around this function's caller). Proceeding without
-    the lock just reopens the pre-fix race, it doesn't break chat.
+    Returns the acquired Lock object, or None if Redis is unavailable / lock acquire times out.
     """
     try:
-        lock = get_redis_service().client.lock(
+        redis_svc = get_redis_service()
+        if not redis_svc or not redis_svc.client:
+            return None
+        lock = redis_svc.client.lock(
             f"chat_stream_lock:{session_id}",
             timeout=SESSION_GENERATION_LOCK_TTL,
             blocking_timeout=SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT,
@@ -485,10 +462,16 @@ async def stream_ollama_response(
     Yields:
         Server-Sent Event formatted strings
     """
-    # issue #18: Acquire session lock inside the stream generator so the HTTP
+    # issue #18 + #13: Acquire session lock inside the stream generator so the HTTP
     # StreamingResponse is returned immediately to prevent reverse-proxy 524 timeouts.
     if session_lock is None and session_id is not None:
         session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
+        if session_lock is None:
+            redis_svc = get_redis_service()
+            if redis_svc and redis_svc.client:
+                logger.error("Session generation lock acquisition timed out for session %s - aborting to prevent un-serialized generation race", session_id)
+                yield f"data: {json.dumps({'type': 'error', 'error': 'Die vorherige Anfrage in dieser Sitzung läuft noch oder hat das Zeitlimit überschritten.'})}\n\n"
+                return
 
     # Mood-Detection und System-Prompt (per-user, DB-backed)
     mood_system = MoodSystem(user_id)

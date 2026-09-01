@@ -1,4 +1,5 @@
 import sys
+import json
 import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
@@ -7,9 +8,21 @@ for mod in ("sentence_transformers", "neo4j"):
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
-from api.routers.chat_streaming import _with_sse_keepalive, _acquire_session_lock, _release_session_lock
+from api.routers.chat_streaming import (
+    _with_sse_keepalive,
+    _acquire_session_lock,
+    _release_session_lock,
+    stream_ollama_response,
+    SESSION_GENERATION_LOCK_TTL,
+    SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT
+)
 
 class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
+
+    def test_lock_constants(self):
+        """Verify that acquire timeout matches lock TTL so long turns can wait without 15s cutoff."""
+        self.assertGreaterEqual(SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT, 600)
+        self.assertEqual(SESSION_GENERATION_LOCK_ACQUIRE_TIMEOUT, SESSION_GENERATION_LOCK_TTL)
 
     async def test_with_sse_keepalive_emits_pulse(self):
         """Verify that _with_sse_keepalive emits ': keep-alive\n\n' during pauses."""
@@ -120,3 +133,27 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(turn_b_history), 2)
         self.assertEqual(turn_b_history[0]["content"], "Hallo von A")
         self.assertEqual(turn_b_history[1]["content"], "Antwort auf A")
+
+    @patch("api.routers.chat_streaming.get_redis_service")
+    @patch("api.routers.chat_streaming._acquire_session_lock")
+    async def test_stream_ollama_response_lock_timeout_aborts(self, mock_acquire, mock_get_redis):
+        """Verify that if lock acquisition returns None on an active Redis service, stream aborts cleanly with error event."""
+        mock_acquire.return_value = None
+        mock_redis_svc = MagicMock()
+        mock_redis_svc.client = MagicMock()
+        mock_get_redis.return_value = mock_redis_svc
+
+        generator = stream_ollama_response(
+            message="Test message",
+            session_id=123,
+            user_id=1
+        )
+
+        events = []
+        async for chunk in generator:
+            events.append(chunk)
+
+        self.assertEqual(len(events), 1)
+        parsed = json.loads(events[0].replace("data: ", "").strip())
+        self.assertEqual(parsed.get("type"), "error")
+        self.assertIn("vorherige Anfrage", parsed.get("error", ""))
