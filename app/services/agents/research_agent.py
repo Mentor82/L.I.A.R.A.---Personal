@@ -165,7 +165,16 @@ class ResearchAgent(BaseAgent):
 # correctly synthesize an answer from real, enriched search source text
 # even when the answer was plainly present in a source.
 DELEGATION_MODEL = "gpt-oss:120b-cloud"
-DELEGATION_MAX_STEPS = 10
+DELEGATION_MAX_STEPS = 12
+
+DELEGATION_BUDGET_INSTRUCTION = """
+
+### Zusätzliche Regel für diese delegierte Teilaufgabe:
+Du hast nur ein knappes Schritt-Budget. Nutze höchstens 2-3 Tool-Aufrufe
+insgesamt, dann schließe zwingend mit einer <final_answer> ab - auch wenn
+du noch nicht jede denkbare Facette recherchiert hast. Eine solide Antwort
+aus 2-3 guten Quellen ist besser als kein Ergebnis, weil das Budget
+aufgebraucht wurde."""
 
 
 async def run_delegated_research(task: str) -> Dict[str, Any]:
@@ -176,21 +185,16 @@ async def run_delegated_research(task: str) -> Dict[str, Any]:
     tool_executor.py's normal-chat tool) so the behavior/tuning lives in
     one place instead of two copies drifting apart.
 
-    Appends an explicit step-budget hint to the task text - confirmed live
-    that without it, the sub-agent can burn its whole step budget running
-    many overlapping searches instead of settling into a final answer
-    (a broad "what's new in Python 3.13" question still hit a 10-step
-    limit with no hint, even though a narrower single-fact lookup finished
-    in 2 steps).
+    Appends DELEGATION_BUDGET_INSTRUCTION to the sub-agent's *system*
+    prompt rather than just the task text - confirmed live that a hint
+    buried in the user-turn task text was not enough: a broad "what's new
+    in Python 3.13" question still burned through a 10-step budget with
+    that hint in place, while a narrower single-fact lookup finished in 2
+    steps regardless. A system-level instruction carries more weight.
     """
-    budgeted_task = (
-        f"{task}\n\n"
-        "(Hinweis: Du hast ein begrenztes Schritt-Budget - fasse spätestens "
-        "nach 2-3 Tool-Aufrufen mit einer <final_answer> zusammen, auch wenn "
-        "nicht jede Facette recherchiert wurde.)"
-    )
     sub_agent = ResearchAgent(model=DELEGATION_MODEL, max_steps=DELEGATION_MAX_STEPS)
-    result = await sub_agent.run(task=budgeted_task)
+    sub_agent.system_prompt += DELEGATION_BUDGET_INSTRUCTION
+    result = await sub_agent.run(task=task)
     if result.get("success"):
         return {"answer": result["answer"]}
     return {"error": result.get("error", "Research Agent lieferte kein Ergebnis")}
