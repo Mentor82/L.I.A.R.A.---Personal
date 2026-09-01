@@ -200,6 +200,11 @@ class ToolExecutor:
         elif tool_def.name == "wikipedia_search":
             return await self._execute_wikipedia(parameters)
 
+        # 🔍 Delegate to the specialized Research Agent (multi-agent
+        # orchestration, mirrors base_agent.py's delegate_research tool)
+        elif tool_def.name == "delegate_research":
+            return await self._execute_delegate_research(parameters)
+
         # 🐙 GitHub Search
         elif tool_def.name == "github_search":
             from services.github_service import get_github_service
@@ -460,7 +465,29 @@ class ToolExecutor:
             "url": result.get("url", ""),
             "title": result.get("title", query)
         }
-    
+
+    async def _execute_delegate_research(self, params: Dict[str, Any]) -> Dict:
+        """
+        Spins up a ResearchAgent sub-instance and runs it to completion for
+        the given task, returning just its final answer - same idea as
+        base_agent.py's delegate_research tool for the Agent Hub, wired into
+        the normal chat's tool-calling loop too (multi-agent orchestration,
+        issue: "Aufgabenverteilung"). RESEARCH_DELEGATION_MODEL matches
+        base_agent.py's choice (a cloud model, not ResearchAgent's own small
+        local default) - confirmed live that llama3.2:3b failed to
+        correctly synthesize an answer from real, enriched search source
+        text even when the answer was plainly present in a source.
+        """
+        from services.agents.research_agent import ResearchAgent
+        from services.agents.base_agent import RESEARCH_DELEGATION_MODEL
+
+        task = params.get("task", "")
+        sub_agent = ResearchAgent(model=RESEARCH_DELEGATION_MODEL, max_steps=6)
+        result = await sub_agent.run(task=task)
+        if result.get("success"):
+            return {"answer": result["answer"]}
+        return {"error": result.get("error", "Research Agent lieferte kein Ergebnis")}
+
     async def _execute_current_time(self, params: Dict[str, Any]) -> Dict:
         """Gibt aktuelle Zeit zurück"""
         from datetime import datetime
@@ -571,7 +598,7 @@ class ToolExecutor:
         # "Web-Suche erlauben" toggle) - checked before the blanket
         # privacy_level shortcut below since both tools are "low" but should
         # still respect an explicit opt-out.
-        if tool_def.name in ("web_search", "wikipedia_search"):
+        if tool_def.name in ("web_search", "wikipedia_search", "delegate_research"):
             return self._check_web_search_consent(user_id)
 
         # workspace_* tools need their own dedicated opt-in

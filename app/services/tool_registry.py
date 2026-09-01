@@ -144,7 +144,41 @@ class ToolRegistry:
             requires_consent=True,
             privacy_level="low"
         ))
-        
+
+        # 🔍 Delegate to the specialized Research Agent (multi-agent
+        # orchestration) - a multi-step research sub-task (several
+        # searches, cross-referencing sources, following links) that a
+        # single web_search call can't do justice to. Runs a full
+        # ResearchAgent instance (SearXNG + Wikipedia + GitHub tools, own
+        # cloud model) and returns just its final answer - same idea as
+        # base_agent.py's delegate_research tool for the Agent Hub, wired
+        # into the normal chat's tool system too.
+        self.register_tool(ToolDefinition(
+            name="delegate_research",
+            description=(
+                "Delegiert eine mehrstufige Recherche-Aufgabe an den spezialisierten Research "
+                "Agent (führt selbstständig mehrere Websuchen/Wikipedia/GitHub-Abfragen durch, "
+                "gleicht Quellen ab und liefert eine fundierte Zusammenfassung mit "
+                "Quellenangaben). Nutze dies für komplexere Recherchefragen statt eines "
+                "einzelnen web_search-Aufrufs, wenn mehrere Suchschritte oder ein "
+                "Quellenabgleich nötig sind."
+            ),
+            category=ToolCategory.INFORMATION,
+            parameters=[
+                ToolParameter(
+                    name="task",
+                    type="string",
+                    description="Die konkrete Recherche-Aufgabe/Frage für den Research Agent",
+                    required=True
+                )
+            ],
+            function=self._delegate_research_stub,
+            # Same allow_web_search gate as web_search/wikipedia_search -
+            # this tool does real web searches under the hood too.
+            requires_consent=True,
+            privacy_level="low"
+        ))
+
         # 🕐 Current Time/Date
         self.register_tool(ToolDefinition(
             name="get_current_time",
@@ -429,6 +463,10 @@ class ToolRegistry:
     async def _workspace_propose_dependency_stub(self, **kwargs):
         """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
         return {"error": "Not implemented", "tool": "workspace_propose_dependency_change"}
+
+    async def _delegate_research_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "delegate_research"}
 
     async def _time_stub(self, **kwargs):
         """Placeholder für Time"""
