@@ -8,13 +8,16 @@ const LocationConsent = ({ onComplete }) => {
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
+  const getToken = () => localStorage.getItem('liara_token') || localStorage.getItem('token');
+
   useEffect(() => {
     checkLocationStatus();
   }, []);
 
   const checkLocationStatus = async () => {
+    const token = getToken();
+    if (!token) return;
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch('/api/location/current', {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -33,11 +36,12 @@ const LocationConsent = ({ onComplete }) => {
   };
 
   const detectLocation = async () => {
+    const token = getToken();
+    if (!token) return;
     setLoading(true);
     setError(null);
     
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch('/api/location/detect', {
         method: 'POST',
         headers: {
@@ -64,11 +68,12 @@ const LocationConsent = ({ onComplete }) => {
   };
 
   const handleAccept = async () => {
+    const token = getToken();
+    if (!token) return;
     setLoading(true);
     setError(null);
     
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch('/api/location/save', {
         method: 'POST',
         headers: {

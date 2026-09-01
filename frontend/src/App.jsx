@@ -184,7 +184,12 @@ function App() {
       if (!sessionId) return
       workspaceAPI.listProposals(sessionId, 'pending')
         .then(({ proposals }) => setPendingProposalsCount(proposals?.length || 0))
-        .catch(() => {})
+        .catch((err) => {
+          if (err?.message?.includes('Session not found')) {
+            localStorage.removeItem('liara_active_session')
+          }
+          setPendingProposalsCount(0)
+        })
     }
     checkPending()
     const interval = setInterval(checkPending, 15000)
