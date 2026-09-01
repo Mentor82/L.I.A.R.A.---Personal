@@ -585,6 +585,9 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
     ollama_tools = None
     if await model_supports_tools(model):
         ollama_tools = get_tool_registry().get_tools_for_ollama()
+        logger.info("Native tools enabled for model '%s' (%d tools registered, user_id=%s, session_id=%s)", model, len(ollama_tools), user_id, session_id)
+    else:
+        logger.info("Model '%s' does not declare native tool support (user_id=%s, session_id=%s)", model, user_id, session_id)
 
     # Defined here, not inside the try (issue #7 item 3), and initialized
     # before it so both are always in scope for the finally block below,
@@ -771,13 +774,7 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # breaking chat outright - this flag (LINEP_ENABLED env var) is off
         # by default.
         transport = "ollama"
-        # print(), not logger.info()/warning(): confirmed live that this
-        # app's stdlib logging never reaches journalctl at all (no
-        # logging.basicConfig anywhere in main.py, root logger has no
-        # handler) - print() is unconditionally captured by systemd's
-        # journal regardless, needed while diagnosing this experimental
-        # switch's transport selection.
-        print(f"[LiNeP-Switch] linep_enabled()={linep_enabled()}", flush=True)
+        logger.debug("[LiNeP-Switch] linep_enabled()=%s", linep_enabled())
         if linep_enabled():
             if await get_linep_provider().health():
                 # Third attempt: Mentor82/LiNeP-Ollama commit 2af68a6 made
@@ -792,9 +789,9 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 # parsing path is actually reachable - re-enabling
                 # thinking-capable models here to test it live.
                 transport = "linep"
-                print(f"[LiNeP-Switch] Chat-Turn (session={session_id}) läuft über LiNeP-Transport", flush=True)
+                logger.info("[LiNeP-Switch] Chat turn (session=%s) using LiNeP transport", session_id)
             else:
-                print("[LiNeP-Switch] LINEP_ENABLED, aber linep-server nicht erreichbar - Fallback auf Ollama-HTTP", flush=True)
+                logger.warning("[LiNeP-Switch] LINEP_ENABLED, but linep-server unreachable -> fallback to Ollama-HTTP (session=%s)", session_id)
 
         for iteration in range(MAX_AGENT_ITERATIONS + 1):
             iteration_tools = ollama_tools if iteration < MAX_AGENT_ITERATIONS else None

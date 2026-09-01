@@ -1,9 +1,14 @@
-"""
-Unit Tests für das Agenten-Subsystem von L.I.A.R.A.
-"""
+import os
+import sys
 import unittest
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+if "redis" not in sys.modules:
+    try:
+        import redis
+    except ImportError:
+        sys.modules["redis"] = MagicMock()
 
 from services.agents.agent_registry import AgentRegistry
 from services.agents.base_agent import BaseAgent

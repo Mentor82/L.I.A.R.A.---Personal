@@ -208,27 +208,16 @@ Quellenangabe im Fließtext, sondern ergänzt sie um eine strukturierte Einschä
 
 def build_consent_required_instructions() -> str:
     """
-    Observed failure mode: a tool call failing with consent_required (e.g.
-    workspace_propose_change when user_preferences.workspace_agent_enabled
-    is off) gets misread by the model as "I still need to ask the user for
-    permission in this chat" - it then repeats the same conversational
-    "may I?" question turn after turn, even after the user says "yes"
-    multiple times, since a chat-level "yes" has no effect on that setting
-    at all. The real gate is a persistent account setting the user has to
-    change themselves; only they can flip it, and only outside this
-    conversation. Wired into both chat.py's tool-aware prompt and
-    chat_streaming.py's system prompt so the guidance applies regardless of
-    which tool-calling mechanism (native Ollama tools or the prompt-based
-    <tool_call> convention) actually produced the failed call.
+    Observed failure mode (Issue #26): a model speculatively tells the user it lacks
+    permission to use web search or requires settings toggles, even when the setting
+    is already enabled and without actually trying the tool call.
+    Also handles the original issue where a tool call returning consent_required
+    prompted the model to ask the user 'may I?' inside the chat.
     """
-    return """WICHTIG - Tool-Fehler mit consent_required:
-Wenn ein Tool-Ergebnis "consent_required" oder eine Zustimmungs-/Berechtigungs-Fehlermeldung enthält,
-frage NICHT erneut im Chat nach einem "Ja" oder einer verbalen Erlaubnis - eine Zustimmung im Chat hat
-darauf keinerlei Wirkung. Der eigentliche Schalter ist eine persistente Einstellung, die nur der Nutzer
-selbst in seinen eigenen Einstellungen ändern kann (z.B. für Workspace-Tools: Profil/Einstellungen →
-Abschnitt "Workspace" → "LIARA darf im Workspace arbeiten"). Erkläre stattdessen kurz und freundlich,
-dass diese Funktion aktuell deaktiviert ist und wo genau sie eingeschaltet werden kann - wiederhole
-nicht einfach dieselbe Bitte um Erlaubnis."""
+    return """WICHTIG - Tool-Nutzung und consent_required:
+1. AKTIVES TOOL-CALLING: Wenn du aktuelle Informationen benötigst (z.B. Nachrichten, Formel 1, Wetter, Sportergebnisse, Web-Recherche, Dateien), führe IMMER direkt das passende Tool (z.B. `web_search`) aus.
+2. KEINE SPEKULATIVEN VERWEIGERUNGEN: Behaupte NIEMALS vorab oder ohne einen tatsächlich fehlgeschlagenen Tool-Aufruf, dass dir die Erlaubnis für eine Suche/Aktion fehlt oder dass der Nutzer diese erst einschalten muss.
+3. BEI TATSÄCHLICHEM consent_required FEHLER: Erst wenn ein Tool-Aufruf in dieser Konversation tatsächlich mit "consent_required" oder einer Berechtigungs-Fehlermeldung fehlschlägt, frage NICHT erneut im Chat nach einem "Ja" (das ändert keine Systemeinstellung). Erkläre stattdessen freundlich, dass diese Funktion aktuell deaktiviert ist und in den Einstellungen (z.B. Profil/Einstellungen → Datenschutz bzw. Workspace) aktiviert werden kann."""
 
 
 def build_workspace_artifact_instructions() -> str:

@@ -19,6 +19,37 @@ if "passlib" not in sys.modules:
     sys.modules["passlib"] = mock_passlib
     sys.modules["passlib.context"] = mock_passlib
 
+if "redis" not in sys.modules:
+    try:
+        import redis
+    except ImportError:
+        sys.modules["redis"] = MagicMock()
+
+class InMemoryRedis:
+    def __init__(self):
+        self.data = {}
+
+    def setex(self, name, time, value):
+        self.data[name] = value
+
+    def get(self, name):
+        return self.data.get(name)
+
+    def xadd(self, name, fields):
+        pass
+
+    def xrange(self, name, min='-', max='+'):
+        return []
+
+    def expire(self, name, time):
+        return True
+
+
+class MockRedisService:
+    def __init__(self):
+        self.client = InMemoryRedis()
+
+
 import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -26,6 +57,10 @@ from fastapi.testclient import TestClient
 from api.routers.agent_router import router as agent_router
 from core.dependencies import require_active_user
 from api.models.base_models import User
+import services.agent_task_store
+
+_mock_redis_svc = MockRedisService()
+services.agent_task_store.get_redis_service = lambda: _mock_redis_svc
 
 
 class MockUser:

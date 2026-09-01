@@ -115,7 +115,9 @@ class ToolExecutor:
         # Privacy-Check
         if check_consent and tool_def.requires_consent:
             has_consent = await self._check_user_consent(user_id, tool_def)
+            logger.info("Consent check for tool '%s' (user_id=%s): granted=%s", tool_call.tool_name, user_id, has_consent)
             if not has_consent:
+                logger.warning("Tool execution blocked by consent policy: '%s' (user_id=%s)", tool_call.tool_name, user_id)
                 return self._error_result(
                     tool_call.tool_name,
                     "User consent required but not granted",
@@ -125,12 +127,14 @@ class ToolExecutor:
         # Parameter-Validierung
         validation_error = self._validate_parameters(tool_call, tool_def)
         if validation_error:
+            logger.warning("Tool validation failed for '%s': %s (parameters: %s)", tool_call.tool_name, validation_error, tool_call.parameters)
             return self._error_result(
                 tool_call.tool_name,
                 validation_error
             )
 
         if tool_def.name in WORKSPACE_AGENT_TOOLS and session_id is None:
+            logger.warning("Workspace tool '%s' called without active session_id", tool_call.tool_name)
             return self._error_result(
                 tool_call.tool_name,
                 "Kein aktiver Workspace (keine Chat-Session)"
@@ -138,7 +142,7 @@ class ToolExecutor:
 
         # Tool ausführen
         try:
-            logger.info(f"Executing tool: {tool_call.tool_name} for user {user_id}")
+            logger.info("Executing tool '%s' for user_id=%s, session_id=%s with params: %s", tool_call.tool_name, user_id, session_id, tool_call.parameters)
 
             start = time.monotonic()
             result = await self._execute_tool(tool_def, tool_call.parameters, user_id, session_id)
@@ -154,6 +158,7 @@ class ToolExecutor:
             # field, so a tool could fail while its execution trace said it
             # completed fine.
             if isinstance(result, dict) and "error" in result:
+                logger.warning("Tool '%s' returned inner error in %dms: %s", tool_call.tool_name, elapsed_ms, result["error"])
                 return self._error_result(
                     tool_call.tool_name,
                     result["error"],
@@ -161,6 +166,7 @@ class ToolExecutor:
                     execution_time_ms=elapsed_ms,
                 )
 
+            logger.info("Tool '%s' completed successfully in %dms", tool_call.tool_name, elapsed_ms)
             return {
                 "success": True,
                 "tool": tool_call.tool_name,
@@ -170,7 +176,7 @@ class ToolExecutor:
             }
 
         except Exception as e:
-            logger.error(f"Tool execution failed: {tool_call.tool_name}: {e}")
+            logger.error("Tool '%s' execution raised exception: %s", tool_call.tool_name, e, exc_info=True)
             return self._error_result(
                 tool_call.tool_name,
                 str(e)

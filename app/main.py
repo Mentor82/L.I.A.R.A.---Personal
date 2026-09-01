@@ -45,6 +45,7 @@ from api.routers.agent_router import router as agent_router
 # REMOVED: from api.chat_session import router as chat_session_router (legacy - use api.routers.chat_sessions)
 # REMOVED: from api.chat_message import router as chat_message_router (legacy - use api.routers.chat_sessions)
 from datetime import datetime
+import logging
 import platform
 import time
 import psutil
@@ -52,6 +53,11 @@ import os
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path="../.env")
+
+# Initialize centralized logging early
+from core.logging_config import setup_logging
+setup_logging()
+logger = logging.getLogger("liara.main")
 
 # Database
 from core.database import check_connection
@@ -98,75 +104,77 @@ async def lifespan(app: FastAPI):
     exception-isolated so one service failing to start/stop doesn't skip
     the others.
     """
-    print("🌙 Liara API starting...")
+    logger.info("🌙 Liara API starting...")
 
     if check_connection():
-        print("✅ PostgreSQL connection successful")
+        logger.info("✅ PostgreSQL connection successful")
     else:
-        print("❌ PostgreSQL connection failed!")
+        logger.error("❌ PostgreSQL connection failed!")
 
-    print("🎬 Initializing Hailo RPi5 Client...")
+    logger.info("🎬 Initializing Hailo RPi5 Client...")
     try:
         await initialize_rpi5_client()
-        print("✅ Hailo RPi5 Client initialized (192.168.178.15:5000)")
+        logger.info("✅ Hailo RPi5 Client initialized (192.168.178.15:5000)")
     except Exception as e:
-        print(f"⚠️  Hailo RPi5 Client initialization failed: {str(e)}")
+        logger.warning(f"⚠️  Hailo RPi5 Client initialization failed: {str(e)}")
 
-    print("🎬 Initializing Edge TPU Client...")
+    logger.info("🎬 Initializing Edge TPU Client...")
     try:
         await initialize_edgetpu_client()
-        print("✅ Edge TPU Client initialized (192.168.178.155:5001)")
+        logger.info("✅ Edge TPU Client initialized (192.168.178.155:5001)")
     except Exception as e:
-        print(f"⚠️  Edge TPU Client initialization failed: {str(e)}")
+        logger.warning(f"⚠️  Edge TPU Client initialization failed: {str(e)}")
 
-    print("🔍 Initializing Multi-Backend Validator...")
+    logger.info("🔍 Initializing Multi-Backend Validator...")
     try:
         validator = await get_validator()
         health = await validator.health_check()
-        print(f"✅ Multi-Backend Validator initialized")
-        print(f"   Primary (liara-core): {health['primary']['status']}")
-        print(f"   Fallback (liara): {health['fallback']['status']}")
-        print(f"   Active backend: {health['active']}")
+        logger.info(
+            "✅ Multi-Backend Validator initialized (primary=%s, fallback=%s, active=%s)",
+            health["primary"]["status"],
+            health["fallback"]["status"],
+            health["active"],
+        )
     except Exception as e:
-        print(f"⚠️  Multi-Backend Validator initialization failed: {str(e)}")
+        logger.warning(f"⚠️  Multi-Backend Validator initialization failed: {str(e)}")
 
-    print("✨ Liara API ready")
+    logger.info("✨ Liara API ready")
 
     yield
 
-    print("🌙 Liara API shutting down...")
+    logger.info("🌙 Liara API shutting down...")
     try:
         validator = await get_validator()
         await validator.shutdown()
-        print("✅ Multi-Backend Validator shutdown complete")
+        logger.info("✅ Multi-Backend Validator shutdown complete")
     except Exception as e:
-        print(f"⚠️  Validator shutdown error: {str(e)}")
+        logger.warning(f"⚠️  Validator shutdown error: {str(e)}")
 
     try:
         await shutdown_rpi5_client()
-        print("✅ Hailo RPi5 Client shutdown complete")
+        logger.info("✅ Hailo RPi5 Client shutdown complete")
     except Exception as e:
-        print(f"⚠️  Hailo RPi5 Client shutdown error: {str(e)}")
+        logger.warning(f"⚠️  Hailo RPi5 Client shutdown error: {str(e)}")
 
     try:
         await shutdown_edgetpu_client()
-        print("✅ Edge TPU Client shutdown complete")
+        logger.info("✅ Edge TPU Client shutdown complete")
     except Exception as e:
-        print(f"⚠️  Edge TPU Client shutdown error: {str(e)}")
+        logger.warning(f"⚠️  Edge TPU Client shutdown error: {str(e)}")
 
     try:
         close_redis_service()
-        print("✅ Redis client closed")
+        logger.info("✅ Redis client closed")
     except Exception as e:
-        print(f"⚠️  Redis shutdown error: {str(e)}")
+        logger.warning(f"⚠️  Redis shutdown error: {str(e)}")
 
     try:
         close_neo4j_service()
-        print("✅ Neo4j driver closed")
+        logger.info("✅ Neo4j driver closed")
     except Exception as e:
-        print(f"⚠️  Neo4j shutdown error: {str(e)}")
+        logger.warning(f"⚠️  Neo4j shutdown error: {str(e)}")
 
-    print("👋 Liara API stopped")
+    logger.info("👋 Liara API stopped")
 
 
 app = FastAPI(

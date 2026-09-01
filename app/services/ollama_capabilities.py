@@ -21,15 +21,19 @@ derived boolean) - capabilities don't change at runtime, and this avoids a
 second /api/show round-trip for models that get checked for both tools and
 thinking support.
 """
+import logging
 from typing import Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 _capability_cache: dict[str, list] = {}
 
 
 async def _get_capabilities(model: str) -> list:
     if model in _capability_cache:
+        logger.debug("Capabilities cache hit for model '%s': %s", model, _capability_cache[model])
         return _capability_cache[model]
 
     capabilities: list = []
@@ -41,9 +45,16 @@ async def _get_capabilities(model: str) -> list:
             )
             response.raise_for_status()
             capabilities = response.json().get("capabilities", [])
-    except Exception:
+            logger.info("Fetched Ollama capabilities for model '%s': %s", model, capabilities)
+    except Exception as e:
         # Unknown/unreachable model - default to an empty capability list
         # rather than risk acting on a guess.
+        logger.warning(
+            "Failed to fetch Ollama capabilities for model '%s' (%s: %s) -> defaulting to []",
+            model,
+            type(e).__name__,
+            e,
+        )
         capabilities = []
 
     _capability_cache[model] = capabilities
@@ -51,7 +62,9 @@ async def _get_capabilities(model: str) -> list:
 
 
 async def model_supports_tools(model: str) -> bool:
-    return "tools" in await _get_capabilities(model)
+    supported = "tools" in await _get_capabilities(model)
+    logger.debug("model_supports_tools('%s') -> %s", model, supported)
+    return supported
 
 
 async def model_has_thinking_capability(model: str) -> bool:
