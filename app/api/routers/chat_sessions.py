@@ -271,3 +271,69 @@ async def delete_chat_session(
         logger.warning(f"Failed to delete workspace for session {session_id} (user {current_user.id})")
 
     return {"message": "Session deleted successfully"}
+
+
+@router.post("/sessions/{session_id}/archive-to-workspace")
+async def archive_chat_session_endpoint(
+    session_id: int,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Archiviert eine Chat-Sitzung persistent als strukturierte Markdown-Datei
+    im Workspace des Benutzers (unter chat_archives/).
+    """
+    from services.chat_archive_service import archive_session_to_workspace
+    result = archive_session_to_workspace(current_user.id, session_id, db)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404 if "nicht gefunden" in result.get("error", "") else 400, detail=result.get("error", "Archivierung fehlgeschlagen"))
+    return result
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_chat_session_endpoint(
+    session_id: int,
+    format: str = "markdown",
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Exportiert eine Chat-Sitzung direkt als Markdown- oder JSON-Datei zum Download.
+    """
+    from fastapi.responses import Response
+    from api.models.chat_session import ChatSession as DBChatSession
+    from api.models.chat_message import ChatMessage as DBChatMessage
+    from services.chat_archive_service import format_session_as_markdown, format_session_as_json, sanitize_filename
+
+    session = db.query(DBChatSession).filter(
+        DBChatSession.id == session_id,
+        DBChatSession.user_id == current_user.id
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = db.query(DBChatMessage).filter(
+        DBChatMessage.session_id == session_id
+    ).order_by(DBChatMessage.timestamp.asc(), DBChatMessage.id.asc()).all()
+
+    clean_title = sanitize_filename(session.title or "chat")
+    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if format.lower() == "json":
+        data = format_session_as_json(session, messages)
+        filename = f"{clean_title}_{session_id}_{now_str}.json"
+        import json
+        return Response(
+            content=json.dumps(data, indent=2, ensure_ascii=False),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    else:
+        content = format_session_as_markdown(session, messages)
+        filename = f"{clean_title}_{session_id}_{now_str}.md"
+        return Response(
+            content=content,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { chatAPI, moodAPI } from '../services/api';
+import { chatArchiveAPI } from '../services/chatArchiveService';
 import { getChatSessions, createChatSession, getSessionMessages, deleteChatSession } from '../services/chatService';
 import { streamChatSSE } from '../services/sseClient';
 import WebSearchResults from './WebSearchResults';
@@ -37,245 +38,15 @@ function ThinkingBlock({ thinking, isAnswering }) {
   );
 }
 
-// Task labels are short model-written strings that often carry inline
-// **bold**/`code`/*italic* markdown (the model has no reason to know this
-// checklist doesn't run through the full MarkdownMessage renderer). Rather
-// than pull react-markdown into every list item, handle just this small,
-// safe subset inline.
-function renderInlineMarkdown(text) {
-  const parts = [];
-  const regex = /\*\*(.+?)\*\*|`(.+?)`|\*(.+?)\*/g;
-  let lastIndex = 0;
-  let match;
-  let key = 0;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-    if (match[1] !== undefined) parts.push(<strong key={key++}>{match[1]}</strong>);
-    else if (match[2] !== undefined) parts.push(<code key={key++}>{match[2]}</code>);
-    else if (match[3] !== undefined) parts.push(<em key={key++}>{match[3]}</em>);
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts;
-}
-
-// Collapsible checklist from the model's <tasks> block(s) - see
-// task_splitter.py. This is a MODEL-AUTHORED plan display, not a verified
-// execution record: a checked item only means the model claims to have
-// covered that step in its own text, not that anything actually ran. Stays
-// expanded by default and doesn't auto-collapse like ThinkingBlock does -
-// watching it update as the model re-emits a fresher state is the point.
-function TaskListBlock({ tasks }) {
-  const [expanded, setExpanded] = useState(true);
-
-  if (!tasks || tasks.length === 0) return null;
-
-  return (
-    <div className="task-list-block">
-      <button type="button" className="task-list-toggle" onClick={() => setExpanded((e) => !e)}>
-        <span>📋 Aufgaben</span>
-        <span className="task-list-caret">{expanded ? '▾' : '▸'}</span>
-      </button>
-      {expanded && (
-        <ul className="task-list-content">
-          {tasks.map((item) => (
-            <li key={item.id} className={`task-list-item ${item.done ? 'done' : ''}`}>
-              <input type="checkbox" checked={item.done} disabled readOnly />
-              <span>{renderInlineMarkdown(item.label)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-const AGENT_STEP_ICON = { running: '⏳', done: '✅', error: '❌' };
-
-// Real tool-execution progress, backend-authored (see chat_streaming.py's
-// agent loop / _build_agent_step_label) - deliberately a separate component
-// and SSE event from TaskListBlock/'tasks': a status here reflects an
-// actual ToolExecutor result, never something the model merely claimed.
-// See task_splitter.py's docstring for why that distinction is kept strict.
-function AgentStepsBlock({ steps }) {
-  const [expanded, setExpanded] = useState(true);
-
-  if (!steps || steps.length === 0) return null;
-
-  return (
-    <div className="agent-steps-block">
-      <button type="button" className="agent-steps-toggle" onClick={() => setExpanded((e) => !e)}>
-        <span>⚙️ Agent</span>
-        <span className="agent-steps-caret">{expanded ? '▾' : '▸'}</span>
-      </button>
-      {expanded && (
-        <ul className="agent-steps-content">
-          {steps.map((step) => (
-            <li key={step.id} className={`agent-steps-item ${step.status}`}>
-              <span className="agent-steps-icon">{AGENT_STEP_ICON[step.status] || '•'}</span>
-              <span>{step.label}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function formatSourceDate(published_at) {
-  if (!published_at) return null;
-  try {
-    return new Date(published_at).toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return null;
-  }
-}
-
-// Structured source-card display for web_search(search_type="web") results
-// (issue #4 phase 2) - deliberately shown alongside, not instead of, the
-// model's own cited text: a reliable, structured view that doesn't depend
-// on how well the model happens to cite sources in any given answer.
-function WebSourcesBlock({ sources }) {
-  const [expanded, setExpanded] = useState(true);
-
-  if (!sources || sources.length === 0) return null;
-
-  return (
-    <div className="web-sources-block">
-      <button type="button" className="web-sources-toggle" onClick={() => setExpanded((e) => !e)}>
-        <span>📚 Quellen ({sources.length})</span>
-        <span className="web-sources-caret">{expanded ? '▾' : '▸'}</span>
-      </button>
-      {expanded && (
-        <ul className="web-sources-content">
-          {sources.map((source) => (
-            <li key={source.id} className="web-sources-item">
-              <a href={source.url} target="_blank" rel="noopener noreferrer" className="web-sources-title">
-                {source.title || source.url}
-              </a>
-              <div className="web-sources-meta">
-                <span className="web-sources-domain">{source.domain}</span>
-                {source.dated ? (
-                  <span className="web-sources-date">{formatSourceDate(source.published_at)}</span>
-                ) : (
-                  <span className="web-sources-date web-sources-undated">kein Datum</span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-const FACTCHECK_ICON = { 'bestätigt': '✓', 'teilweise': '△', 'unbestätigt': '✗' };
-const FACTCHECK_CLASS = { 'bestätigt': 'confirmed', 'teilweise': 'partial', 'unbestätigt': 'unverified' };
-
-// Per-claim confidence rating from the model's <factcheck> block(s) - see
-// factcheck_splitter.py. Distinct from WebSourcesBlock (WHAT was found):
-// this rates specific claims in the prose AGAINST what was found. Shown
-// alongside, not instead of, normal in-prose citation.
-function FactCheckBlock({ items }) {
-  // `null` = no manual override yet, so `expanded` is derived fresh from
-  // `items` every render (open whenever at least one claim isn't fully
-  // confirmed - nothing to flag in an all-'bestätigt' result, so it starts
-  // collapsed rather than stacking a mostly-reassuring card under Quellen
-  // on every web-search answer). Once the user clicks, their explicit
-  // choice sticks regardless of what `items` does afterward.
-  const [userToggled, setUserToggled] = useState(null);
-
-  if (!items || items.length === 0) return null;
-
-  const hasLowerConfidence = items.some((item) => item.confidence !== 'bestätigt');
-  const expanded = userToggled !== null ? userToggled : hasLowerConfidence;
-
-  return (
-    <div className="factcheck-block">
-      <button type="button" className="factcheck-toggle" onClick={() => setUserToggled(!expanded)}>
-        <span>🔎 Faktencheck ({items.length})</span>
-        <span className="factcheck-caret">{expanded ? '▾' : '▸'}</span>
-      </button>
-      {expanded && (
-        <ul className="factcheck-content">
-          {items.map((item) => (
-            <li key={item.id} className={`factcheck-item ${FACTCHECK_CLASS[item.confidence] || ''}`}>
-              <span className="factcheck-icon">{FACTCHECK_ICON[item.confidence] || '•'}</span>
-              <span className="factcheck-label">{renderInlineMarkdown(item.label)}</span>
-              {item.source && <span className="factcheck-source">{item.source}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-const PROPOSAL_ACTION_LABELS = {
-  create: 'anlegen', update: 'überschreiben', delete: 'löschen',
-  install: 'installieren', remove: 'entfernen', // package-kind proposals (issue #5)
-};
-
-// LIARA proposed a workspace change (Agent-Vorbereitung v1) - nothing on
-// disk changed yet, this just points at where to review/approve it. Same
-// collapsible-card shape as WebSourcesBlock above.
-function WorkspaceProposalsBlock({ proposals }) {
-  if (!proposals || proposals.length === 0) return null;
-
-  return (
-    <div className="web-sources-block">
-      <div className="web-sources-toggle" style={{ cursor: 'default' }}>
-        <span>📝 Workspace-Vorschläge ({proposals.length})</span>
-      </div>
-      <ul className="web-sources-content">
-        {proposals.map((p) => (
-          <li key={p.proposal_id} className="web-sources-item">
-            <span className="web-sources-title">
-              {p.filename} {PROPOSAL_ACTION_LABELS[p.action] || p.action}
-            </span>
-            <div className="web-sources-meta">
-              <Link to="/workspace" className="web-sources-domain">Im Workspace prüfen →</Link>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// A long-form plan/document (see build_workspace_artifact_instructions in
-// prompt_builder.py) got saved as a Workspace file instead of streamed into
-// the chat bubble - same collapsible-card shape as WorkspaceProposalsBlock
-// above. `filename` is only null if the save failed or there was no active
-// session to save into, in which case the full content renders inline here
-// as a fallback rather than being silently lost.
-function WorkspaceArtifactsBlock({ artifacts }) {
-  if (!artifacts || artifacts.length === 0) return null;
-
-  return (
-    <div className="web-sources-block">
-      <div className="web-sources-toggle" style={{ cursor: 'default' }}>
-        <span>📄 Erstellte Dokumente ({artifacts.length})</span>
-      </div>
-      <ul className="web-sources-content">
-        {artifacts.map((a, i) => (
-          <li key={i} className="web-sources-item">
-            <span className="web-sources-title">{a.title}</span>
-            <div className="web-sources-meta">
-              {a.filename ? (
-                <Link to="/workspace" state={{ openWorkspaceFile: a.filename }} className="web-sources-domain">
-                  {a.filename} im Workspace öffnen →
-                </Link>
-              ) : (
-                <MarkdownMessage content={a.content} />
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+import {
+  renderInlineMarkdown,
+  TaskListBlock,
+  AgentStepsBlock,
+  WebSourcesBlock,
+  FactCheckBlock,
+  WorkspaceProposalsBlock,
+  WorkspaceArtifactsBlock
+} from './chat/ChatCards';
 
 function Chat() {
   const [message, setMessage] = useState('');
@@ -348,6 +119,8 @@ function Chat() {
   // resolves last wins and silently reinstates the old conversation history
   // on top of a just-created "new chat".
   const sessionActionTakenRef = useRef(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveBanner, setArchiveBanner] = useState(null);
   
   const activeSession = chatSessions.find(s => s.id === activeSessionId) || chatSessions[0];
   const messages = activeSession?.messages || [];
@@ -538,6 +311,37 @@ function Chat() {
           }
         : session
     ));
+  };
+
+  const handleArchiveToWorkspace = async () => {
+    if (!activeSessionId) return;
+    setIsArchiving(true);
+    try {
+      const res = await chatArchiveAPI.archiveToWorkspace(activeSessionId);
+      if (res && res.ok) {
+        setArchiveBanner({ type: 'success', text: `💾 ${res.message || 'Erfolgreich im Workspace archiviert'}` });
+        setTimeout(() => setArchiveBanner(null), 5000);
+      }
+    } catch (err) {
+      console.error('Archivierung fehlgeschlagen:', err);
+      setArchiveBanner({ type: 'error', text: `Archivierung fehlgeschlagen: ${err.message || err}` });
+      setTimeout(() => setArchiveBanner(null), 5000);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleExportMarkdown = async () => {
+    if (!activeSessionId) return;
+    try {
+      await chatArchiveAPI.exportSession(activeSessionId, 'markdown');
+      setArchiveBanner({ type: 'success', text: '⬇️ Markdown-Export heruntergeladen' });
+      setTimeout(() => setArchiveBanner(null), 4000);
+    } catch (err) {
+      console.error('Export fehlgeschlagen:', err);
+      setArchiveBanner({ type: 'error', text: `Export fehlgeschlagen: ${err.message || err}` });
+      setTimeout(() => setArchiveBanner(null), 5000);
+    }
   };
 
   // Auto-Model-Selection: Wähle optimales Model basierend auf Anfrage
@@ -1320,9 +1124,26 @@ function Chat() {
             <span className="toggle-label">🤖 Auto</span>
           </label>
           {messages.length > 0 && (
-            <span className="chat-message-count" title="Nachrichten im Verlauf">
-              💬 {messages.length}
-            </span>
+            <>
+              <span className="chat-message-count" title="Nachrichten im Verlauf">
+                💬 {messages.length}
+              </span>
+              <button 
+                onClick={handleArchiveToWorkspace} 
+                className="btn-archive" 
+                title="Im Workspace archivieren (chat_archives/)"
+                disabled={isArchiving}
+              >
+                {isArchiving ? '⏳' : '💾'}
+              </button>
+              <button 
+                onClick={handleExportMarkdown} 
+                className="btn-export" 
+                title="Chat als Markdown herunterladen"
+              >
+                ⬇️
+              </button>
+            </>
           )}
           <button onClick={createNewChat} className="btn-new-chat" title="Neue Konversation">
             ➕
@@ -1332,6 +1153,13 @@ function Chat() {
           </button>
         </div>
       </div>
+
+      {archiveBanner && (
+        <div className={`chat-banner ${archiveBanner.type === 'error' ? 'chat-banner-error' : 'chat-banner-success'}`}>
+          <span>{archiveBanner.text}</span>
+          <button type="button" className="chat-banner-dismiss" onClick={() => setArchiveBanner(null)}>✕</button>
+        </div>
+      )}
 
       <div className="chat-messages">
         {messages.length === 0 && (

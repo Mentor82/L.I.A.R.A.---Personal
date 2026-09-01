@@ -106,8 +106,8 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         mock_lock.reacquire.return_value = False  # Renewal fails (e.g. key expired in Redis)
 
         lock_lost_event = asyncio.Event()
-        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, lock_lost_event, interval=0.02))
-        await asyncio.sleep(0.05)
+        watchdog_task = asyncio.create_task(_session_lock_watchdog(mock_lock, lock_lost_event, interval=0.01))
+        await asyncio.wait_for(lock_lost_event.wait(), timeout=2.0)
 
         self.assertTrue(lock_lost_event.is_set())
         watchdog_task.cancel()

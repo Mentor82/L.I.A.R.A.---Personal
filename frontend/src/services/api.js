@@ -4,7 +4,7 @@
  * Kommuniziert mit dem FastAPI Backend über Vite Proxy (/api -> localhost:8100)
  */
 
-const API_BASE = '/api';
+export const API_BASE = '/api';
 
 /**
  * Parst eine Response als JSON, ohne bei leerem Body (z.B. 204 No Content
@@ -19,7 +19,7 @@ async function parseJsonSafe(response) {
 /**
  * Generic fetch wrapper mit Error Handling und Authentication
  */
-async function apiFetch(endpoint, options = {}) {
+export async function apiFetch(endpoint, options = {}) {
   try {
     // Get JWT token from localStorage
     const token = localStorage.getItem('liara_token');

@@ -12,8 +12,8 @@
   "app/services/web_safety/risk_analyzer.py": 520,
   "frontend/src/components/CalendarView.css": 1011,
   "frontend/src/components/CalendarView.jsx": 993,
-  "frontend/src/components/Chat.css": 1536,
-  "frontend/src/components/Chat.jsx": 1722,
+  "frontend/src/components/Chat.css": 1337,
+  "frontend/src/components/Chat.jsx": 1550,
   "frontend/src/components/LandingPage.css": 2297,
   "frontend/src/components/LandingPage.jsx": 865,
   "frontend/src/components/Login.css": 676,
@@ -27,9 +27,9 @@
   "frontend/src/components/Terminal.jsx": 510,
   "frontend/src/components/TerminalTabs.jsx": 673,
   "frontend/src/components/UserPreferences.jsx": 511,
-  "frontend/src/components/WorkspacePage.css": 1442,
+  "frontend/src/components/WorkspacePage.css": 1443,
   "frontend/src/components/WorkspacePage.jsx": 1687,
   "frontend/src/services/api.js": 811,
   "frontend/src/styles/components.css": 642,
-  "frontend/src/styles/theme.css": 703
+  "frontend/src/styles/theme.css": 727
 }

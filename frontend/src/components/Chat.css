@@ -1,4 +1,5 @@
 /* Chat UI - Enhanced mit Bubbles, Model-Select, Animationen, History Sidebar */
+@import '../styles/components/chat-cards.css';
 
 /* Layout mit Sidebar */
 .chat-layout {
@@ -344,6 +345,29 @@
   transform: scale(1.1);
 }
 
+.btn-archive,
+.btn-export {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-primary-subtle);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: all 0.2s;
+  color: var(--color-text);
+}
+
+.btn-archive:hover:not(:disabled),
+.btn-export:hover:not(:disabled) {
+  background: var(--bg-primary-muted);
+  transform: scale(1.08);
+}
+
+.btn-archive:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Messages Area */
 .chat-messages {
   flex: 1;
@@ -516,253 +540,6 @@
   max-height: 260px;
   overflow-y: auto;
   border-top: 1px solid rgba(139, 92, 246, 0.15);
-}
-
-/* Task List Block (model-authored plan checklist, see task_splitter.py) */
-.task-list-block {
-  margin: 0.5rem 0;
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.task-list-toggle {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg-purple-subtle);
-  border: none;
-  color: var(--color-text-muted);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.task-list-toggle:hover {
-  color: var(--color-purple);
-}
-
-.task-list-caret {
-  font-style: normal;
-}
-
-.task-list-content {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid rgba(139, 92, 246, 0.15);
-}
-
-.task-list-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
-.task-list-item input[type="checkbox"] {
-  accent-color: var(--color-purple);
-  cursor: default;
-}
-
-.task-list-item.done span {
-  text-decoration: line-through;
-  opacity: 0.7;
-}
-
-/* Agent Steps Block (real tool-execution progress, see chat_streaming.py) */
-.agent-steps-block {
-  margin: 0.5rem 0;
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.agent-steps-toggle {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg-purple-subtle);
-  border: none;
-  color: var(--color-text-muted);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.agent-steps-toggle:hover {
-  color: var(--color-purple);
-}
-
-.agent-steps-caret {
-  font-style: normal;
-}
-
-.agent-steps-content {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid rgba(139, 92, 246, 0.15);
-}
-
-.agent-steps-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
-.agent-steps-item.running {
-  color: var(--color-purple);
-}
-
-.agent-steps-item.error {
-  color: var(--color-danger);
-}
-
-.agent-steps-icon {
-  flex-shrink: 0;
-}
-
-/* Web Sources Block (structured source cards, see chat_streaming.py's agent loop) */
-.web-sources-block {
-  margin: 0.5rem 0;
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.web-sources-toggle {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg-purple-subtle);
-  border: none;
-  color: var(--color-text-muted);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.web-sources-toggle:hover {
-  color: var(--color-purple);
-}
-
-.web-sources-caret {
-  font-style: normal;
-}
-
-.web-sources-content {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid rgba(139, 92, 246, 0.15);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.web-sources-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.web-sources-title {
-  font-size: 0.85rem;
-  color: var(--color-purple);
-  text-decoration: none;
-}
-
-.web-sources-title:hover {
-  text-decoration: underline;
-}
-
-.web-sources-meta {
-  display: flex;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-.web-sources-undated {
-  opacity: 0.7;
-  font-style: italic;
-}
-
-/* Fact-Check Block (Pro-Claim-Konfidenzbewertung, siehe factcheck_splitter.py) */
-.factcheck-block {
-  margin: 0.5rem 0;
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.factcheck-toggle {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--bg-purple-subtle);
-  border: none;
-  color: var(--color-text-muted);
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.factcheck-toggle:hover {
-  color: var(--color-purple);
-}
-
-.factcheck-content {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  border-top: 1px solid rgba(139, 92, 246, 0.15);
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.factcheck-item {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  padding: 0.15rem 0 0.15rem 0.5rem;
-  border-left: 3px solid var(--color-text-muted);
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-
-.factcheck-item.confirmed {
-  border-left-color: var(--color-success);
-}
-
-.factcheck-item.partial {
-  border-left-color: var(--color-warning);
-}
-
-.factcheck-item.unverified {
-  border-left-color: var(--color-danger);
-  opacity: 0.85;
-}
-
-.factcheck-source {
-  font-size: 0.75rem;
-  opacity: 0.7;
-  white-space: nowrap;
 }
 
 /* Action Result Badge */
@@ -1415,7 +1192,8 @@
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(236, 72, 153, 0.05));
 }
 
-/* Error Banner (dismissible, replaces alert()) */
+/* Banners (dismissible, replaces alert()) */
+.chat-banner,
 .chat-error-banner {
   display: flex;
   align-items: center;
@@ -1426,13 +1204,32 @@
   margin: 0 1rem;
   cursor: pointer;
   font-size: 0.9rem;
+}
+
+.chat-banner-error,
+.chat-error-banner {
   background: var(--bg-danger-subtle);
   color: var(--color-danger);
   border: 1px solid var(--bg-danger-muted);
 }
 
+.chat-banner-success {
+  background: var(--bg-success-subtle);
+  color: var(--color-success);
+  border: 1px solid var(--bg-success-muted);
+}
+
 .chat-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1rem;
+  cursor: pointer;
   opacity: 0.7;
+}
+
+.chat-banner-dismiss:hover {
+  opacity: 1;
 }
 
 /* Delete Confirmation Modal (replaces window.confirm()) */
