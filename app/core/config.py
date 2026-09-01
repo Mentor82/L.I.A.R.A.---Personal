@@ -1,5 +1,5 @@
 """Core configuration for Liara application."""
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -25,18 +25,19 @@ class Settings(BaseSettings):
     linep_port: int = 11435
     linep_timeout_seconds: float = 180.0
 
-    class Config:
-        env_file = ".env"
-        # The shared .env carries ~13 other keys (smtp_*, *_password,
-        # ollama_base_url, ...) that were never declared as fields here -
-        # pydantic-settings rejects any undeclared key by default
-        # (extra_forbidden), which had gone unnoticed only because nothing
-        # actually imported/instantiated this Settings class before (see the
-        # LiNeP-switch plan/commit history for the outage this caused).
-        # Ignoring them is correct: this class only needs to own ITS OWN
-        # declared fields, not validate every key that happens to live in
-        # the same .env file for unrelated code.
-        extra = "ignore"
+    # The shared .env carries ~13 other keys (smtp_*, *_password,
+    # ollama_base_url, ...) that were never declared as fields here -
+    # pydantic-settings rejects any undeclared key by default
+    # (extra_forbidden), which had gone unnoticed only because nothing
+    # actually imported/instantiated this Settings class before (see the
+    # LiNeP-switch plan/commit history for the outage this caused).
+    # Ignoring them is correct: this class only needs to own ITS OWN
+    # declared fields, not validate every key that happens to live in
+    # the same .env file for unrelated code.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
 
 
 settings = Settings()

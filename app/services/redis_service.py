@@ -11,7 +11,7 @@ import json
 import time
 import uuid
 from typing import List, Dict, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -219,7 +219,7 @@ class RedisSessionService:
         if self._add_to_context_script is None:
             self._add_to_context_script = self.client.register_script(_ADD_TO_CONTEXT_LUA)
 
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         context_item = {
             'content_type': content_type,
             'content_id': content_id,

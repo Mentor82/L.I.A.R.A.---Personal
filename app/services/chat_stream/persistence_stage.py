@@ -7,7 +7,7 @@ assistant turns, 4D memory integration, and Neo4j concept relations under the se
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -68,7 +68,7 @@ def persist_user_turn_under_lock(
                     message_id=user_message_id,
                     content=message,
                     role='user',
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     session_id=session_id
                 )
             except Exception as e:
@@ -157,7 +157,7 @@ def persist_assistant_turn(
                     message_id=assistant_message_id,
                     content=full_response_text,
                     role='assistant',
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     session_id=session_id
                 )
             except Exception as e:

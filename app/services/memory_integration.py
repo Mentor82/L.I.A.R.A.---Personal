@@ -11,7 +11,7 @@ UPDATED: 2025-12-04
 from sqlalchemy.orm import Session
 from sqlalchemy import text, bindparam
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import re
 from collections import Counter
@@ -286,14 +286,14 @@ def store_in_4d_memory(
                     'intent': analysis['intent'],
                     'emotion': analysis['emotion'],
                     'importance': analysis['importance'],
-                    'created_at': datetime.utcnow().isoformat()
+                    'created_at': datetime.now(timezone.utc).isoformat()
                 }
             )
             result['neo4j'] = 'created'
             
             # If mood is provided, create mood node and link
             if mood and energy_level:
-                timestamp = datetime.utcnow().isoformat()
+                timestamp = datetime.now(timezone.utc).isoformat()
                 neo4j.create_mood_node(
                     user_id=user_id,
                     timestamp=timestamp,

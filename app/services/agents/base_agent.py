@@ -7,6 +7,7 @@ import json
 import re
 import logging
 import asyncio
+import inspect
 import requests
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 
@@ -150,7 +151,7 @@ class BaseAgent:
 
         handler = self.tools[tool_name]["handler"]
         try:
-            if asyncio.iscoroutinefunction(handler):
+            if inspect.iscoroutinefunction(handler):
                 return await handler(**arguments)
             else:
                 return await asyncio.to_thread(handler, **arguments)

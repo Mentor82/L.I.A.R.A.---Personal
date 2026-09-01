@@ -1,35 +1,37 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-psutil==5.9.6
-pydantic==2.5.0
-pydantic-settings==2.1.0
-sqlalchemy==2.0.23
-apscheduler==3.10.4
-python-multipart==0.0.6
-requests==2.31.0
-passlib==1.7.4
-argon2-cffi==23.1.0
-python-dotenv==1.0.0
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+psutil>=5.9.6
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+sqlalchemy>=2.0.23
+apscheduler>=3.10.4
+python-multipart>=0.0.6
+requests>=2.31.0
+passlib>=1.7.4
+argon2-cffi>=23.1.0
+python-dotenv>=1.0.0
+beautifulsoup4>=4.12.0
+psycopg2-binary>=2.9.9
 
 # 4D Memory Architecture Dependencies
-redis==5.0.1
-neo4j==5.14.1
-sentence-transformers==2.2.2
-pgvector==0.2.4
-python-jose[cryptography]==3.3.0
+redis>=5.0.1
+neo4j>=5.14.1
+sentence-transformers>=2.2.2
+pgvector>=0.2.4
+python-jose[cryptography]>=3.3.0
 httpx>=0.28.0
 
 # Concept extraction (POS-based noun/proper-noun extraction, replacing the
 # old length+stopword heuristic) - needs `python -m spacy download de_core_news_sm`
 # after installing, see deploy notes.
-spacy==3.7.5
+spacy>=3.7.5
 
 # Image Generation (Stable Diffusion via Replicate)
 # Optional: Nur wenn Bild-Generierung gewünscht
 # Keine zusätzlichen Pakete nötig (httpx schon vorhanden)
 
 # Sandboxed Code Execution (chat "Run" button) - plotting in Python
-matplotlib==3.9.2
+matplotlib>=3.9.2
 
 # Experimental LiNeP transport switch (LINEP_ENABLED, see linep_provider.py)
 # - not on public PyPI, this is the custom Mentor82/LiNeP protocol package

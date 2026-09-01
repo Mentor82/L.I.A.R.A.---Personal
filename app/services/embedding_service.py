@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from typing import List, Dict, Optional, Union
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -286,5 +286,5 @@ def analyze_content(text: str, context: Optional[Dict] = None) -> Dict:
         'content_summary': text[:500] if len(text) > 500 else text,
         'embedding_model': service.model_name,
         'embedding_version': service.version,
-        'analyzed_at': datetime.utcnow().isoformat()
+        'analyzed_at': datetime.now(timezone.utc).isoformat()
     }
