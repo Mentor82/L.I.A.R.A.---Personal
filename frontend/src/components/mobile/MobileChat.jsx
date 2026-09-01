@@ -145,6 +145,7 @@ export default function MobileChat({ user, onLogout }) {
       localStorage.removeItem('liara_active_session');
     } else {
       localStorage.setItem('liara_active_session', sessionId.toString());
+      setSessionError(false);
     }
     setDrawerOpen(false);
 
