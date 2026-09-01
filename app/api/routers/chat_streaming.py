@@ -313,25 +313,32 @@ async def perform_web_search(query: str, intent: str, user_id: Optional[int] = N
                 logger.warning(f"Wikipedia error: {result.get('error')}")
         
         elif intent in ['SEARCH_NEWS', 'SEARCH_WEB']:
-            # DuckDuckGo Instant Answer
-            logger.info(f"Searching DuckDuckGo for: {query}")
-            result = await web_search.search_instant_answer(query)
-            logger.info(f"DuckDuckGo result: {result}")
-            if result.get('abstract') or result.get('answer'):
-                formatted = web_search.format_for_llm(result, 'search')
-                
-                # Analyze result URLs for risk
-                url_to_check = result.get('abstract_url') or result.get('url')
-                if url_to_check:
-                    url_risk = risk_analyzer.analyze_url(url_to_check)
-                    risk_score = url_risk.get('risk_score', 30)
-                    logger.info(f"Risk analysis for {url_to_check}: score={risk_score}")
-                else:
-                    risk_score = 15  # DuckDuckGo ohne externe URL ist relativ sicher
-                
-                return formatted, result, 'general', risk_score
+            # Real web search via SearXNG - same SearchBroker + ProxySandbox
+            # fetch-enrichment pipeline the model-driven
+            # web_search(search_type="web") tool already uses (see
+            # tool_executor.py's _execute_web_search_general, reused here
+            # rather than duplicated). DuckDuckGo's Instant Answer API only
+            # returns something for narrow infobox/definition queries and
+            # came back empty here for most real news/web queries - same
+            # class of bug fixed in research_agent.py's web_search tool.
+            logger.info(f"Searching web (SearXNG) for: {query}")
+            result = await get_tool_executor()._execute_web_search_general(query, language='de')
+            sources = result.get('sources', [])
+            logger.info(f"SearXNG result: {len(sources)} source(s)")
+            if sources:
+                formatted = "\n\n".join(
+                    f"Quelle: {s['title']} ({s['url']})\n{s['text']}"
+                    for s in sources
+                )
+
+                # Analyze the top source's URL for risk
+                url_risk = risk_analyzer.analyze_url(sources[0]['url'])
+                risk_score = url_risk.get('risk_score', 15)
+                logger.info(f"Risk analysis for {sources[0]['url']}: score={risk_score}")
+
+                return formatted, result, 'web', risk_score
             else:
-                logger.warning("No results from DuckDuckGo")
+                logger.warning("No results from SearXNG web search")
         
         logger.warning(f"No web search results for intent: {intent}")
         return None, None, None, None
@@ -709,9 +716,27 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
         # If web search was triggered, send event
         if web_search_intent:
             yield f"data: {json.dumps({'type': 'web_search', 'intent': web_search_intent, 'search_type': web_search_type})}\n\n"
-            
-            # Send web search results
-            if web_search_data:
+
+            if web_search_type == 'web' and web_search_data:
+                # SearXNG result (perform_web_search's SEARCH_NEWS/SEARCH_WEB
+                # branch) - same structured source-card event/shape as the
+                # model-driven web_search("web") tool below, not the older
+                # single-abstract WebSearchResults display (that one expects
+                # a DuckDuckGo-shaped dict, not a source list).
+                web_source_items = [
+                    {
+                        "id": f"source-{i}",
+                        "title": s.get("title", ""),
+                        "url": s.get("url", ""),
+                        "domain": s.get("domain", ""),
+                        "published_at": s.get("published_at"),
+                        "dated": s.get("dated", False)
+                    }
+                    for i, s in enumerate(web_search_data.get("sources", []))
+                ]
+                yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
+            elif web_search_data:
+                # Send web search results
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type, 'risk_score': web_search_risk_score or 0})}\n\n"
         
         # Agent tool-calling loop: bounded re-invocation of Ollama so the
@@ -1867,8 +1892,23 @@ async def stream_guest_response(
         if intent in SEARCH_INTENTS:
             yield f"data: {json.dumps({'type': 'web_search', 'intent': intent})}\n\n"
             web_search_result, web_search_data, web_search_type, _ = await perform_web_search(query, intent)
-            
-            if web_search_data:
+
+            if web_search_type == 'web' and web_search_data:
+                # SearXNG result - same structured source-card shape as the
+                # authenticated chat path above, see stream_ollama_response.
+                web_source_items = [
+                    {
+                        "id": f"source-{i}",
+                        "title": s.get("title", ""),
+                        "url": s.get("url", ""),
+                        "domain": s.get("domain", ""),
+                        "published_at": s.get("published_at"),
+                        "dated": s.get("dated", False)
+                    }
+                    for i, s in enumerate(web_search_data.get("sources", []))
+                ]
+                yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
+            elif web_search_data:
                 yield f"data: {json.dumps({'type': 'web_results', 'results': web_search_data, 'search_type': web_search_type})}\n\n"
         
         # Einfacher System-Prompt für Gäste
