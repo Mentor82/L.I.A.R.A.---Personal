@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { agentAPI, chatAPI } from '../services/api';
+import { parseSSEStream } from '../services/sseClient';
 import MarkdownMessage from './MarkdownMessage';
 import './AgentDrawer.css';
 
@@ -91,31 +92,8 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
       }
 
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop(); // Unvollständigen Rest behalten
-
-        for (const block of lines) {
-          const trimmed = block.trim();
-          if (!trimmed || trimmed.startsWith(':')) continue; // Keep-alive ignorieren
-
-          const dataLine = trimmed.split('\n').find((l) => l.startsWith('data: '));
-          if (!dataLine) continue;
-
-          try {
-            const eventPayload = JSON.parse(dataLine.slice(6));
-            handleIncomingEvent(eventPayload);
-          } catch (e) {
-            console.warn('Fehler beim Parsen des SSE Events:', e);
-          }
-        }
+      for await (const eventPayload of parseSSEStream(reader)) {
+        handleIncomingEvent(eventPayload);
       }
     } catch (err) {
       console.error('Agent Task Fehler:', err);

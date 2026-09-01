@@ -81,42 +81,55 @@ async function apiFetch(endpoint, options = {}) {
   }
 }
 
+let inFlightRefreshPromise = null;
+
 /**
- * Refresh access token using refresh token
+ * Refresh access token using refresh token.
+ * Prevents concurrent refresh races by returning the in-flight Promise if active.
  * @returns {Promise<boolean>} true if successful
  */
-async function refreshAccessToken() {
-  try {
-    const refreshToken = localStorage.getItem('liara_refresh_token');
-    if (!refreshToken) {
-      return false;
-    }
-    
-    const response = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    
-    if (!response.ok) {
-      return false;
-    }
-    
-    const data = await response.json();
-    
-    // Store new tokens
-    localStorage.setItem('liara_token', data.access_token);
-    if (data.refresh_token) {
-      localStorage.setItem('liara_refresh_token', data.refresh_token);
-    }
-    localStorage.setItem('liara_user', JSON.stringify(data.user));
-    
-    console.log('Token refreshed successfully');
-    return true;
-  } catch (error) {
-    console.error('Token refresh failed:', error);
-    return false;
+export async function refreshAccessToken() {
+  if (inFlightRefreshPromise) {
+    return inFlightRefreshPromise;
   }
+
+  inFlightRefreshPromise = (async () => {
+    try {
+      const refreshToken = localStorage.getItem('liara_refresh_token');
+      if (!refreshToken) {
+        return false;
+      }
+      
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      
+      if (!response.ok) {
+        return false;
+      }
+      
+      const data = await response.json();
+      
+      // Store new tokens
+      localStorage.setItem('liara_token', data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem('liara_refresh_token', data.refresh_token);
+      }
+      localStorage.setItem('liara_user', JSON.stringify(data.user));
+      
+      console.log('Token refreshed successfully');
+      return true;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      return false;
+    } finally {
+      inFlightRefreshPromise = null;
+    }
+  })();
+
+  return inFlightRefreshPromise;
 }
 
 /**

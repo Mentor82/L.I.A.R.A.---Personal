@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any, Dict
 
 MLOG_DIR = Path("/opt/liara/mlog")
-MLOG_DIR.mkdir(exist_ok=True)
+try:
+    MLOG_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    MLOG_DIR = Path("./mlog")
+    try:
+        MLOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
 
 class MirkoLogger:

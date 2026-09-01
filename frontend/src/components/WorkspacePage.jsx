@@ -6,6 +6,7 @@ import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
 import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
 import { chatAPI, workspaceAPI, codeExecAPI, preferencesAPI } from '../services/api';
+import { streamChatSSE } from '../services/sseClient';
 import { getSessionMessages } from '../services/chatService';
 import CodeRunResult from './CodeRunResult';
 import DiffView from './DiffView';
@@ -429,50 +430,45 @@ function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
     setMessages((prev) => [...prev, { role: 'user', content: text }]);
     setSending(true);
 
-    let assistantAdded = false;
+    const assistantMsgId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : 'ws_msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+
     let assistantContent = '';
-    try {
-      const token = localStorage.getItem('liara_token');
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ message: text, model, session_id: sessionId }),
+
+    const updateAssistantMsg = (newContent) => {
+      assistantContent = newContent;
+      setMessages((prev) => {
+        const idx = prev.findIndex(m => m.id === assistantMsgId);
+        if (idx === -1) {
+          return [...prev, { id: assistantMsgId, role: 'assistant', content: assistantContent }];
+        }
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], content: assistantContent };
+        return copy;
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    };
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (data === '[DONE]') continue;
-          let parsed;
-          try { parsed = JSON.parse(data); } catch { continue; }
-
+    try {
+      await streamChatSSE('/api/chat/stream', {
+        message: text,
+        model,
+        session_id: sessionId
+      }, {
+        onEvent: (parsed) => {
           if (parsed.type === 'content') {
-            assistantContent += parsed.text;
-            if (!assistantAdded) {
-              assistantAdded = true;
-              setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }]);
-            } else {
-              setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', content: assistantContent }]);
-            }
+            updateAssistantMsg(assistantContent + (parsed.text || ''));
           } else if (parsed.type === 'workspace_proposal') {
-            // A proposal was created via this chat - refresh the Explorer/
-            // proposals list the same way approving/rejecting one already does.
             onWorkspaceProposal?.();
-          } else if (parsed.type === 'error') {
-            const message = typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message || 'Unbekannter Fehler.');
-            throw new Error(message);
           }
         }
-      }
+      });
     } catch (err) {
       setError(err.message || 'Fehler bei der Kommunikation mit LIARA.');
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantMsgId, role: 'assistant', content: `⚠️ ${err.message || 'Fehler bei der Kommunikation mit LIARA.'}` }
+      ]);
     } finally {
       setSending(false);
     }

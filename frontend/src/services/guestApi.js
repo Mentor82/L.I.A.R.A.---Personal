@@ -1,6 +1,4 @@
-/**
- * Guest API - Endpoints ohne Authentifizierung
- */
+import { parseSSEStream } from './sseClient';
 
 const API_BASE = '/api';  // Nginx proxied /api/* zum Backend
 
@@ -51,48 +49,24 @@ export const guestAPI = {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json().catch(() => ({}));
       throw new Error(error.detail || 'Chat error');
     }
 
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
 
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6).trim();
-            if (!dataStr || dataStr === '[DONE]') continue;
-            
-            try {
-              const data = JSON.parse(dataStr);
-              
-              if (data.type === 'error') {
-                onError(data.error);
-              } else if (data.type === 'done') {
-                onDone();
-              } else if (data.type === 'content') {
-                onChunk(data);
-              } else if (data.type === 'web_search') {
-                onChunk(data);
-              } else if (data.type === 'web_results') {
-                onChunk(data);
-              }
-            } catch (parseError) {
-              console.error('Failed to parse SSE data:', parseError, 'Line:', dataStr);
-            }
-          }
+      for await (const data of parseSSEStream(reader, { signal: abortSignal })) {
+        if (data.type === 'error') {
+          onError(data.error);
+        } else if (data.type === 'done') {
+          onDone();
+        } else if (data.type === 'content' || data.type === 'web_search' || data.type === 'web_results') {
+          onChunk(data);
         }
       }
-    } finally {
-      reader.releaseLock();
+    } catch (err) {
+      onError?.(err.message || 'Stream parsing error');
     }
   }
 };

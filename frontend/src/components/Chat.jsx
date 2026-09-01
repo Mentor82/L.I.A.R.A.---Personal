@@ -2,9 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { chatAPI, moodAPI } from '../services/api';
 import { getChatSessions, createChatSession, getSessionMessages, deleteChatSession } from '../services/chatService';
-import { analyzeSentimentDebounced } from '../services/sentimentService';
-import { shouldUseSSE } from '../services/systemLoadService';
-import SearchingIndicator from './SearchingIndicator';
+import { streamChatSSE } from '../services/sseClient';
 import WebSearchResults from './WebSearchResults';
 import MarkdownMessage from './MarkdownMessage';
 import SentimentIndicator, { SentimentBadge } from './SentimentIndicator';
@@ -656,368 +654,136 @@ function Chat() {
     abortControllerRef.current = new AbortController();
     const requestAbortController = abortControllerRef.current;
 
+    // Generate unique ID for this assistant streaming message
+    const assistantMessageId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+
+    let liaraMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      model: modelToUse,
+      timestamp: new Date().toISOString(),
+      webSearchResults: null,
+      searchType: null,
+      riskScore: null
+    };
+
+    let messageAdded = false;
+
+    const updateAssistantMessage = (patch) => {
+      liaraMessage = { ...liaraMessage, ...patch };
+      setChatSessions(prev => prev.map(session => {
+        if (session.id !== activeSessionId) return session;
+        const msgIndex = session.messages.findIndex(m => m.id === assistantMessageId);
+        if (msgIndex === -1) {
+          return { ...session, messages: [...session.messages, liaraMessage] };
+        }
+        const nextMessages = [...session.messages];
+        nextMessages[msgIndex] = liaraMessage;
+        return { ...session, messages: nextMessages };
+      }));
+    };
+
     try {
-      const token = localStorage.getItem('liara_token');
-      
-      // ⚡ Adaptive SSE: Check system load first
-      const useSSE = await shouldUseSSE();
-      console.log(`[Chat] Using ${useSSE ? 'SSE' : 'SYNC'} mode based on system load`);
-      console.log(`[FRONTEND_LOG] ${timestamp} - REQUEST_MODE - Using ${useSSE ? 'SSE' : 'SYNC'}`);
-      
-      if (!useSSE) {
-        // ====== SYNC MODE: High system load, use traditional request/response ======
-        console.log('[Chat] SYNC MODE: Using /api/chat/message');
-        console.log(`[FRONTEND_LOG] ${timestamp} - HTTP_START - Sending POST to /api/chat/message`);
-
-        const response = await fetch('/api/chat/message', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            message: trimmedMessage,
-            model: modelToUse,
-            session_id: activeSessionId
-          }),
-          signal: requestAbortController.signal
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        
-        // Add complete response message
-        const liaraMessage = {
-          role: 'assistant',
-          content: data.response,
-          model: data.model_used || modelToUse,
-          timestamp: new Date().toISOString(),
-          intent: data.intent,
-          actionResult: data.action_result,
-          toolResult: data.tool_result,  // Tool-Call Ergebnis
-          mood: data.mood
-        };
-        
-        setChatSessions(prev => prev.map(session => 
-          session.id === activeSessionId 
-            ? { ...session, messages: [...session.messages, liaraMessage] }
-            : session
-        ));
-        
-        setLoading(false);
-
-        // Update mood - eigener try/catch, siehe Begründung beim SSE-Zweig
-        // weiter unten: die Antwort ist bereits angezeigt, ein Fehler hier
-        // darf sie nicht nachträglich als gescheitert erscheinen lassen.
-        try {
-          const moodData = await moodAPI.getStatus();
-          setCurrentMood(moodData.current_mood);
-        } catch (moodError) {
-          console.error('[Chat] Mood-Status-Refresh fehlgeschlagen (nicht kritisch):', moodError);
-        }
-
-        return;
-      }
-      
-      // ====== SSE MODE: Normal load, use streaming ======
-      console.log('[Chat] SSE MODE: Using /api/chat/stream');
+      console.log('[Chat] SSE STREAM START: Connecting to /api/chat/stream');
       console.log(`[FRONTEND_LOG] ${timestamp} - SSE_START - Connecting to /api/chat/stream`);
-      
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          message: trimmedMessage,
-          model: modelToUse,
-          // Without this, the backend could never tell which session a
-          // message belonged to and created a brand-new orphaned session
-          // for every single message instead of continuing this one.
-          session_id: activeSessionId
-        }),
-        signal: requestAbortController.signal
-      });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      
-      let liaraMessage = {
-        role: 'assistant',
-        content: '',
+      await streamChatSSE('/api/chat/stream', {
+        message: trimmedMessage,
         model: modelToUse,
-        timestamp: new Date().toISOString(),
-        webSearchResults: null,
-        searchType: null,
-        riskScore: null
-      };
-      
-      let messageAdded = false;  // Track ob Message bereits hinzugefügt wurde
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              lastActivityRef.current = Date.now();
-              setStalled(false);
-
-              if (parsed.type === 'metadata') {
-                // Update model info
-                liaraMessage.model = parsed.model;
-                liaraMessage.mood = parsed.mood;
-              } else if (parsed.type === 'memory_context') {
-                // ✨ Memory Context from Neo4j
-                setMemoryContext(parsed.data);
-                liaraMessage.memoryContext = parsed.data;
-              } else if (parsed.type === 'action_result') {
-                // Action (event/task/note) was executed
-                liaraMessage.actionResult = parsed.result;
-              } else if (parsed.type === 'web_search') {
-                // Show searching indicator
-                setSearching(true);
-                setSearchIntent(parsed.intent || 'general');
-              } else if (parsed.type === 'web_results') {
-                // Got search results
-                setSearching(false);
-                liaraMessage.webSearchResults = parsed.results;
-                liaraMessage.searchType = parsed.search_type;
-                liaraMessage.riskScore = parsed.risk_score;
-              } else if (parsed.type === 'thinking') {
-                // Reasoning-model output (deepseek-r1 etc.) - kept separate
-                // from liaraMessage.content so it renders as its own
-                // collapsible block instead of leaking into the answer text.
-                liaraMessage.thinking = (liaraMessage.thinking || '') + parsed.text;
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'tasks') {
-                // Model-authored plan checklist (see task_splitter.py) - each
-                // event carries the FULL current state, so it replaces
-                // liaraMessage.tasks wholesale rather than accumulating like
-                // 'thinking' does.
-                liaraMessage.tasks = parsed.items;
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'agent_steps') {
-                // Real tool-execution progress (see chat_streaming.py's agent
-                // loop) - backend-confirmed, not model-claimed, so this is a
-                // separate event/field from 'tasks'. Full current state each
-                // time, same replace-wholesale contract as 'tasks'.
-                liaraMessage.agentSteps = parsed.items;
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'web_sources') {
-                // Structured source cards from web_search(search_type="web")
-                // (see chat_streaming.py's agent loop) - shown alongside the
-                // model's own cited text, not instead of it. Full current
-                // state each time, same replace-wholesale contract as
-                // 'agent_steps'/'tasks'.
-                liaraMessage.webSources = parsed.items;
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'factcheck') {
-                // Per-claim confidence ratings (see factcheck_splitter.py) -
-                // full current state each time, same replace-wholesale
-                // contract as 'tasks'/'agent_steps'/'web_sources'.
-                liaraMessage.factcheck = parsed.items;
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'workspace_proposal') {
-                // LIARA proposed a workspace change via the workspace_propose_change
-                // tool (Agent-Vorbereitung v1) - nothing on disk changed yet, this
-                // just tells the user where to go review/approve it. Each event is
-                // one proposal, so accumulate rather than replace-wholesale.
-                liaraMessage.workspaceProposals = [...(liaraMessage.workspaceProposals || []), parsed];
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'workspace_artifact') {
-                // A long-form plan/document (see build_workspace_artifact_instructions
-                // in prompt_builder.py) got saved as a Workspace file instead of
-                // streamed as chat content - one card per artifact, so accumulate
-                // rather than replace-wholesale, same as workspace_proposal above.
-                // `content` is only present when the save failed/there was no
-                // session (WorkspaceArtifactCard falls back to rendering it inline).
-                liaraMessage.workspaceArtifacts = [...(liaraMessage.workspaceArtifacts || []), parsed];
-
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'content') {
-                // Append content chunk
-                liaraMessage.content += parsed.text;
-
-                // Beim ersten Content: Message hinzufügen und Loading-Indikator
-                // ausblenden - sonst läuft die "denkt nach..."-Bubble parallel
-                // zur bereits sichtbaren, live wachsenden Antwort weiter, bis
-                // der komplette Stream fertig ist.
-                if (!messageAdded) {
-                  messageAdded = true;
-                  setLoading(false);
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? { ...session, messages: [...session.messages, liaraMessage] }
-                      : session
-                  ));
-                } else {
-                  // Update: Ersetze die LETZTE Message im Array
-                  setChatSessions(prev => prev.map(session =>
-                    session.id === activeSessionId
-                      ? {
-                          ...session,
-                          messages: [
-                            ...session.messages.slice(0, -1),  // Alle außer letzte
-                            liaraMessage  // Neue Version der letzten Message
-                          ]
-                        }
-                      : session
-                  ));
-                }
-              } else if (parsed.type === 'done') {
-                setLoading(false);
-                setSearching(false);
-                // /chat/stream now persists both sides of the exchange
-                // itself (see chat_streaming.py) - saving it again here
-                // duplicated the message with a NULL user_id.
-              } else if (parsed.type === 'persisted') {
-                // Fires once the DB write actually commits, separately from
-                // (and slightly after) 'done' - 'done' only means Ollama
-                // finished generating, not that the reply is safely saved
-                // yet. Tracked on the message for now (e.g. future "still
-                // saving" UI); not surfaced visually yet.
-                liaraMessage.persisted = parsed.success;
-                setChatSessions(prev => prev.map(session =>
-                  session.id === activeSessionId
-                    ? { ...session, messages: [...session.messages.slice(0, -1), liaraMessage] }
-                    : session
-                ));
-              } else if (parsed.type === 'error') {
-                throw new Error(parsed.error);
-              }
-            } catch (parseError) {
-              console.error('Failed to parse SSE data:', parseError);
+        session_id: activeSessionId
+      }, {
+        signal: requestAbortController.signal,
+        onActivity: () => {
+          lastActivityRef.current = Date.now();
+          setStalled(false);
+        },
+        onEvent: async (parsed) => {
+          if (parsed.type === 'metadata') {
+            updateAssistantMessage({ model: parsed.model, mood: parsed.mood });
+          } else if (parsed.type === 'memory_context') {
+            setMemoryContext(parsed.data);
+            updateAssistantMessage({ memoryContext: parsed.data });
+          } else if (parsed.type === 'action_result') {
+            updateAssistantMessage({ actionResult: parsed.result });
+          } else if (parsed.type === 'web_search') {
+            setSearching(true);
+            setSearchIntent(parsed.intent || 'general');
+          } else if (parsed.type === 'web_results') {
+            setSearching(false);
+            updateAssistantMessage({
+              webSearchResults: parsed.results,
+              searchType: parsed.search_type,
+              riskScore: parsed.risk_score
+            });
+          } else if (parsed.type === 'thinking') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
             }
+            updateAssistantMessage({
+              thinking: (liaraMessage.thinking || '') + (parsed.text || '')
+            });
+          } else if (parsed.type === 'tasks') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({ tasks: parsed.items });
+          } else if (parsed.type === 'agent_steps') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({ agentSteps: parsed.items });
+          } else if (parsed.type === 'web_sources') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({ webSources: parsed.items });
+          } else if (parsed.type === 'factcheck') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({ factcheck: parsed.items });
+          } else if (parsed.type === 'workspace_proposal') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({
+              workspaceProposals: [...(liaraMessage.workspaceProposals || []), parsed]
+            });
+          } else if (parsed.type === 'workspace_artifact') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({
+              workspaceArtifacts: [...(liaraMessage.workspaceArtifacts || []), parsed]
+            });
+          } else if (parsed.type === 'content') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({
+              content: liaraMessage.content + (parsed.text || '')
+            });
+          } else if (parsed.type === 'done') {
+            setLoading(false);
+            setSearching(false);
+          } else if (parsed.type === 'persisted') {
+            updateAssistantMessage({ persisted: parsed.success });
           }
         }
-      }
+      });
 
-      // Mood könnte sich geändert haben. Eigener try/catch: die eigentliche
-      // Antwort ist zu diesem Zeitpunkt bereits vollständig gestreamt und
-      // angezeigt - ein Fehler bei diesem rein informativen Folge-Call darf
-      // nicht als "Fehler bei der Kommunikation mit Liara" über eine bereits
-      // erfolgreiche Antwort gelegt werden.
+      // Mood-Refresh nach erfolgreicher Antwort
       try {
         const moodData = await moodAPI.getStatus();
         setCurrentMood(moodData.current_mood);
@@ -1034,13 +800,14 @@ function Chat() {
       
       console.error('[Chat] Error:', error);
       console.log(`[FRONTEND_LOG] ${timestamp} - REQUEST_ERROR - ${error.message}`);
+      setErrorMessage(error.message || 'Fehler bei der Kommunikation mit Liara');
       setChatSessions(prev => prev.map(session => 
         session.id === activeSessionId 
           ? { 
               ...session, 
               messages: [...session.messages, { 
                 role: 'error', 
-                content: 'Fehler bei der Kommunikation mit Liara. Ist das Backend erreichbar?',
+                content: error.message || 'Fehler bei der Kommunikation mit Liara. Ist das Backend erreichbar?',
                 timestamp: new Date().toISOString()
               }]
             }

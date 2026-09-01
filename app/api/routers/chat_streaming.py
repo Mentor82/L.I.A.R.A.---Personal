@@ -477,7 +477,7 @@ async def stream_ollama_response(
     memory_enabled: bool = True,
     used_tools: bool = False,
     conversation_history: Optional[List[Dict]] = None,
-    session_lock=None,  # issue #13 item 2 - released in this function's finally
+    session_lock=None,  # issue #13 item 2 / issue #18 - acquired inside generator if None, released in finally
 ) -> AsyncGenerator[str, None]:
     """
     Streame Ollama-Response via Server-Sent Events.
@@ -485,6 +485,11 @@ async def stream_ollama_response(
     Yields:
         Server-Sent Event formatted strings
     """
+    # issue #18: Acquire session lock inside the stream generator so the HTTP
+    # StreamingResponse is returned immediately to prevent reverse-proxy 524 timeouts.
+    if session_lock is None and session_id is not None:
+        session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
+
     # Mood-Detection und System-Prompt (per-user, DB-backed)
     mood_system = MoodSystem(user_id)
     interaction_type = MoodSystem.detect_interaction_type(message)
@@ -1649,13 +1654,6 @@ async def stream_chat(
                 raise HTTPException(status_code=404, detail="Session not found or access denied")
 
             session_id = request.session_id
-
-            # issue #13 item 2: serialize this session's turns from here -
-            # the history read immediately below through the assistant
-            # persistence at the end of stream_ollama_response() - before a
-            # second concurrent request for this same session can read the
-            # same pre-turn history this one is about to.
-            session_lock = await asyncio.to_thread(_acquire_session_lock, session_id)
 
         # Short-term conversational history: without this, every request sent
         # only (system prompt + the single current message) with no prior
