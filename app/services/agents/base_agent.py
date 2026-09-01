@@ -172,6 +172,7 @@ class BaseAgent:
             "stream": False,
             "options": {
                 "temperature": 0.2,  # Niedrige Temperatur für präzise Tool-Nutzung
+                "repeat_penalty": 1.1  # unset before - a smaller model can loop/repeat over a multi-step ReAct run without this
             }
         }
         if tools:

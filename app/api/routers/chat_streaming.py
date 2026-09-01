@@ -818,7 +818,13 @@ Erkläre kurz, dass du den Standort speichern kannst für zukünftige Anfragen (
                 "stream": True,
                 "options": {
                     "temperature": temperature,
-                    "num_predict": num_predict
+                    "num_predict": num_predict,
+                    # Left unset before - confirmed live that an unstable
+                    # model (e.g. gpt-oss:120b-cloud) can then repeat its
+                    # entire answer verbatim 2-3x in a single turn. LiNeP's
+                    # RequestEnvelope has no generic options field to carry
+                    # this through, so the LiNeP branch below stays affected.
+                    "repeat_penalty": 1.1
                 }
             }
             if iteration_tools:
@@ -1930,7 +1936,8 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
             "stream": True,
             "options": {
                 "temperature": 0.7,
-                "num_predict": 300  # Kürzere Antworten für Gäste
+                "num_predict": 300,  # Kürzere Antworten für Gäste
+                "repeat_penalty": 1.1  # see stream_ollama_response's payload for why
             }
         }
         
