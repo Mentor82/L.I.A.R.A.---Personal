@@ -148,6 +148,7 @@ def get_notes_tree(
                 'category': note.category,
                 'tags': note.tags or [],
                 'parent_id': note.parent_id,
+                'session_id': note.session_id,
                 'is_pinned': note.is_pinned,
                 'is_archived': note.is_archived,
                 'is_expanded': note.is_expanded,
