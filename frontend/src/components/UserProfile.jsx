@@ -17,6 +17,9 @@ function UserProfile() {
     const userData = localStorage.getItem('liara_user')
     if (userData) {
       const parsedUser = JSON.parse(userData)
+      // One-time restore from localStorage on mount - a real external-system
+      // read, not a render-computable value.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setUser(parsedUser)
       setFormData(prev => ({
         ...prev,
@@ -55,7 +58,7 @@ function UserProfile() {
       } else {
         setMessage({ type: 'error', text: data.detail || 'Fehler beim Aktualisieren' })
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: 'Netzwerkfehler' })
     }
   }
@@ -101,7 +104,7 @@ function UserProfile() {
       } else {
         setMessage({ type: 'error', text: data.detail || 'Fehler beim Ändern des Passworts' })
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: 'Netzwerkfehler' })
     }
   }

@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { guestAPI } from '../services/guestApi';
 import PageLayout from './PageLayout';
 import ComplianceBadges from './ComplianceBadges';
 import './LandingPage.css';
 
 function LandingPage({ onLogin }) {
-  const navigate = useNavigate();
   const location = useLocation();
   const [guestModeEnabled, setGuestModeEnabled] = useState(false);
   const [showAuthForm, setShowAuthForm] = useState(false);
@@ -114,7 +113,7 @@ function LandingPage({ onLogin }) {
       } else {
         setError(data.detail || 'Login fehlgeschlagen');
       }
-    } catch (error) {
+    } catch {
       setError('Verbindungsfehler');
     } finally {
       setLoading(false);

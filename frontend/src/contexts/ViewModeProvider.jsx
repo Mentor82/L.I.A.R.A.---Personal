@@ -1,6 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-
-const ViewModeContext = createContext(null);
+import { useState, useEffect, useCallback } from 'react';
+import { ViewModeContext } from './ViewModeContext';
 
 export function ViewModeProvider({ children }) {
   // 'auto' | 'mobile' | 'desktop'
@@ -46,12 +45,4 @@ export function ViewModeProvider({ children }) {
       {children}
     </ViewModeContext.Provider>
   );
-}
-
-export function useViewMode() {
-  const context = useContext(ViewModeContext);
-  if (!context) {
-    throw new Error('useViewMode must be used within a ViewModeProvider');
-  }
-  return context;
 }

@@ -14,10 +14,6 @@ function UserManagement() {
     privacy_accepted: true
   });
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   const fetchUsers = async () => {
     try {
       const response = await fetch('/api/users/', {
@@ -33,6 +29,13 @@ function UserManagement() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Initial data fetch on mount - the effect is the fetch itself (a real
+    // external-system side effect), not a render-computable value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchUsers();
+  }, []);
 
   const handleRoleChange = async (userId, newRole) => {
     try {

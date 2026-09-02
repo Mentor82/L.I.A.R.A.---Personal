@@ -4,7 +4,10 @@ import { THEME_STORAGE_KEY, getStoredTheme, resolveEffectiveTheme, applyTheme } 
 import liaraLogo from '../assets/LIARA-LOGO.png';
 import './PageLayout.css';
 
-function PageLayout({ children, showGuestCTA = false, wide = false }) {
+// LandingPage.jsx still passes a `showGuestCTA` prop (see its
+// `guestModeEnabled`), but there's no guest-CTA UI here yet to gate on it -
+// left out of the destructure below rather than wired to nothing.
+function PageLayout({ children, wide = false }) {
   const location = useLocation();
   const navigate = useNavigate();
   const isLandingPage = location.pathname === '/';

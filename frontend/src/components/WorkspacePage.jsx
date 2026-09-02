@@ -79,10 +79,6 @@ function extensionOf(filename) {
   return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : '';
 }
 
-function basenameOf(path) {
-  return path.includes('/') ? path.slice(path.lastIndexOf('/') + 1) : path;
-}
-
 function parentOf(path) {
   return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 }
@@ -160,7 +156,7 @@ const SOURCE_BADGE_CLASS = {
   unknown: 'workspace-badge-unknown',
 };
 
-export function isImageFile(filename) {
+function isImageFile(filename) {
   if (!filename) return false;
   return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(filename);
 }
@@ -821,7 +817,7 @@ function WorkspacePage() {
       // silently keeping stale ids around for the next bulk action.
       const stillPending = new Set(list.map((p) => p.id));
       setSelectedProposalIds((prev) => new Set([...prev].filter((id) => stillPending.has(id))));
-    } catch (err) {
+    } catch {
       // Non-fatal - the proposals panel simply stays empty/stale.
     }
   };
@@ -984,7 +980,7 @@ function WorkspacePage() {
         scrollIntoView: true,
       });
       view.focus();
-    } catch (err) {
+    } catch {
       // Line out of range or a transient editor-state mismatch - not worth
       // surfacing as an error, the file itself still opened correctly.
     }

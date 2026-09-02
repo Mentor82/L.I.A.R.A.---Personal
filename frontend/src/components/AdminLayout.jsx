@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useTerminalDock } from '../contexts/TerminalDockContext'
+import { useTerminalDock } from '../contexts/useTerminalDock'
 import './AdminLayout.css'
 
 /**
@@ -10,7 +10,6 @@ import './AdminLayout.css'
 function AdminLayout({ onLogout }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const isRootPath = location.pathname === '/admin'
   const isTerminalActive = location.pathname === '/admin/terminal'
   const dockRef = useRef(null)
   const { setDockNode } = useTerminalDock()

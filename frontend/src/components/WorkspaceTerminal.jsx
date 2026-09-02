@@ -89,7 +89,9 @@ function SingleTerminalInstance({ sessionId, active, onStatusChange }) {
           try {
             fitAddon.fit();
             ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-          } catch {}
+          } catch {
+            // Cosmetic resize - not worth surfacing if the terminal isn't ready yet.
+          }
         }, 150);
       };
 
@@ -130,7 +132,9 @@ function SingleTerminalInstance({ sessionId, active, onStatusChange }) {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }
-      } catch {}
+      } catch {
+        // Cosmetic resize - not worth surfacing if the terminal isn't ready yet.
+      }
     });
     resizeObserver.observe(containerRef.current);
 
@@ -154,7 +158,9 @@ function SingleTerminalInstance({ sessionId, active, onStatusChange }) {
               rows: termRef.current.rows,
             }));
           }
-        } catch {}
+        } catch {
+          // Cosmetic resize - not worth surfacing if the terminal isn't ready yet.
+        }
       }, 50);
     }
   }, [active]);

@@ -99,7 +99,7 @@ function SystemHealth() {
 
   if (!health) return null;
 
-  const { overall, system, services, ports, containers, databases, endpoints, ai_services } = health;
+  const { overall, system, services, ports, containers, ai_services } = health;
 
   return (
     <div className="system-health halo-bg-pattern">

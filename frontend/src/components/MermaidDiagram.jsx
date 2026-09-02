@@ -59,7 +59,9 @@ const MermaidDiagram = memo(({ code }) => {
     return <div className="mermaid-loading">Diagramm wird gerendert…</div>;
   }
 
-  // eslint-disable-next-line react/no-danger -- mermaid.render output, securityLevel 'strict' sanitizes it
+  // mermaid.render output, securityLevel 'strict' sanitizes it -
+  // react/no-danger isn't part of this project's eslint config (only
+  // eslint-plugin-react-hooks/react-refresh are), so no disable is needed.
   return <div className="mermaid-diagram" dangerouslySetInnerHTML={{ __html: svg }} />;
 });
 MermaidDiagram.displayName = 'MermaidDiagram';

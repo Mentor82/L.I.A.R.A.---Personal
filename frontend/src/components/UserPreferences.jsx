@@ -121,7 +121,7 @@ function UserPreferences() {
       } else {
         setMessage({ type: 'error', text: 'Fehler beim Speichern' })
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: 'Netzwerkfehler' })
     }
   }
@@ -153,7 +153,7 @@ function UserPreferences() {
         setPreferences(prev => ({ ...prev, [key]: !newValue }))
         setMessage({ type: 'error', text: 'Fehler beim Speichern' })
       }
-    } catch (error) {
+    } catch {
       setPreferences(prev => ({ ...prev, [key]: !newValue }))
       setMessage({ type: 'error', text: 'Netzwerkfehler' })
     }
@@ -183,7 +183,7 @@ function UserPreferences() {
       } else {
         setMessage({ type: 'error', text: 'Fehler beim Löschen der Erinnerungen' })
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: 'error', text: 'Netzwerkfehler' })
     } finally {
       setDeletingMemories(false)

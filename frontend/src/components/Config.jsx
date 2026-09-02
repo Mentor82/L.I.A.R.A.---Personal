@@ -8,12 +8,6 @@ function Config() {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadConfigData();
-    const interval = setInterval(loadConfigData, 10000); // Refresh every 10s
-    return () => clearInterval(interval);
-  }, []);
-
   const loadConfigData = async () => {
     try {
       const [personaRes, modelsRes, infoRes, healthRes] = await Promise.all([
@@ -40,6 +34,15 @@ function Config() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Initial data fetch on mount - the effect is the fetch itself (a real
+    // external-system side effect), not a render-computable value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadConfigData();
+    const interval = setInterval(loadConfigData, 10000); // Refresh every 10s
+    return () => clearInterval(interval);
+  }, []);
 
   if (loading) {
     return <div className="config-loading">Loading configuration...</div>;

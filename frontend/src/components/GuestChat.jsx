@@ -17,6 +17,9 @@ function ThinkingBlock({ thinking, isAnswering }) {
   useEffect(() => {
     if (isAnswering && !autoCollapsedRef.current) {
       autoCollapsedRef.current = true;
+      // One-time auto-collapse latch - no render-time equivalent, since after
+      // this the user's own manual toggle must be free to override `expanded`.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExpanded(false);
     }
   }, [isAnswering]);

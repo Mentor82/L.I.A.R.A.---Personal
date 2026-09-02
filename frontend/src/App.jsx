@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { BrowserRouter as Router, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { TerminalDockProvider, useTerminalDock } from './contexts/TerminalDockContext'
-import { ViewModeProvider, useViewMode } from './contexts/ViewModeContext'
+import { TerminalDockProvider } from './contexts/TerminalDockProvider'
+import { useTerminalDock } from './contexts/useTerminalDock'
+import { ViewModeProvider } from './contexts/ViewModeProvider'
+import { useViewMode } from './contexts/useViewMode'
 import { preferencesAPI, workspaceAPI } from './services/api'
 import liaraLogo from './assets/LIARA-LOGO.png'
 
@@ -113,24 +115,25 @@ const PageLoader = () => (
 // mounted), or a detached hidden node otherwise, so the component never unmounts.
 function PersistentTerminal() {
   const { dockNode } = useTerminalDock()
-  const hiddenHomeRef = useRef(null)
-
-  if (!hiddenHomeRef.current) {
-    hiddenHomeRef.current = document.createElement('div')
-    hiddenHomeRef.current.style.display = 'none'
-  }
+  // Lazy useState initializer instead of a ref read during render - the DOM
+  // node still only gets created once and keeps stable identity for the
+  // component's lifetime, but without touching `.current` outside an effect.
+  const [hiddenHome] = useState(() => {
+    const el = document.createElement('div')
+    el.style.display = 'none'
+    return el
+  })
 
   useEffect(() => {
-    const el = hiddenHomeRef.current
-    document.body.appendChild(el)
+    document.body.appendChild(hiddenHome)
     return () => {
-      document.body.removeChild(el)
+      document.body.removeChild(hiddenHome)
     }
-  }, [])
+  }, [hiddenHome])
 
   // dockNode stays stable for as long as AdminLayout is mounted (anywhere under /admin),
   // so this only retargets when entering/leaving the admin section, never between its subpages.
-  const target = dockNode || hiddenHomeRef.current
+  const target = dockNode || hiddenHome
 
   return createPortal(
     <Suspense fallback={<div>Wird geladen...</div>}>
@@ -141,7 +144,6 @@ function PersistentTerminal() {
 }
 
 function App() {
-  const { t } = useTranslation()
   // Restored synchronously during the initial render (not in a useEffect,
   // which used to leave a render where auth state was still "unknown" -
   // harmless for a healthy session since setUser/setLoading batched
@@ -180,6 +182,10 @@ function App() {
   // a longer interval since this is polish, not something latency-sensitive.
   useEffect(() => {
     if (!user || user.is_guest || !workspaceAgentEnabled) {
+      // Resetting derived badge state when polling is turned off - there's
+      // no render-time equivalent since this must react to `user`/
+      // `workspaceAgentEnabled` changing, not to a value computable during render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPendingProposalsCount(0)
       return
     }

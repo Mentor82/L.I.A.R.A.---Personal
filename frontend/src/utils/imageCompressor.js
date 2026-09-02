@@ -80,7 +80,7 @@ export async function compressAndFormatImage(file, maxDimension = 1280, quality 
       img.src = e.target.result;
     };
 
-    reader.onerror = (err) => reject(new Error('Fehler beim Lesen der Datei'));
+    reader.onerror = () => reject(new Error('Fehler beim Lesen der Datei'));
     reader.readAsDataURL(file);
   });
 }

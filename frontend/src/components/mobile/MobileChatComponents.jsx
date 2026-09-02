@@ -6,7 +6,6 @@ import {
   WorkspaceProposalsBlock,
   WorkspaceArtifactsBlock
 } from '../chat/ChatCards';
-import liaraLogo from '../../assets/LIARA-LOGO.png';
 
 export function MobileThinkingBlock({ thinking, isAnswering, labelThinking, labelDone }) {
   const [expanded, setExpanded] = useState(!isAnswering);
@@ -15,6 +14,9 @@ export function MobileThinkingBlock({ thinking, isAnswering, labelThinking, labe
   useEffect(() => {
     if (isAnswering && !autoCollapsedRef.current) {
       autoCollapsedRef.current = true;
+      // One-time auto-collapse latch - no render-time equivalent, since after
+      // this the user's own manual toggle must be free to override `expanded`.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExpanded(false);
     }
   }, [isAnswering]);

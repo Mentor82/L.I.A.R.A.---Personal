@@ -201,7 +201,7 @@ function TerminalTabs() {
           } else if (message.type === 'error') {
             instance.term.writeln(`\x1b[1;31m❌ Error: ${message.data}\x1b[0m`);
           }
-        } catch (e) {
+        } catch {
           instance.term.write(event.data);
         }
       };

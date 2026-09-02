@@ -5,7 +5,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
 import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
-import { useViewMode } from '../../contexts/ViewModeContext';
+import { useViewMode } from '../../contexts/useViewMode';
 import { workspaceAPI, codeExecAPI } from '../../services/api';
 import WorkspaceTerminal from '../WorkspaceTerminal';
 import CodeRunResult from '../CodeRunResult';
@@ -20,7 +20,7 @@ export default function MobileWorkspace() {
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState('files'); // 'files' | 'editor' | 'terminal'
-  const [sessionId, setSessionId] = useState(() => {
+  const [sessionId] = useState(() => {
     const saved = localStorage.getItem('liara_active_session');
     return saved ? parseInt(saved) : 1;
   });

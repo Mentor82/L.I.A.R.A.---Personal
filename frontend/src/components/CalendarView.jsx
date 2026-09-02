@@ -197,7 +197,7 @@ function CalendarView() {
   };
 
   // Central event editor opener
-  const openEventEditor = ({ date, startHour = null, startMinute = 0, source = 'button' }) => {
+  const openEventEditor = ({ date, startHour = null, startMinute = 0 }) => {
     const selectedDateTime = new Date(date);
     
     // If no specific time provided, use next full/half hour
@@ -289,29 +289,6 @@ function CalendarView() {
     const yearStart = new Date(d.getFullYear(), 0, 1);
     const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
     return weekNo;
-  };
-
-  // Generate hours for day/week view
-  const generateHours = () => {
-    const hours = [];
-    for (let h = 0; h < 24; h++) {
-      hours.push(h);
-    }
-    return hours;
-  };
-
-  // Get events for specific time slot
-  const getEventsForSlot = (date, hour, minute) => {
-    return events.filter(event => {
-      const eventStart = new Date(event.start_time);
-      const eventEnd = new Date(event.end_time);
-      
-      const slotTime = new Date(date);
-      slotTime.setHours(hour, minute, 0, 0);
-      
-      return eventStart.toDateString() === date.toDateString() &&
-             eventStart <= slotTime && eventEnd > slotTime;
-    });
   };
 
   // Get all events for a day (sorted by time)

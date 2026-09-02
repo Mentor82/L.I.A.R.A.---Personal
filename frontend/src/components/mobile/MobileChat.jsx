@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useViewMode } from '../../contexts/ViewModeContext';
+import { useViewMode } from '../../contexts/useViewMode';
 import { chatAPI } from '../../services/api';
 import { getChatSessions, createChatSession, getSessionMessages, deleteChatSession } from '../../services/chatService';
 import { streamChatSSE } from '../../services/sseClient';
@@ -22,7 +22,7 @@ import {
 } from './MobileChatComponents';
 import './MobileChat.css';
 
-export default function MobileChat({ user, onLogout }) {
+export default function MobileChat({ onLogout }) {
   const { t } = useTranslation();
   const { setViewMode } = useViewMode();
   const navigate = useNavigate();
@@ -242,7 +242,9 @@ export default function MobileChat({ user, onLogout }) {
     e.stopPropagation();
     try {
       await deleteChatSession(sessionId);
-    } catch {}
+    } catch {
+      // Local session list is updated below regardless - best-effort server delete.
+    }
     setChatSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== sessionId);
       if (filtered.length > 0) {

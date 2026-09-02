@@ -8,10 +8,6 @@ function AdminDashboard() {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
   const fetchDashboardData = async () => {
     try {
       const authHeader = { 'Authorization': `Bearer ${localStorage.getItem('liara_token')}` };
@@ -32,6 +28,13 @@ function AdminDashboard() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // Initial data fetch on mount - the effect is the fetch itself (a real
+    // external-system side effect), not a render-computable value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchDashboardData();
+  }, []);
 
   if (loading) {
     return (

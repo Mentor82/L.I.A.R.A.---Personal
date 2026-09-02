@@ -97,7 +97,7 @@ const LocationConsent = ({ onComplete }) => {
       } else {
         setError(data.message || 'Failed to save location');
       }
-    } catch (err) {
+    } catch {
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);

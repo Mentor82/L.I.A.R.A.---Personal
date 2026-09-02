@@ -133,6 +133,165 @@ const useLazySyntax = () => {
   return { syntaxHighlighter, syntaxStyle, ensureLanguage };
 };
 
+// Extracted to a top-level, properly-cased component (rather than an inline
+// `code(){...}` property in the `components` object below) so the hooks it
+// needs (running/languageReady state, the language-loading effect) live in
+// something React and its tooling can actually recognize as a component -
+// react-markdown itself always renders `components.code` as a component
+// regardless of naming, but a lowercase object-method name doesn't satisfy
+// the Rules of Hooks' static naming check.
+function CodeBlockRenderer({ inline, className, children, sessionId, SyntaxHighlighter, syntaxStyle, ensureLanguage, ...props }) {
+  const match = /language-(\w+)/.exec(className || '');
+  const language = match ? match[1] : '';
+  const [languageReady, setLanguageReady] = useState(false);
+  const normalizedLanguage = language.toLowerCase();
+
+  const codeText = String(children).replace(/\n$/, '');
+  // Models routinely write a Mermaid diagram in a fence with no (or
+  // the wrong) language tag - confirmed live, a ```-only fence full
+  // of `flowchart TD` content rendered as a bare paragraph instead
+  // of a diagram, since it never even reached the isMermaid check
+  // below (see the inline/no-language early return further down).
+  // Sniffing the first real line for a known Mermaid diagram
+  // keyword catches that case without needing the model to get the
+  // fence tag right.
+  const isMermaid = normalizedLanguage === 'mermaid'
+    || (!inline && !language && MERMAID_DIAGRAM_KEYWORDS_RE.test(codeText));
+  const isRunnable = RUNNABLE_LANGUAGES.has(normalizedLanguage) && !!sessionId;
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState(null);
+
+  const handleRun = async () => {
+    setRunning(true);
+    setRunResult(null);
+    try {
+      let targetLang = normalizedLanguage;
+      if (['python', 'py', 'python3'].includes(targetLang)) {
+        targetLang = localStorage.getItem('liara_sandbox_python_version') || 'python3.14';
+      }
+      const result = await codeExecAPI.run(sessionId, targetLang, codeText);
+      setRunResult(result);
+    } catch (err) {
+      setRunResult({ error: err.message || 'Ausführung fehlgeschlagen.' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // Hooks below must run unconditionally on every render of this
+  // component instance (Rules of Hooks) - the mermaid branch is
+  // handled further down, after all hooks have been called, not
+  // via an early return here.
+  useEffect(() => {
+    let active = true;
+    if (!normalizedLanguage) {
+      setLanguageReady(false);
+      return () => { active = false; };
+    }
+
+    ensureLanguage(normalizedLanguage).then((ready) => {
+      if (!active) return;
+      setLanguageReady(ready);
+    }).catch(() => {
+      // Falls back to the plain <pre> block below instead of an
+      // unhandled rejection silently leaving languageReady stuck
+      // at false forever with no visible error.
+      if (active) setLanguageReady(false);
+    });
+
+    return () => { active = false; };
+  }, [ensureLanguage, normalizedLanguage]);
+
+  if (isMermaid) {
+    return <MermaidDiagram code={codeText} />;
+  }
+
+  // If no block or language, render inline code.
+  if (inline || !language) {
+    return (
+      <code className="inline-code" {...props}>
+        {children}
+      </code>
+    );
+  }
+
+  // If the highlighter isn't loaded yet, render a simple pre block.
+  if (!SyntaxHighlighter || !syntaxStyle || !languageReady) {
+    return (
+      <pre className="code-fallback" {...props}>
+        <code>{codeText}</code>
+      </pre>
+    );
+  }
+
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-block-header">
+        <span className="code-language">{language}</span>
+        <span className="code-block-actions">
+          {isRunnable && (
+            <button
+              className="code-run-btn"
+              onClick={handleRun}
+              disabled={running}
+              title="Code ausführen"
+            >
+              {running ? '⏳ Läuft…' : '▶ Ausführen'}
+            </button>
+          )}
+          <button
+            className="code-copy-btn"
+            onClick={() => {
+              navigator.clipboard.writeText(codeText);
+            }}
+            title="Code kopieren"
+          >
+            📋 Kopieren
+          </button>
+        </span>
+      </div>
+      <SyntaxHighlighter
+        style={syntaxStyle}
+        language={normalizedLanguage}
+        PreTag="div"
+        className="code-highlighter"
+        {...props}
+      >
+        {codeText}
+      </SyntaxHighlighter>
+      {running && (
+        <div className="code-run-loading">
+          <div className="loading-dots"><span></span><span></span><span></span></div>
+          <span>Wird ausgeführt…</span>
+        </div>
+      )}
+      {runResult && <CodeRunResult result={runResult} sessionId={sessionId} />}
+    </div>
+  );
+}
+
+// Extracted for the same reason as CodeBlockRenderer above - a properly-cased
+// component so its useState call satisfies the Rules of Hooks naming check.
+function ImageRenderer({ src, alt }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  return (
+    <div className="markdown-image-wrapper">
+      <img
+        src={src}
+        alt={alt || 'Generiertes Bild'}
+        className="markdown-image"
+        loading="lazy"
+        onClick={() => setLightboxOpen(true)}
+        title="Klicken zum Vergrößern"
+      />
+      {alt && <p className="markdown-image-caption">{alt}</p>}
+      {lightboxOpen && (
+        <ImageLightbox src={src} alt={alt} onClose={() => setLightboxOpen(false)} />
+      )}
+    </div>
+  );
+}
+
 const MarkdownMessage = memo(({ content, sessionId }) => {
   const { syntaxHighlighter: SyntaxHighlighter, syntaxStyle, ensureLanguage } = useLazySyntax();
   const normalizedContent = useMemo(() => normalizeMathDelimiters(content), [content]);
@@ -150,134 +309,16 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
           return <>{children}</>;
         },
 
-        // Custom Code Block Renderer
-        code({ node, inline, className, children, ...props }) {
-          const match = /language-(\w+)/.exec(className || '');
-          const language = match ? match[1] : '';
-          const [languageReady, setLanguageReady] = useState(false);
-          const normalizedLanguage = language.toLowerCase();
-          
-          const codeText = String(children).replace(/\n$/, '');
-          // Models routinely write a Mermaid diagram in a fence with no (or
-          // the wrong) language tag - confirmed live, a ```-only fence full
-          // of `flowchart TD` content rendered as a bare paragraph instead
-          // of a diagram, since it never even reached the isMermaid check
-          // below (see the inline/no-language early return further down).
-          // Sniffing the first real line for a known Mermaid diagram
-          // keyword catches that case without needing the model to get the
-          // fence tag right.
-          const isMermaid = normalizedLanguage === 'mermaid'
-            || (!inline && !language && MERMAID_DIAGRAM_KEYWORDS_RE.test(codeText));
-          const isRunnable = RUNNABLE_LANGUAGES.has(normalizedLanguage) && !!sessionId;
-          const [running, setRunning] = useState(false);
-          const [runResult, setRunResult] = useState(null);
-
-          const handleRun = async () => {
-            setRunning(true);
-            setRunResult(null);
-            try {
-              let targetLang = normalizedLanguage;
-              if (['python', 'py', 'python3'].includes(targetLang)) {
-                targetLang = localStorage.getItem('liara_sandbox_python_version') || 'python3.14';
-              }
-              const result = await codeExecAPI.run(sessionId, targetLang, codeText);
-              setRunResult(result);
-            } catch (err) {
-              setRunResult({ error: err.message || 'Ausführung fehlgeschlagen.' });
-            } finally {
-              setRunning(false);
-            }
-          };
-
-          // Hooks below must run unconditionally on every render of this
-          // component instance (Rules of Hooks) - the mermaid branch is
-          // handled further down, after all hooks have been called, not
-          // via an early return here.
-          useEffect(() => {
-            let active = true;
-            if (!normalizedLanguage) {
-              setLanguageReady(false);
-              return () => { active = false; };
-            }
-
-            ensureLanguage(normalizedLanguage).then((ready) => {
-              if (!active) return;
-              setLanguageReady(ready);
-            }).catch(() => {
-              // Falls back to the plain <pre> block below instead of an
-              // unhandled rejection silently leaving languageReady stuck
-              // at false forever with no visible error.
-              if (active) setLanguageReady(false);
-            });
-
-            return () => { active = false; };
-          }, [ensureLanguage, normalizedLanguage]);
-
-          if (isMermaid) {
-            return <MermaidDiagram code={codeText} />;
-          }
-
-          // If no block or language, render inline code.
-          if (inline || !language) {
-            return (
-              <code className="inline-code" {...props}>
-                {children}
-              </code>
-            );
-          }
-
-          // If the highlighter isn't loaded yet, render a simple pre block.
-          if (!SyntaxHighlighter || !syntaxStyle || !languageReady) {
-            return (
-              <pre className="code-fallback" {...props}>
-                <code>{codeText}</code>
-              </pre>
-            );
-          }
-
+        // Custom Code Block Renderer - see CodeBlockRenderer above.
+        code(props) {
           return (
-            <div className="code-block-wrapper">
-              <div className="code-block-header">
-                <span className="code-language">{language}</span>
-                <span className="code-block-actions">
-                  {isRunnable && (
-                    <button
-                      className="code-run-btn"
-                      onClick={handleRun}
-                      disabled={running}
-                      title="Code ausführen"
-                    >
-                      {running ? '⏳ Läuft…' : '▶ Ausführen'}
-                    </button>
-                  )}
-                  <button
-                    className="code-copy-btn"
-                    onClick={() => {
-                      navigator.clipboard.writeText(codeText);
-                    }}
-                    title="Code kopieren"
-                  >
-                    📋 Kopieren
-                  </button>
-                </span>
-              </div>
-              <SyntaxHighlighter
-                style={syntaxStyle}
-                language={normalizedLanguage}
-                PreTag="div"
-                className="code-highlighter"
-                {...props}
-              >
-                {codeText}
-              </SyntaxHighlighter>
-              {running && (
-                <div className="code-run-loading">
-                  <div className="loading-dots"><span></span><span></span><span></span></div>
-                  <span>Wird ausgeführt…</span>
-                </div>
-              )}
-              {runResult && <CodeRunResult result={runResult} sessionId={sessionId} />}
-            </div>
+            <CodeBlockRenderer
+              {...props}
+              sessionId={sessionId}
+              SyntaxHighlighter={SyntaxHighlighter}
+              syntaxStyle={syntaxStyle}
+              ensureLanguage={ensureLanguage}
+            />
           );
         },
         
@@ -331,25 +372,9 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
           return <ol className="markdown-ol">{children}</ol>;
         },
         
-        // Custom Image Renderer (für generierte Bilder)
-        img({ src, alt }) {
-          const [lightboxOpen, setLightboxOpen] = useState(false);
-          return (
-            <div className="markdown-image-wrapper">
-              <img
-                src={src}
-                alt={alt || 'Generiertes Bild'}
-                className="markdown-image"
-                loading="lazy"
-                onClick={() => setLightboxOpen(true)}
-                title="Klicken zum Vergrößern"
-              />
-              {alt && <p className="markdown-image-caption">{alt}</p>}
-              {lightboxOpen && (
-                <ImageLightbox src={src} alt={alt} onClose={() => setLightboxOpen(false)} />
-              )}
-            </div>
-          );
+        // Custom Image Renderer (für generierte Bilder) - see ImageRenderer above.
+        img(props) {
+          return <ImageRenderer {...props} />;
         },
         
         // Custom Paragraph Renderer

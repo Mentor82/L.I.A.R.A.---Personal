@@ -23,6 +23,9 @@ function ThinkingBlock({ thinking, isAnswering }) {
   useEffect(() => {
     if (isAnswering && !autoCollapsedRef.current) {
       autoCollapsedRef.current = true;
+      // One-time auto-collapse latch - no render-time equivalent, since after
+      // this the user's own manual toggle must be free to override `expanded`.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExpanded(false);
     }
   }, [isAnswering]);
@@ -41,7 +44,6 @@ function ThinkingBlock({ thinking, isAnswering }) {
 }
 
 import {
-  renderInlineMarkdown,
   TaskListBlock,
   AgentStepsBlock,
   WebSourcesBlock,
@@ -51,6 +53,13 @@ import {
   ChatBubbleFooter,
   SessionContextBar
 } from './chat/ChatCards';
+import {
+  AGENT_STEP_ICON,
+  formatSourceDate,
+  FACTCHECK_ICON,
+  PROPOSAL_ACTION_LABELS
+} from './chat/chatCardHelpers';
+import { analyzeSentimentDebounced } from '../services/sentimentService';
 
 function Chat() {
   const [message, setMessage] = useState('');
@@ -58,7 +67,7 @@ function Chat() {
     try {
       const saved = localStorage.getItem('liara_chat_sessions');
       return saved ? JSON.parse(saved) : [{ id: Date.now(), title: 'Neue Konversation', messages: [], timestamp: new Date().toISOString() }];
-    } catch (error) {
+    } catch {
       return [{ id: Date.now(), title: 'Neue Konversation', messages: [], timestamp: new Date().toISOString() }];
     }
   });
@@ -91,7 +100,7 @@ function Chat() {
   const STALL_THRESHOLD_MS = 45000;
   const [stalled, setStalled] = useState(false);
   const lastActivityRef = useRef(Date.now());
-  const [isSending, setIsSending] = useState(false); // Mehrfachklick-Schutz
+  const [, setIsSending] = useState(false); // Mehrfachklick-Schutz
   const [errorMessage, setErrorMessage] = useState('');
   const [chatToDelete, setChatToDelete] = useState(null);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState(null);
@@ -1526,7 +1535,7 @@ function Chat() {
           style={{ display: 'none' }}
         />
 
-        <div className="chat-input-wrapper">
+        <div className="chat-input-wrapper" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           {/* 🖼️ Bild-Upload Button */}
           <button
             type="button"

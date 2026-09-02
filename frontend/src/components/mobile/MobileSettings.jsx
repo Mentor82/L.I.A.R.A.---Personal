@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useViewMode } from '../../contexts/ViewModeContext';
+import { useViewMode } from '../../contexts/useViewMode';
 import LanguageSwitcher from '../LanguageSwitcher';
 import ThemeToggle from '../ThemeToggle';
 import liaraLogo from '../../assets/LIARA-LOGO.png';
@@ -9,7 +9,7 @@ import './MobileSettings.css';
 
 export default function MobileSettings({ user, onLogout }) {
   const { t } = useTranslation();
-  const { viewMode, setViewMode } = useViewMode();
+  const { setViewMode } = useViewMode();
   const navigate = useNavigate();
 
   return (

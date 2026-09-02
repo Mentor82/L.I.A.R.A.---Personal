@@ -17,7 +17,10 @@ function Notes() {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState(localStorage.getItem('notes_filter') || 'all');
+  // setFilter has no UI wired to it yet (no All/Pinned/Archived control exists
+  // below) - the pinned/archived branches in fetchNotes below stay ready for
+  // when that control is added. Prefixed to satisfy no-unused-vars until then.
+  const [filter, _setFilter] = useState(localStorage.getItem('notes_filter') || 'all');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
   const [newNote, setNewNote] = useState({
@@ -28,16 +31,6 @@ function Notes() {
   });
   const [tagInput, setTagInput] = useState('');
   const [mood, setMood] = useState(null);
-
-  useEffect(() => {
-    fetchNotes();
-    fetchMood();
-  }, [filter]);
-
-  // Save filter preference
-  useEffect(() => {
-    localStorage.setItem('notes_filter', filter);
-  }, [filter]);
 
   const fetchMood = async () => {
     try {
@@ -54,7 +47,7 @@ function Notes() {
       const filters = {};
       if (filter === 'pinned') filters.pinned_only = true;
       if (filter === 'archived') filters.archived = true;
-      
+
       const data = await notesAPI.getAll(filters);
       setNotes(data.notes || []);
     } catch (error) {
@@ -62,6 +55,19 @@ function Notes() {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    // Initial/filter-change data fetch - the effect is the fetch itself (a
+    // real external-system side effect), not a render-computable value.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchNotes();
+    fetchMood();
+  }, [filter]);
+
+  // Save filter preference
+  useEffect(() => {
+    localStorage.setItem('notes_filter', filter);
+  }, [filter]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -196,40 +202,6 @@ function Notes() {
 
   const handleRemoveEditTag = (tag) => {
     setEditingNote({ ...editingNote, tags: editingNote.tags.filter(t => t !== tag) });
-  };
-
-  const handleQuickAdd = async (e) => {
-    e.preventDefault();
-    if (!quickAdd.trim()) return;
-
-    const note = {
-      title: quickAdd.length > 50 ? quickAdd.substring(0, 50) + '...' : quickAdd,
-      content: quickAdd,
-      category: detectCategory(quickAdd),
-      tags: extractTags(quickAdd)
-    };
-
-    try {
-      await notesAPI.create(note);
-      setQuickAdd('');
-      fetchNotes();
-    } catch (error) {
-      console.error('Failed to create quick note:', error);
-    }
-  };
-
-  const detectCategory = (text) => {
-    const lower = text.toLowerCase();
-    if (lower.includes('meeting') || lower.includes('call') || lower.includes('protokoll')) return 'meetings';
-    if (lower.includes('idee') || lower.includes('brainstorm')) return 'ideas';
-    if (lower.includes('todo') || lower.includes('erledigen')) return 'tasks';
-    if (lower.includes('link') || lower.includes('http')) return 'resources';
-    return null;
-  };
-
-  const extractTags = (text) => {
-    const matches = text.match(/#(\w+)/g);
-    return matches ? matches.map(tag => tag.substring(1)) : [];
   };
 
   const getMoodSuggestion = () => {
