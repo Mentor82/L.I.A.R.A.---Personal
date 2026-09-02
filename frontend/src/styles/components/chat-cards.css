@@ -184,6 +184,38 @@
   font-style: italic;
 }
 
+/* Image Results Block (thumbnails, see ChatCards.jsx's ImageResultsBlock) */
+.image-results-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.image-results-thumb-btn {
+  padding: 0;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: none;
+  line-height: 0;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.image-results-thumb-btn:hover {
+  border-color: var(--color-purple);
+  transform: scale(1.03);
+}
+
+.image-results-thumb {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  display: block;
+}
+
 /* Fact-Check Block */
 .factcheck-block {
   margin: 0.5rem 0;

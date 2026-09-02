@@ -78,6 +78,55 @@ class SearchBroker:
 
         return results
 
+    async def search_images(self, query: str, language: str = "de", limit: int = 12) -> List[Dict]:
+        """
+        Same SearXNG instance, image category. SearXNG's image results carry
+        both a thumbnail (small, fast to load - what the chat shows inline)
+        and the full-resolution source image (what the lightbox opens) as
+        separate fields, unlike the text search's single snippet.
+        """
+        cache_key = f"search:images:{hashlib.sha256(query.encode()).hexdigest()}:{language}"
+        try:
+            cached = get_redis_service().get_cached_json(cache_key)
+            if cached is not None:
+                return cached
+        except Exception as e:
+            logger.warning(f"Image search cache read failed (continuing without it): {e}")
+
+        try:
+            response = await self._client.get(
+                SEARXNG_URL,
+                params={"q": query, "format": "json", "language": language, "categories": "images"}
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            logger.warning(f"SearXNG image search failed for '{query}': {e}")
+            return []
+
+        results = []
+        for rank, item in enumerate(data.get("results", [])[:limit], start=1):
+            img_src = item.get("img_src", "")
+            source_url = item.get("url", "")
+            if not img_src:
+                continue
+            results.append({
+                "title": item.get("title", ""),
+                "img_src": img_src,
+                "thumbnail_src": item.get("thumbnail_src") or img_src,
+                "source_url": source_url,
+                "domain": urlparse(source_url).netloc,
+                "rank": rank,
+                "engine": item.get("engine", "")
+            })
+
+        try:
+            get_redis_service().cache_json(cache_key, results, ttl=CACHE_TTL_SECONDS)
+        except Exception as e:
+            logger.warning(f"Image search cache write failed (non-fatal): {e}")
+
+        return results
+
 
 _search_broker_instance: Optional[SearchBroker] = None
 

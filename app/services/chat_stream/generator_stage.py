@@ -686,6 +686,20 @@ async def stream_ollama_response(
                         ]
                         yield f"data: {json.dumps({'type': 'web_sources', 'items': web_source_items})}\n\n"
 
+                    if tool_result.get("success") and inner_result.get("type") == "images":
+                        image_result_items = [
+                            {
+                                "id": f"image-{i}",
+                                "url": img.get("img_src", ""),
+                                "thumbnail": img.get("thumbnail_src") or img.get("img_src", ""),
+                                "title": img.get("title", ""),
+                                "sourceUrl": img.get("source_url", ""),
+                                "domain": img.get("domain", "")
+                            }
+                            for i, img in enumerate(inner_result.get("images", []))
+                        ]
+                        yield f"data: {json.dumps({'type': 'image_results', 'items': image_result_items})}\n\n"
+
                     if tool_result.get("success") and inner_result.get("type") == "tasks":
                         full_tasks_items = inner_result.get("items", [])
                         yield f"data: {json.dumps({'type': 'tasks', 'items': full_tasks_items})}\n\n"

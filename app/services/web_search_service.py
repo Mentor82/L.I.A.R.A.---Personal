@@ -312,12 +312,15 @@ def register_web_tools(registry) -> None:
             "brauchen - durchsucht das offene Web (SearXNG) und liefert tatsächlich abgerufene "
             "Quellentexte mit URL/Titel statt nur einem kurzen Snippet. Bei search_type='web' "
             "steuert policy='fresh' die Sortierung nach Aktualität (neueste Quellen zuerst, "
-            "Quellen ohne Datum werden markiert) - Standard ist policy='general' (Relevanz)."
+            "Quellen ohne Datum werden markiert) - Standard ist policy='general' (Relevanz). "
+            "search_type='images' sucht gezielt nach Bildern zu einem Thema/Motiv (z.B. 'Katzen "
+            "Fotos', 'Eiffelturm bei Nacht') - die Bilder werden dem Nutzer direkt als Vorschaubilder "
+            "im Chat angezeigt, nicht als Text."
         ),
         category=ToolCategory.INFORMATION,
         parameters=[
             ToolParameter(name="query", type="string", description="Die Suchanfrage", required=True),
-            ToolParameter(name="search_type", type="string", description="Art der Suche", required=False, default="instant", enum=["instant", "web", "wikipedia"]),
+            ToolParameter(name="search_type", type="string", description="Art der Suche", required=False, default="instant", enum=["instant", "web", "wikipedia", "images"]),
             ToolParameter(name="language", type="string", description="Sprache der Ergebnisse", required=False, default="de", enum=["de", "en"]),
             ToolParameter(name="policy", type="string", description="Nur für search_type='web': 'general' (Relevanz, Standard) oder 'fresh' (neueste Quellen zuerst)", required=False, default="general", enum=["general", "fresh"])
         ],

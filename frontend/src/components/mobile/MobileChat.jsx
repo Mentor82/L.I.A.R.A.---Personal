@@ -9,6 +9,7 @@ import MarkdownMessage from '../MarkdownMessage';
 import {
   AgentStepsBlock,
   WebSourcesBlock,
+  ImageResultsBlock,
   WorkspaceProposalsBlock,
   WorkspaceArtifactsBlock
 } from '../chat/ChatCards';
@@ -413,6 +414,21 @@ export default function MobileChat({ onLogout }) {
                   return { ...s, messages: msgs };
                 })
               );
+            } else if (parsed.type === 'image_results') {
+              setChatSessions((prev) =>
+                prev.map((s) => {
+                  if (s.id !== currSessionId) return s;
+                  const msgs = [...s.messages];
+                  const last = msgs[msgs.length - 1];
+                  if (last && last.role === 'assistant') {
+                    msgs[msgs.length - 1] = {
+                      ...last,
+                      imageResults: parsed.items,
+                    };
+                  }
+                  return { ...s, messages: msgs };
+                })
+              );
             } else if (parsed.type === 'workspace_proposal') {
               setChatSessions((prev) =>
                 prev.map((s) => {
@@ -636,6 +652,7 @@ export default function MobileChat({ onLogout }) {
                   {msg.workspaceProposals && <WorkspaceProposalsBlock proposals={msg.workspaceProposals} />}
                   {msg.agentSteps && <AgentStepsBlock steps={msg.agentSteps} />}
                   {msg.webSources && <WebSourcesBlock sources={msg.webSources} />}
+                  {msg.imageResults && <ImageResultsBlock images={msg.imageResults} />}
 
                   {/* Message Footer with Model & Tokens */}
                   {!isUser && (

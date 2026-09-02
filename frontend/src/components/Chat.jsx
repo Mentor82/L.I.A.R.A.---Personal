@@ -47,6 +47,7 @@ import {
   TaskListBlock,
   AgentStepsBlock,
   WebSourcesBlock,
+  ImageResultsBlock,
   FactCheckBlock,
   WorkspaceProposalsBlock,
   WorkspaceArtifactsBlock,
@@ -590,6 +591,12 @@ function Chat() {
               messageAdded = true;
             }
             updateAssistantMessage({ webSources: parsed.items });
+          } else if (parsed.type === 'image_results') {
+            setLoading(false);
+            if (!messageAdded) {
+              messageAdded = true;
+            }
+            updateAssistantMessage({ imageResults: parsed.items });
           } else if (parsed.type === 'factcheck') {
             setLoading(false);
             if (!messageAdded) {
@@ -769,8 +776,9 @@ function Chat() {
   // msg.content - the copy button used to silently drop Denkprozess/Agent/
   // Quellen/Faktencheck/Aufgaben, which only ever lived in the bubble's own
   // separate collapsible blocks. Mirrors the bubble's own render order
-  // (ThinkingBlock -> AgentStepsBlock -> WebSourcesBlock -> FactCheckBlock ->
-  // WorkspaceProposalsBlock -> TaskListBlock -> content -> footer) so the
+  // (ThinkingBlock -> AgentStepsBlock -> WebSourcesBlock -> ImageResultsBlock ->
+  // FactCheckBlock -> WorkspaceProposalsBlock -> TaskListBlock -> content ->
+  // footer) so the
   // copied text reads the same top-to-bottom as the bubble itself.
   const buildFullMessageText = (msg) => {
     const parts = [];
@@ -788,6 +796,10 @@ function Chat() {
         return `${i + 1}. ${s.title || s.url} (${s.domain}, ${date})\n   ${s.url}`;
       });
       parts.push(`📚 Quellen:\n${lines.join('\n')}`);
+    }
+    if (msg.imageResults && msg.imageResults.length > 0) {
+      const lines = msg.imageResults.map((img, i) => `${i + 1}. ${img.title || img.url}\n   ${img.url}`);
+      parts.push(`🖼️ Bilder:\n${lines.join('\n')}`);
     }
     if (msg.factcheck && msg.factcheck.length > 0) {
       const lines = msg.factcheck.map((item) => {
@@ -1350,6 +1362,9 @@ function Chat() {
               )}
               {msg.role === 'assistant' && (
                 <WebSourcesBlock sources={msg.webSources} />
+              )}
+              {msg.role === 'assistant' && (
+                <ImageResultsBlock images={msg.imageResults} />
               )}
               {msg.role === 'assistant' && (
                 <FactCheckBlock items={msg.factcheck} />

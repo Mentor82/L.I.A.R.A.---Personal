@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import MarkdownMessage from '../MarkdownMessage';
+import ImageLightbox from '../ImageLightbox';
 import {
   renderInlineMarkdown,
   AGENT_STEP_ICON,
@@ -94,6 +95,47 @@ export function WebSourcesBlock({ sources }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// Small thumbnails so a batch of image-search results doesn't dominate the
+// bubble (see WebSourcesBlock for the same "collapsible card" shell) - a
+// click opens the existing full-size ImageLightbox instead of a bigger
+// inline image, same interaction as a single generated/markdown image.
+export function ImageResultsBlock({ images }) {
+  const [expanded, setExpanded] = useState(true);
+  const [openIndex, setOpenIndex] = useState(null);
+  if (!images || images.length === 0) return null;
+
+  return (
+    <div className="web-sources-block image-results-block">
+      <button type="button" className="web-sources-toggle" onClick={() => setExpanded((e) => !e)}>
+        <span>🖼️ Bilder ({images.length})</span>
+        <span className="web-sources-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && (
+        <div className="image-results-grid">
+          {images.map((img, i) => (
+            <button
+              type="button"
+              key={img.id || i}
+              className="image-results-thumb-btn"
+              onClick={() => setOpenIndex(i)}
+              title={img.title || 'Bild vergrößern'}
+            >
+              <img src={img.thumbnail || img.url} alt={img.title || ''} className="image-results-thumb" loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
+      {openIndex !== null && images[openIndex] && (
+        <ImageLightbox
+          src={images[openIndex].url || images[openIndex].thumbnail}
+          alt={images[openIndex].title}
+          onClose={() => setOpenIndex(null)}
+        />
       )}
     </div>
   );

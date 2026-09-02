@@ -320,6 +320,9 @@ class ToolExecutor:
             policy = params.get("policy", "general")
             return await self._execute_web_search_general(query, language, policy)
 
+        if search_type == "images":
+            return await self._execute_image_search(query, language)
+
         if search_type == "wikipedia":
             result = await self.web_search.search_wikipedia(query, language)
         else:
@@ -406,6 +409,31 @@ class ToolExecutor:
             "query": query,
             "type": "web",
             "sources": sources,
+            "summary": summary
+        }
+
+    async def _execute_image_search(self, query: str, language: str) -> Dict:
+        """
+        Image-category search via the same SearchBroker/SearXNG instance as
+        the general web search - see SearchBroker.search_images(). Unlike
+        web_search_general, there's no fetch-and-extract enrichment step
+        here (nothing to fetch text from), so this is just a direct
+        pass-through of the broker's normalized results.
+        """
+        images = await self.search_broker.search_images(query, language=language)
+
+        summary = (
+            f"{len(images)} Bild(er) gefunden für '{query}'. Die Bilder werden dem Nutzer direkt "
+            "im Chat angezeigt - fasse sie in deiner Antwort kurz zusammen, ohne die Bild-URLs "
+            "selbst als Text/Markdown zu wiederholen."
+            if images
+            else f"Keine Bilder für '{query}' gefunden (Suche nicht verfügbar oder keine Treffer)."
+        )
+
+        return {
+            "query": query,
+            "type": "images",
+            "images": images,
             "summary": summary
         }
 

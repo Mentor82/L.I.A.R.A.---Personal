@@ -145,6 +145,8 @@ async def perform_web_search(
 def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
     """Builds a human-readable label for agent progress steps."""
     if tool_name == "web_search":
+        if arguments.get("search_type") == "images":
+            return f'🖼️ Bildersuche: "{arguments.get("query", "")}"'
         return f'Websuche: "{arguments.get("query", "")}"'
     if tool_name == "wikipedia_search":
         return f'Wikipedia: "{arguments.get("query", "")}"'
