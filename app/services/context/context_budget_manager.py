@@ -27,6 +27,7 @@ class ContextAssemblyResult:
     original_tokens: int
     optimized_tokens: int
     memory_items: List[Dict[str, Any]]
+    newly_compacted_turns: List[Dict[str, Any]]
 
 
 class ContextBudgetManager:
@@ -68,7 +69,8 @@ class ContextBudgetManager:
                 decision=decision,
                 original_tokens=initial_tokens,
                 optimized_tokens=initial_tokens,
-                memory_items=mem_list
+                memory_items=mem_list,
+                newly_compacted_turns=[]
             )
 
         # 1. System-Message separieren
@@ -125,5 +127,6 @@ class ContextBudgetManager:
             decision=decision,
             original_tokens=initial_tokens,
             optimized_tokens=optimized_tokens,
-            memory_items=mem_list
+            memory_items=mem_list,
+            newly_compacted_turns=older_turns
         )

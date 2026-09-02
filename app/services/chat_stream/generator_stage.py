@@ -48,6 +48,8 @@ from services.chat_stream.prompt_stage import (
 from services.chat_stream.persistence_stage import (
     persist_user_turn_under_lock,
     persist_assistant_turn,
+    load_structured_session_state,
+    persist_structured_session_state,
 )
 from services.chat_persistence import persist_assistant_message
 from services.chat_stream.generator_helpers import (
@@ -61,6 +63,31 @@ from services.context import ContextBudgetManager
 
 logger = logging.getLogger(__name__)
 mlogger = get_mirko_logger()
+
+
+async def _run_background_context_compaction(
+    session_id: int, turns: List[Dict], base_state, model: str
+) -> None:
+    """
+    Holt sich per echtem LLM-Aufruf (StructuredCompactor.compact_via_llm)
+    eine bessere Verdichtung derselben Turns, die gerade schon per Heuristik
+    persistiert wurden, und schreibt sie nach. Läuft komplett im Hintergrund -
+    blockiert nie eine Chat-Antwort. Lädt den State direkt vor dem Schreiben
+    nochmal frisch, statt den übergebenen base_state blind zu überschreiben,
+    damit ein inzwischen schon gelandeter Heuristik-Write (oder ein paralleler
+    Compaction-Lauf) nicht verloren geht - merge() entfernt ohnehin nie etwas.
+    """
+    if not turns:
+        return
+    try:
+        from services.context.structured_compactor import StructuredCompactor
+
+        latest = await asyncio.to_thread(load_structured_session_state, session_id)
+        merge_base = latest or base_state
+        enriched = await StructuredCompactor.compact_via_llm(turns, merge_base, model=model)
+        await asyncio.to_thread(persist_structured_session_state, session_id, enriched)
+    except Exception as e:
+        logger.error(f"Background context compaction failed for session {session_id}: {e}")
 
 
 async def stream_ollama_response(
@@ -186,14 +213,35 @@ async def stream_ollama_response(
     ]
 
     # Dynamisches 4-Schichten Context-Budgeting & Rolling Compaction
+    persisted_state = None
+    if session_id is not None:
+        persisted_state = await asyncio.to_thread(load_structured_session_state, session_id)
+
     context_res = ContextBudgetManager.process_turn_context(
         messages=messages,
         model_name=model,
+        session_state=persisted_state,
         memory_items=memory_context
     )
     messages = context_res.messages
     if context_res.memory_items is not None:
         memory_context = context_res.memory_items
+
+    # Ein neuer Kompaktierungs-Schub ist passiert, wenn last_compacted_turn_index
+    # gegenüber dem geladenen Stand gewachsen ist. Sofort den (billigen)
+    # Heuristik-Stand persistieren, damit last_compacted_turn_index in jedem
+    # Fall vorrückt - unabhängig davon, ob der Hintergrund-LLM-Abgleich klappt.
+    # Beides läuft als Fire-and-Forget-Task, blockiert diese Antwort nicht.
+    prior_index = persisted_state.last_compacted_turn_index if persisted_state else 0
+    if session_id is not None and context_res.session_state.last_compacted_turn_index > prior_index:
+        asyncio.create_task(
+            asyncio.to_thread(persist_structured_session_state, session_id, context_res.session_state)
+        )
+        asyncio.create_task(
+            _run_background_context_compaction(
+                session_id, context_res.newly_compacted_turns, context_res.session_state, model
+            )
+        )
 
     ollama_tools = None
     if supports_tools:

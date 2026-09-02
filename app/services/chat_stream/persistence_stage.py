@@ -108,6 +108,49 @@ def persist_user_turn_under_lock(
         db.close()
 
 
+def load_structured_session_state(session_id: int):
+    """Lädt den zuletzt persistierten Structured-Context-State einer Session.
+    Gibt None zurück, wenn noch nie kompaktiert wurde (leere Session,
+    frisch angelegte Session) oder bei jedem DB-Fehler - der Aufrufer
+    behandelt None gleichwertig zu einem frischen, leeren State."""
+    from services.context.structured_compactor import StructuredSessionState
+
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT structured_state FROM chat_sessions WHERE id = :session_id"),
+            {'session_id': session_id}
+        ).first()
+        if not row or not row.structured_state:
+            return None
+        return StructuredSessionState.from_dict(json.loads(row.structured_state))
+    except Exception as e:
+        logger.error(f"Failed to load structured_state for session {session_id}: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def persist_structured_session_state(session_id: int, state) -> bool:
+    """Schreibt den Structured-Context-State zurück. Best effort - ein
+    Fehlschlag hier darf nie einen Chat-Turn scheitern lassen, deshalb wird
+    hier nichts geraised, nur geloggt."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text("UPDATE chat_sessions SET structured_state = :state WHERE id = :session_id"),
+            {'state': json.dumps(state.to_dict(), ensure_ascii=False), 'session_id': session_id}
+        )
+        db.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to persist structured_state for session {session_id}: {e}")
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
 def persist_assistant_turn(
     user_id: Optional[int],
     session_id: Optional[int],
