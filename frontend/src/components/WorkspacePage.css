@@ -29,8 +29,12 @@
      EDITOR_FONT_STACK - kept in sync manually, since CodeMirror's
      EditorView.theme() can't read a CSS custom property from here. */
   --ws-mono-font: 'JetBrains Mono', 'Fira Code', Consolas, Menlo, 'Courier New', monospace;
-  --ws-ui-font-size: 0.8125rem;   /* 13px - VS Code's workbench chrome size */
-  --ws-ui-font-size-sm: 0.6875rem; /* 11px - meta text: file size, timestamps, badges, section labels */
+  /* Fixed px, not rem: this page's root font-size is 14px (not the usual
+     16px), so rem equivalents of "13px"/"11px" silently undershot to
+     ~11.4px/~9.6px. These two intentionally match code-server/VS Code's
+     actual pixel scale regardless of the app's own root font-size. */
+  --ws-ui-font-size: 13px;    /* VS Code's workbench chrome size */
+  --ws-ui-font-size-sm: 11px; /* meta text: file size, timestamps, badges, section labels */
 }
 
 /* Breaks out of .app-main's centered 1280px reading-width container (App.css
