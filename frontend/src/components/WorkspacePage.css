@@ -1487,8 +1487,14 @@
   background: var(--bg-hover);
 }
 
+/* background: transparent overrides .workspace-page button.danger's own
+   solid red background (meant for confirm-delete modal buttons) - without
+   it, this button inherited that solid red background while this rule only
+   changed the text to the same red, rendering as invisible text on a solid
+   red bar. */
 .workspace-context-menu button.danger {
   color: var(--color-danger);
+  background: transparent;
 }
 
 .workspace-context-menu button.danger:hover {
