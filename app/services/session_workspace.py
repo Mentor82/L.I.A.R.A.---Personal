@@ -67,6 +67,17 @@ PROPOSALS_FILENAME = ".liara_proposals.json"
 # in metadata/ too, the same way.
 LOCK_FILENAME = ".liara.lock"
 
+# Persistentes, sitzungsgebundenes Gedächtnis für Autonomous-Agent-Läufe
+# (Agent Hub, siehe base_agent.py) - zusätzlich zum reinen Chat-Verlauf.
+# Namespaced per Agent-Name innerhalb einer Datei (statt einer Datei pro
+# Agent), damit ein "clear" oder ein korrupter Read nie mehr als eine Datei
+# betrifft. Lebt bewusst in metadata/, nicht als eigener .liara/-Ordner
+# innerhalb von workspace/ (wie ursprünglich vorgeschlagen) - metadata/
+# existiert für genau diesen Zweck schon (0o700, für sandboxed Code
+# unsichtbar/unantastbar, siehe ensure_session_metadata_dir oben), eine
+# zweite parallele Konvention hätte nur Verwirrung gestiftet.
+AGENT_CONTEXT_FILENAME = ".liara_agent_context.json"
+
 # Project-wide text search limits - a single chat session's workspace is
 # small (MAX_SESSION_TOTAL is 500 MiB across every file), but scanning
 # unbounded file sizes/counts on every keystroke-triggered search would
@@ -358,6 +369,60 @@ def _rename_file_in_manifest(user_id: int, session_id: int, old_name: str, new_n
                 changed = True
         if changed:
             _save_manifest(user_id, session_id, manifest)
+
+
+def _agent_context_path(user_id: int, session_id: int) -> Path:
+    return _metadata_dir(user_id, session_id) / AGENT_CONTEXT_FILENAME
+
+
+def load_agent_context(user_id: int, session_id: int, agent_name: str) -> dict:
+    """
+    Liest den gespeicherten Namespace eines einzelnen Agenten (z.B.
+    "CodeAgent") zurück - leeres dict, wenn nie gespeichert oder die Datei
+    fehlt/korrupt ist. Wird von BaseAgent.run() genutzt, um eine
+    Fortsetzungs-Zusammenfassung aus einem vorherigen, an max_steps
+    ausgelaufenen Lauf wieder in die neue Aufgabe einzuspeisen.
+    """
+    path = _agent_context_path(user_id, session_id)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        logger.warning(f"session_workspace: agent context at {path} unreadable/corrupt ({e}) - treating as empty")
+        return {}
+    return data.get(agent_name, {}) if isinstance(data, dict) else {}
+
+
+def save_agent_context(user_id: int, session_id: int, agent_name: str, context: dict) -> None:
+    """Schreibt context unter dem Namespace agent_name, ohne die Namespaces
+    anderer Agenten in derselben Session anzutasten."""
+    ensure_session_metadata_dir(_session_dir(user_id, session_id))
+    path = _agent_context_path(user_id, session_id)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    data[agent_name] = context
+    _atomic_write_json(path, data)
+
+
+def clear_agent_context(user_id: int, session_id: int, agent_name: str) -> None:
+    """Löscht den Namespace nach erfolgreichem Abschluss - eine fertige
+    Aufgabe soll keinen 'Fortsetzung'-Hinweis mehr für den nächsten,
+    unabhängigen Task in derselben Session hinterlassen."""
+    path = _agent_context_path(user_id, session_id)
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(data, dict) and agent_name in data:
+        del data[agent_name]
+        _atomic_write_json(path, data)
 
 
 def set_context_selection(user_id: int, session_id: int, filenames: List[str]) -> None:

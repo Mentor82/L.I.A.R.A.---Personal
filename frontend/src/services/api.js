@@ -788,10 +788,10 @@ export const agentAPI = {
   /**
    * Neuen asynchronen Agenten-Task starten
    */
-  async runTask({ agent_id = 'code', task, session_id, model, max_steps = 12 }) {
+  async runTask({ agent_id = 'code', task, session_id, model, max_steps = 12, resume = false }) {
     return apiFetch('/agents/run', {
       method: 'POST',
-      body: JSON.stringify({ agent_id, task, session_id, model, max_steps }),
+      body: JSON.stringify({ agent_id, task, session_id, model, max_steps, resume }),
     });
   },
 

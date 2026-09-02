@@ -9,6 +9,7 @@ import logging
 import asyncio
 import inspect
 import requests
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 
 from services.ollama_capabilities import model_supports_tools
@@ -247,7 +248,8 @@ class BaseAgent:
         user_id: Optional[int] = None,
         session_id: Optional[int] = None,
         callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
-        is_cancelled: Optional[Callable[[], Awaitable[bool]]] = None
+        is_cancelled: Optional[Callable[[], Awaitable[bool]]] = None,
+        resume: bool = False
     ) -> Dict[str, Any]:
         """
         Haupt-Ausführungsschleife (ReAct Loop).
@@ -258,6 +260,26 @@ class BaseAgent:
                     await callback({"event": event_type, "agent": self.name, "data": data})
                 except Exception as e:
                     logger.warning(f"Callback Fehler: {e}")
+
+        # Fortsetzung eines an max_steps ausgelaufenen vorherigen Laufs -
+        # explizit angefordert (resume=True), nie automatisch anhand einer
+        # neuen Aufgabe geraten: sonst würde ein völlig unabhängiger neuer
+        # Task in derselben Session versehentlich mit altem Kontext
+        # vermischt. Siehe session_workspace.save_agent_context weiter
+        # unten (max_steps erreicht) für die Gegenseite.
+        if resume and user_id is not None and session_id is not None:
+            from services.session_workspace import load_agent_context
+            saved_ctx = await asyncio.to_thread(load_agent_context, user_id, session_id, self.name)
+            if saved_ctx.get("continuation_summary"):
+                resumed_task = (
+                    f"Fortsetzung einer zuvor pausierten Aufgabe (Schritt-Budget war aufgebraucht).\n\n"
+                    f"Ursprüngliche Aufgabe:\n{saved_ctx.get('pending_task', task)}\n\n"
+                    f"Bisheriger Stand (Zusammenfassung des letzten Laufs):\n{saved_ctx['continuation_summary']}\n\n"
+                    f"Mache von hier aus weiter, ohne bereits Erledigtes zu wiederholen."
+                )
+                if task.strip():
+                    resumed_task += f"\n\nZusätzlicher Hinweis vom Nutzer:\n{task}"
+                task = resumed_task
 
         # Prefer Ollama's native tool-calling for models that support it
         # (checked once via /api/show, see ollama_capabilities.py) - a
@@ -299,6 +321,21 @@ class BaseAgent:
                 }
 
             await emit("step_start", {"step": step})
+
+            # Weiche Vorwarnung kurz vor dem Limit, statt eines Hard-Cutoffs
+            # ohne Ankündigung - gleiches Prinzip wie bei IDE-Agenten
+            # (Cursor/Copilot Agent Mode): dem Modell die Chance geben, selbst
+            # rechtzeitig abzuschließen, bevor der Wrap-up-Call unten
+            # übernehmen muss.
+            if self.max_steps > 2 and step == self.max_steps - 2:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Hinweis: Nur noch {self.max_steps - step} Schritte im Budget. "
+                        "Bitte fasse dich kurz, priorisiere das Wesentliche und schließe "
+                        "möglichst bald mit einer finalen Antwort ab."
+                    )
+                })
 
             # LLM anfragen
             try:
@@ -356,6 +393,7 @@ class BaseAgent:
                 # No tool call this turn - the model's content is its answer.
                 history_log.append({"type": "final_answer", "step": step, "answer": content})
                 answer_file = await self._save_answer_artifact(task, content, user_id, session_id)
+                await self._clear_continuation(user_id, session_id)
                 await emit("done", {"answer": content, "answer_file": answer_file, "steps": step})
                 return {
                     "success": True,
@@ -377,6 +415,7 @@ class BaseAgent:
             # Wenn Final Answer erreicht
             if parsed["type"] == "final_answer":
                 answer_file = await self._save_answer_artifact(task, parsed["answer"], user_id, session_id)
+                await self._clear_continuation(user_id, session_id)
                 await emit("done", {"answer": parsed["answer"], "answer_file": answer_file, "steps": step})
                 return {
                     "success": True,
@@ -420,12 +459,56 @@ class BaseAgent:
                     "content": f"Fehler beim Parsen deines Tool-Calls: {parsed['error']}. Bitte korrigiere das Format."
                 })
 
-        # Max Steps erreicht
+        # Max Steps erreicht - statt eines harten Fehlschlags ein Checkpoint:
+        # bereits ausgeführte Tool-Aufrufe (Dateien, Recherchen) sind ja nicht
+        # ungeschehen, nur weil das Schritt-Budget aufgebraucht ist. Gleiches
+        # Prinzip wie bei IDE-Agenten (Cursor, Copilot Agent Mode, Claude Code
+        # selbst): ein Wrap-up statt eines stillen Abbruchs, dessen Ergebnis
+        # für den nächsten Lauf (resume=True) persistiert wird.
         timeout_msg = f"Maximale Schrittanzahl ({self.max_steps}) erreicht, bevor die Aufgabe abgeschlossen werden konnte."
-        await emit("timeout", {"message": timeout_msg})
+        continuation_summary = None
+        try:
+            wrapup_messages = messages + [{
+                "role": "user",
+                "content": (
+                    "STOPP - das Schritt-Budget ist aufgebraucht. Antworte NUR mit "
+                    "einer kompakten Zusammenfassung (max. 8 Sätze) des bisherigen "
+                    "Stands: was wurde bereits erledigt/geändert, und was ist noch "
+                    "offen? Keine Tool-Aufrufe, keine Tags - nur Klartext."
+                )
+            }]
+            wrapup_message = await self.call_llm(wrapup_messages, tools=None)
+            continuation_summary = (wrapup_message.get("content") or "").strip() or None
+        except Exception as e:
+            logger.warning(f"Wrap-up-Zusammenfassung für {self.name} fehlgeschlagen: {e}")
+
+        if continuation_summary and user_id is not None and session_id is not None:
+            from services.session_workspace import save_agent_context
+            await asyncio.to_thread(save_agent_context, user_id, session_id, self.name, {
+                "pending_task": task,
+                "continuation_summary": continuation_summary,
+                "steps_used": step,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+        await emit("paused", {"message": timeout_msg, "summary": continuation_summary, "steps": step})
         return {
             "success": False,
+            "paused": True,
             "error": timeout_msg,
+            "continuation_summary": continuation_summary,
             "steps": step,
             "history": history_log
         }
+
+    async def _clear_continuation(self, user_id: Optional[int], session_id: Optional[int]) -> None:
+        """Löscht einen evtl. gespeicherten Fortsetzungs-Stand nach
+        erfolgreichem Abschluss, damit er keinen späteren, unabhängigen Task
+        in derselben Session mit veraltetem Kontext verwechselt."""
+        if user_id is None or session_id is None:
+            return
+        try:
+            from services.session_workspace import clear_agent_context
+            await asyncio.to_thread(clear_agent_context, user_id, session_id, self.name)
+        except Exception as e:
+            logger.warning(f"Konnte Fortsetzungs-Stand für {self.name} nicht löschen: {e}")

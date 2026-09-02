@@ -16,6 +16,8 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
   const [finalAnswer, setFinalAnswer] = useState(null);
   const [finalAnswerFile, setFinalAnswerFile] = useState(null);
   const [error, setError] = useState(null);
+  const [paused, setPaused] = useState(false);
+  const [pauseSummary, setPauseSummary] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
   const eventsEndRef = useRef(null);
 
@@ -52,12 +54,15 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
     }
   };
 
-  const startTask = async () => {
-    if (!taskPrompt.trim() || isRunning) return;
+  const startTask = async ({ resume = false } = {}) => {
+    if (isRunning) return;
+    if (!resume && !taskPrompt.trim()) return;
 
     setError(null);
     setFinalAnswer(null);
     setFinalAnswerFile(null);
+    setPaused(false);
+    setPauseSummary(null);
     setStepEvents([]);
     setCurrentStep(0);
     setIsRunning(true);
@@ -70,6 +75,7 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
         session_id: sessionId,
         model: selectedModel || undefined,
         max_steps: 15,
+        resume,
       });
 
       if (!res?.task_id) {
@@ -128,8 +134,11 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
     } else if (type === 'error') {
       setError(data.error);
       setIsRunning(false);
-    } else if (type === 'timeout') {
-      setError(data.message);
+    } else if (type === 'paused') {
+      // Schritt-Budget erreicht, aber kein Fehlschlag - die Zusammenfassung
+      // ist bereits serverseitig gespeichert, "Fortsetzen" knüpft daran an.
+      setPaused(true);
+      setPauseSummary(data.summary || null);
       setIsRunning(false);
     }
   };
@@ -234,8 +243,17 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
             <button className="agent-btn danger" onClick={cancelTask}>
               ⏹ Stoppen (Schritt {currentStep})
             </button>
+          ) : paused ? (
+            <>
+              <button className="agent-btn primary" onClick={() => startTask({ resume: true })}>
+                ▶ Fortsetzen
+              </button>
+              <button className="agent-btn secondary" onClick={() => startTask()} disabled={!taskPrompt.trim()}>
+                Neue Aufgabe starten
+              </button>
+            </>
           ) : (
-            <button className="agent-btn primary" onClick={startTask} disabled={!taskPrompt.trim()}>
+            <button className="agent-btn primary" onClick={() => startTask()} disabled={!taskPrompt.trim()}>
               ▶ Task ausführen <kbd>Ctrl+Enter</kbd>
             </button>
           )}
@@ -248,14 +266,23 @@ export default function AgentDrawer({ sessionId, onClose, onFilesChanged, onOpen
           <span>Ausführungs-Protokoll</span>
           {isRunning && <span className="agent-status-badge running">⚡ Schritt {currentStep} läuft...</span>}
           {!isRunning && finalAnswer && <span className="agent-status-badge done">✅ Abgeschlossen</span>}
-          {!isRunning && error && <span className="agent-status-badge error">❌ Fehler</span>}
+          {!isRunning && paused && <span className="agent-status-badge paused">⏸ Pausiert (Fortschritt gespeichert)</span>}
+          {!isRunning && error && !paused && <span className="agent-status-badge error">❌ Fehler</span>}
         </div>
 
         <div className="agent-trace-list">
-          {stepEvents.length === 0 && !isRunning && !finalAnswer && !error && (
+          {stepEvents.length === 0 && !isRunning && !finalAnswer && !error && !paused && (
             <div className="agent-trace-empty">
               <p>Noch keine Task-Ausführung aktiv.</p>
               <span className="trace-hint">Gib oben eine Aufgabe ein und starte den Agenten.</span>
+            </div>
+          )}
+
+          {paused && !isRunning && (
+            <div className="trace-paused-card">
+              <p><strong>Schritt-Budget aufgebraucht, aber nicht gescheitert.</strong></p>
+              {pauseSummary && <p className="trace-pause-summary">{pauseSummary}</p>}
+              <span className="trace-hint">Klick "Fortsetzen" - der Agent knüpft am gespeicherten Stand an.</span>
             </div>
           )}
 

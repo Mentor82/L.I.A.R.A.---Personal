@@ -47,12 +47,17 @@ class AgentRunRequest(BaseModel):
     session_id: Optional[int] = None
     model: Optional[str] = None
     max_steps: Optional[int] = 12
+    # Nur True, wenn der Nutzer explizit einen zuvor an max_steps
+    # ausgelaufenen Lauf fortsetzen will (siehe base_agent.py run()) - nie
+    # automatisch anhand des Task-Texts geraten, sonst würde ein neuer,
+    # unabhängiger Task versehentlich mit altem Kontext vermischt.
+    resume: bool = False
 
 
 class AgentTaskStatus(BaseModel):
     task_id: str
     agent_id: str
-    status: str  # "running", "done", "error", "cancelled"
+    status: str  # "running", "done", "error", "cancelled", "paused"
     task: str
     current_step: int = 0
     created_at: str
@@ -76,7 +81,8 @@ async def _run_agent_task_worker(
     agent: BaseAgent,
     task_prompt: str,
     user_id: int,
-    session_id: Optional[int]
+    session_id: Optional[int],
+    resume: bool = False
 ):
     async def event_callback(event: Dict[str, Any]):
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -105,7 +111,8 @@ async def _run_agent_task_worker(
             user_id=user_id,
             session_id=session_id,
             callback=event_callback,
-            is_cancelled=is_cancelled
+            is_cancelled=is_cancelled,
+            resume=resume
         )
 
         finished_at = datetime.now(timezone.utc).isoformat()
@@ -113,6 +120,14 @@ async def _run_agent_task_worker(
             await asyncio.to_thread(
                 agent_task_store.update_task, task_id,
                 status="cancelled", finished_at=finished_at, error=result.get("error")
+            )
+        elif result.get("paused"):
+            # Schritt-Budget erreicht, aber kein Fehlschlag - eine
+            # Fortsetzungs-Zusammenfassung wurde bereits gespeichert
+            # (base_agent.py), ein Folge-Run mit resume=True knüpft daran an.
+            await asyncio.to_thread(
+                agent_task_store.update_task, task_id,
+                status="paused", finished_at=finished_at, error=result.get("error")
             )
         elif result.get("success"):
             await asyncio.to_thread(
@@ -155,7 +170,7 @@ async def start_agent_task(
     """
     Startet einen spezialisierten Agenten-Task im Hintergrund.
     """
-    if not req.task.strip():
+    if not req.task.strip() and not req.resume:
         raise HTTPException(status_code=400, detail="Aufgabenstellung (task) darf nicht leer sein.")
 
     try:
@@ -176,7 +191,7 @@ async def start_agent_task(
     # request (same as before), only the STATE is now cross-worker-visible
     # via Redis. _BACKGROUND_TASKS just prevents GC of the running task.
     async_task = asyncio.create_task(
-        _run_agent_task_worker(task_id, agent, req.task, user.id, req.session_id)
+        _run_agent_task_worker(task_id, agent, req.task, user.id, req.session_id, resume=req.resume)
     )
     _BACKGROUND_TASKS.add(async_task)
     async_task.add_done_callback(_BACKGROUND_TASKS.discard)
