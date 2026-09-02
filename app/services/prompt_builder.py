@@ -225,6 +225,12 @@ WICHTIG:
 - Bei allgemeinen Fragen → OHNE Tool antworten
 - Wenn Tool verwendet: Antworte ERST mit <tool_call>, dann warte auf Result
 - Nach Tool-Result: Beantworte die Frage mit den erhaltenen Daten
+- BILDANFRAGEN: Wenn der Nutzer Bilder/Fotos zu einem Thema oder Motiv sehen möchte
+  (z.B. "zeig mir Bilder von...", "hast du Fotos von..."), rufe web_search mit
+  search_type="images" auf - NICHT fetch_web_page und NICHT selbst erfundene
+  Bild-URLs/Markdown-Links. Das Tool existiert und liefert echte Bild-Thumbnails,
+  die dem Nutzer direkt angezeigt werden. Probiere es aus, bevor du behauptest,
+  es gäbe kein passendes Tool.
 
 {build_consent_required_instructions()}
 
