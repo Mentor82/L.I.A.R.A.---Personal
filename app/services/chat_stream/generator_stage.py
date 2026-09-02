@@ -245,7 +245,18 @@ async def stream_ollama_response(
 
     ollama_tools = None
     if supports_tools:
-        ollama_tools = get_tool_registry().get_tools_for_ollama()
+        # web_search/workspace_propose_change are hidden here (not
+        # unregistered - other callers like the Agent Hub profiles still see
+        # them where relevant) so the model reaches for delegate_research/
+        # delegate_code_task instead: a single-shot tool call for "search
+        # the web" or "write this file" doesn't get the multi-step
+        # analyze-then-act loop those tasks usually need, and prompt-level
+        # steering alone proved unreliable earlier this session (native tool
+        # exposure is the one lever that actually holds).
+        from services.tool_registry import CHAT_DELEGATION_EXCLUDED_TOOLS
+        ollama_tools = get_tool_registry().get_tools_for_ollama(
+            exclude=CHAT_DELEGATION_EXCLUDED_TOOLS
+        )
         logger.info("Native tools enabled for model '%s' (%d tools, user_id=%s, session_id=%s)", model, len(ollama_tools), user_id, session_id)
 
     full_response_text = ""

@@ -195,6 +195,10 @@ def _build_agent_step_label(tool_name: str, arguments: Dict) -> str:
         from services.agents.research_agent import DELEGATION_MODEL
         task_preview = (arguments.get("task") or "")[:60]
         return f'🔍 Research Agent ({DELEGATION_MODEL}): "{task_preview}"'
+    if tool_name == "delegate_code_task":
+        from services.agents.code_agent import CODE_DELEGATION_MODEL
+        task_preview = (arguments.get("task") or "")[:60]
+        return f'💻 Code Agent ({CODE_DELEGATION_MODEL}): "{task_preview}"'
     return tool_name
 
 

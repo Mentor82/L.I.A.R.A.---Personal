@@ -18,6 +18,16 @@ class ToolCategory(str, Enum):
     MEMORY = "memory"            # 4D Memory & Wissenssuche
 
 
+# Single-shot tools hidden from the normal chat's own tool exposure (both the
+# native tool-calling path and the text-tag prompt fallback for models
+# without native support) in favor of steering toward delegate_research/
+# delegate_code_task, which run the full multi-step agent loop those tasks
+# usually need. Not unregistered - other callers (Agent Hub profiles, tests)
+# still see the full set; this only trims what get_tools_for_ollama()/
+# get_tool_descriptions_for_llm() hand to chat specifically.
+CHAT_DELEGATION_EXCLUDED_TOOLS = ["web_search", "workspace_propose_change"]
+
+
 @dataclass
 class ToolParameter:
     """Tool-Parameter Definition"""
@@ -217,6 +227,37 @@ class ToolRegistry:
             privacy_level="low"
         ))
 
+        # 💻 Delegate a multi-step code task to the specialized Code Agent -
+        # same idea as delegate_research above, but for code creation/edits.
+        # Runs a full CodeAgent instance (view_file/grep_search/replace_chunk/
+        # create_file/delete_file, own model) in propose_only mode: every
+        # write becomes a pending Workspace proposal, never a direct write -
+        # same review-then-accept gate workspace_propose_change already uses.
+        self.register_tool(ToolDefinition(
+            name="delegate_code_task",
+            description=(
+                "Delegiert eine mehrstufige Code-Aufgabe (neue Datei, Refactoring, Bugfix über "
+                "mehrere Schritte) an den spezialisierten Code Agent (analysiert den Workspace "
+                "selbstständig mit view_file/grep_search, ändert dann gezielt Code). Ändert "
+                "NICHTS direkt - jede Änderung landet als Vorschlag im Workspace-Tab, den der "
+                "Nutzer noch bestätigen muss. Braucht eine aktive Workspace-Session."
+            ),
+            category=ToolCategory.WORKSPACE,
+            parameters=[
+                ToolParameter(
+                    name="task",
+                    type="string",
+                    description="Die konkrete Code-Aufgabe für den Code Agent",
+                    required=True
+                )
+            ],
+            function=self._delegate_code_task_stub,
+            # Same opt-in gate as workspace_propose_change - this operates on
+            # the user's own workspace files, defaults to off.
+            requires_consent=True,
+            privacy_level="low"
+        ))
+
         # 🕐 Current Time/Date
         self.register_tool(ToolDefinition(
             name="get_current_time",
@@ -377,11 +418,14 @@ class ToolRegistry:
             return [t for t in self._tools.values() if t.category == category]
         return list(self._tools.values())
     
-    def get_tool_descriptions_for_llm(self) -> str:
+    def get_tool_descriptions_for_llm(self, exclude: Optional[List[str]] = None) -> str:
         """Generiere Tool-Beschreibungen für Ollama System-Prompt"""
         lines = ["Du hast Zugriff auf folgende Tools:\n"]
+        exclude_set = set(exclude or [])
 
         for tool in self._tools.values():
+            if tool.name in exclude_set:
+                continue
             params_str = ", ".join([
                 f"{p.name}: {p.type}"
                 + (f" [{'|'.join(p.enum)}]" if p.enum else "")
@@ -405,7 +449,7 @@ class ToolRegistry:
         
         return "\n".join(lines)
     
-    def get_tools_for_ollama(self) -> List[Dict]:
+    def get_tools_for_ollama(self, exclude: Optional[List[str]] = None) -> List[Dict]:
         """
         Serializes tools into Ollama's native function-calling format
         (`{"type": "function", "function": {...}}`, JSON-Schema parameters) -
@@ -420,7 +464,14 @@ class ToolRegistry:
         and always gets a consent-denied error back. Filtering by the same
         field ToolExecutor itself checks means this list widens on its own,
         with no change needed here, once real per-user consent exists.
+
+        `exclude` lets a caller hide specific tools without unregistering
+        them globally - used by the normal chat to hide the single-shot
+        web_search/workspace_propose_change in favor of steering the model
+        toward delegate_research/delegate_code_task instead, while other
+        callers (tests, any future non-chat caller) still see the full set.
         """
+        exclude_set = set(exclude or [])
         return [
             {
                 "type": "function",
@@ -443,7 +494,7 @@ class ToolRegistry:
                 }
             }
             for tool in self._tools.values()
-            if tool.privacy_level == "low"
+            if tool.privacy_level == "low" and tool.name not in exclude_set
         ]
 
     def get_tool_schema(self, name: str) -> Optional[Dict]:
@@ -505,6 +556,10 @@ class ToolRegistry:
     async def _delegate_research_stub(self, **kwargs):
         """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
         return {"error": "Not implemented", "tool": "delegate_research"}
+
+    async def _delegate_code_task_stub(self, **kwargs):
+        """Placeholder - routed directly in ToolExecutor._execute_tool instead."""
+        return {"error": "Not implemented", "tool": "delegate_code_task"}
 
     async def _task_checklist_stub(self, **kwargs):
         """Placeholder - routed directly in ToolExecutor._execute_tool instead."""

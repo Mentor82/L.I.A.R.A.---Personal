@@ -40,15 +40,21 @@ def replace_chunk(
     user_id: Optional[int] = None,
     session_id: Optional[int] = None,
     filename: Optional[str] = None,
-    allow_multiple: bool = False
+    allow_multiple: bool = False,
+    dry_run: bool = False
 ) -> Dict[str, Any]:
     """
     Ersetzt einen spezifischen Code-Chunk in einer Datei.
-    
+
     1. Sucht nach exaktem Vorkommen von target_content.
     2. Validiert Eindeutigkeit (wenn allow_multiple=False).
     3. Führt vorab einen Syntax-Check auf dem resultierenden Code durch.
     4. Schreibt erst bei erfolgreicher Validierung auf die Festplatte.
+
+    dry_run=True überspringt Schritt 4 und liefert stattdessen new_content
+    zurück, ohne die Datei anzufassen - für Aufrufer, die das Ergebnis erst
+    noch anderweitig behandeln wollen (z.B. als Vorschlag statt Direktschrieb,
+    siehe CodeAgent's propose_only-Modus).
     """
     target = _resolve_file(path, user_id, session_id, filename)
     if not target or not target.exists():
@@ -103,6 +109,15 @@ def replace_chunk(
                 "error": f"Änderung abgebrochen - resultierender Code enthält Syntaxfehler: {syntax_res['error']}",
                 "syntax_error": syntax_res
             }
+
+    if dry_run:
+        return {
+            "success": True,
+            "filename": str(filename or target.name),
+            "new_content": new_content,
+            "replaced_occurrences": occurrences if allow_multiple else 1,
+            "dry_run": True
+        }
 
     # Datei schreiben
     try:

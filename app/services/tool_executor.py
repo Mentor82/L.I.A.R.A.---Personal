@@ -22,7 +22,7 @@ from services.productivity_tools import execute_productivity_tool
 
 WORKSPACE_AGENT_TOOLS = (
     "workspace_list_files", "workspace_read_file", "workspace_propose_change",
-    "workspace_propose_dependency_change",
+    "workspace_propose_dependency_change", "delegate_code_task",
 )
 
 # How many top SearXNG results get a real fetch-and-extract enrichment pass
@@ -204,6 +204,13 @@ class ToolExecutor:
         # orchestration, mirrors base_agent.py's delegate_research tool)
         elif tool_def.name == "delegate_research":
             return await self._execute_delegate_research(parameters)
+
+        # 💻 Delegate to the specialized Code Agent (mirrors delegate_research
+        # above) - propose_only mode, so every write still lands as a
+        # Workspace proposal the user must accept, same as
+        # workspace_propose_change today.
+        elif tool_def.name == "delegate_code_task":
+            return await self._execute_delegate_code_task(user_id, session_id, parameters)
 
         # 📋 Task Checklist - reuses task_splitter.py's own markdown-checkbox
         # parser so a tool-called checklist and a text-tag-emitted one
@@ -484,6 +491,20 @@ class ToolExecutor:
         """
         from services.agents.research_agent import run_delegated_research
         return await run_delegated_research(params.get("task", ""))
+
+    async def _execute_delegate_code_task(
+        self, user_id: Optional[int], session_id: Optional[int], params: Dict[str, Any]
+    ) -> Dict:
+        """
+        Spins up a CodeAgent sub-instance (propose_only=True) and runs it to
+        completion for the given task, returning just its final answer - same
+        idea as _execute_delegate_research above, for code creation/edits
+        instead of research. Shared with base_agent.py's own eventual use via
+        run_delegated_code_task() so the model/step-budget/propose-mode logic
+        lives in one place.
+        """
+        from services.agents.code_agent import run_delegated_code_task
+        return await run_delegated_code_task(params.get("task", ""), user_id, session_id)
 
     async def _execute_current_time(self, params: Dict[str, Any]) -> Dict:
         """Gibt aktuelle Zeit zurück"""

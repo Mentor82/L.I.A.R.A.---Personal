@@ -212,9 +212,9 @@ def _get_tool_aware_system_prompt() -> str:
     """
     Erstellt Tool-aware System-Prompt mit Tool-Definitionen
     """
-    from services.tool_registry import get_tool_registry
+    from services.tool_registry import get_tool_registry, CHAT_DELEGATION_EXCLUDED_TOOLS
     registry = get_tool_registry()
-    tool_descriptions = registry.get_tool_descriptions_for_llm()
+    tool_descriptions = registry.get_tool_descriptions_for_llm(exclude=CHAT_DELEGATION_EXCLUDED_TOOLS)
     
     return f"""
 {tool_descriptions}
