@@ -193,7 +193,25 @@ async def stream_chat(
                 for item in relevant_concepts:
                     enhanced_context += f"\n**Konzept: {item['concept']}** (Similarity: {item['similarity']:.2f})\n"
                     for msg in item['related_messages'][:2]:
-                        enhanced_context += f"  - {msg['role']}: {msg['content'][:100]}...\n"
+                        # Every assistant reply gets auto-indexed into this same
+                        # graph (persistence_stage.py), with no distinction from
+                        # user-stated facts - a past refusal/error/capability
+                        # claim ("this tool doesn't support X") got replayed as
+                        # if it were ground truth in brand-new sessions,
+                        # confirmed live via a stale "web_search doesn't support
+                        # images" reply resurfacing hours later. User-authored
+                        # content stays trustworthy; assistant-authored content
+                        # is explicitly flagged as non-authoritative so the
+                        # model re-verifies (e.g. via an actual tool call)
+                        # instead of repeating its own possibly-outdated words.
+                        if msg['role'] == 'assistant':
+                            enhanced_context += (
+                                f"  - (deine eigene frühere Antwort - KEINE verifizierte Tatsache, "
+                                f"insbesondere zu Tool-/System-Fähigkeiten ggf. veraltet; im Zweifel "
+                                f"neu prüfen statt zu wiederholen): {msg['content'][:100]}...\n"
+                            )
+                        else:
+                            enhanced_context += f"  - Nutzer sagte früher: {msg['content'][:100]}...\n"
         except Exception as e:
             logger.warning(f"Semantic context retrieval failed: {e}")
 

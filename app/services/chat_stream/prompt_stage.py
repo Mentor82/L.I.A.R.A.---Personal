@@ -291,11 +291,19 @@ Formatiere deine Antworten automatisch je nach Inhalt:
     if not supports_tools:
         prompt += f"\n\n{_get_tool_aware_system_prompt()}"
 
-    if memory_context and len(memory_context) > 0:
-        prompt += f"\n\nRelevanter Kontext aus früheren Gesprächen:\n"
-        for item in memory_context[:3]:
-            text_val = item.get('content', '') or item.get('text', '') or str(item)
-            prompt += f"- {text_val}\n"
+    # memory_context (relevant_concepts) is the same data chat_streaming.py
+    # already formats properly - with a role-aware caveat distinguishing
+    # user-stated facts from the assistant's own past (possibly outdated/
+    # wrong) replies - into custom_context below. This used to inject it a
+    # second time here too, but item.get('content')/item.get('text') never
+    # matched relevant_concepts' actual shape ({'concept', 'similarity',
+    # 'related_messages': [...]}), so it silently fell through to str(item):
+    # a raw dict dump containing the same assistant text with none of that
+    # caveat framing - a second, uncaveated poisoning path for exactly the
+    # "stale self-claim treated as fact" bug custom_context's version fixes.
+    # memory_context is still used elsewhere (the SSE 'memory_context' event
+    # for the frontend's memory indicator badge) - only this redundant/broken
+    # prompt injection is removed.
 
     if custom_context:
         prompt += f"\n\nZusätzlicher Kontext:\n{custom_context}"
