@@ -17,6 +17,13 @@ const RUNNABLE_LANGUAGES = new Set([
   'py311', 'py312', 'py313', 'py314', 'julia', 'jl'
 ]);
 
+// Matches Mermaid's own first-line diagram declarations - used to recognize
+// a diagram in a code fence that has no (or the wrong) language tag, since
+// models routinely drop the ```mermaid tag despite writing valid Mermaid
+// syntax underneath. Anchored to the start of the trimmed text so it can't
+// false-positive on these words appearing later, mid-explanation.
+const MERMAID_DIAGRAM_KEYWORDS_RE = /^\s*(flowchart|graph|sequenceDiagram|classDiagram(-v2)?|stateDiagram(-v2)?|erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|gitGraph|C4(Context|Container|Component|Dynamic|Deployment)|mindmap|timeline|sankey(-beta)?|block-beta|packet-beta|architecture-beta|xychart-beta|kanban)\b/;
+
 // LLMs commonly write LaTeX using \( \)/\[ \] (common in OpenAI-style
 // training data) instead of the $ $/$$ $$ delimiters remark-math expects.
 // Without this, those blocks are not just left unstyled - markdown's own
@@ -151,7 +158,16 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
           const normalizedLanguage = language.toLowerCase();
           
           const codeText = String(children).replace(/\n$/, '');
-          const isMermaid = normalizedLanguage === 'mermaid';
+          // Models routinely write a Mermaid diagram in a fence with no (or
+          // the wrong) language tag - confirmed live, a ```-only fence full
+          // of `flowchart TD` content rendered as a bare paragraph instead
+          // of a diagram, since it never even reached the isMermaid check
+          // below (see the inline/no-language early return further down).
+          // Sniffing the first real line for a known Mermaid diagram
+          // keyword catches that case without needing the model to get the
+          // fence tag right.
+          const isMermaid = normalizedLanguage === 'mermaid'
+            || (!inline && !language && MERMAID_DIAGRAM_KEYWORDS_RE.test(codeText));
           const isRunnable = RUNNABLE_LANGUAGES.has(normalizedLanguage) && !!sessionId;
           const [running, setRunning] = useState(false);
           const [runResult, setRunResult] = useState(null);
@@ -197,6 +213,10 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
             return () => { active = false; };
           }, [ensureLanguage, normalizedLanguage]);
 
+          if (isMermaid) {
+            return <MermaidDiagram code={codeText} />;
+          }
+
           // If no block or language, render inline code.
           if (inline || !language) {
             return (
@@ -204,10 +224,6 @@ const MarkdownMessage = memo(({ content, sessionId }) => {
                 {children}
               </code>
             );
-          }
-
-          if (isMermaid) {
-            return <MermaidDiagram code={codeText} />;
           }
 
           // If the highlighter isn't loaded yet, render a simple pre block.
