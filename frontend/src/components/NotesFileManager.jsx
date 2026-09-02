@@ -1,21 +1,26 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { notesAPI, moodAPI } from '../services/api';
 import LexicalEditor from './LexicalEditor';
 import './NotesFileManager.css';
 
 const NotesFileManager = () => {
+  const navigate = useNavigate();
   const [notes, setNotes] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [filteredNotes, setFilteredNotes] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [formData, setFormData] = useState({
     title: '',
     content: '',
     category: '',
-    subcategory: ''
+    subcategory: '',
+    tags: []
   });
+  const [tagInput, setTagInput] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [expandedCategories, setExpandedCategories] = useState(new Set(['all']));
   const [mood, setMood] = useState(null);
@@ -33,7 +38,7 @@ const NotesFileManager = () => {
 
   useEffect(() => {
     filterNotesByCategory();
-  }, [selectedCategory, notes, sortBy, showPinnedOnly, showArchivedOnly]);
+  }, [selectedCategory, notes, sortBy, showPinnedOnly, showArchivedOnly, searchQuery]);
 
   const fetchNotes = async () => {
     try {
@@ -118,6 +123,19 @@ const NotesFileManager = () => {
     } else {
       // By default, hide archived notes
       filtered = filtered.filter(note => !note.is_archived);
+    }
+
+    // Client-side search over title/content/tags - notes are already all
+    // loaded via getAll(), so there's no round-trip cost to filtering here
+    // rather than hitting the backend's own GET /notes/search.
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      filtered = filtered.filter(note => {
+        const titleMatch = (note.title || '').toLowerCase().includes(query);
+        const contentMatch = stripHtml(note.content || '').toLowerCase().includes(query);
+        const tagMatch = (note.tags || []).some(tag => tag.toLowerCase().includes(query));
+        return titleMatch || contentMatch || tagMatch;
+      });
     }
 
     // Apply sorting
@@ -209,8 +227,10 @@ const NotesFileManager = () => {
       title: '',
       content: '',
       category: selectedCategory !== 'all' ? selectedCategory : '',
-      subcategory: ''
+      subcategory: '',
+      tags: []
     });
+    setTagInput('');
     setShowModal(true);
   };
 
@@ -220,14 +240,37 @@ const NotesFileManager = () => {
     const categoryParts = note.category ? note.category.split('/') : [];
     const mainCategory = categoryParts.slice(0, -1).join('/') || note.category || '';
     const subcategory = categoryParts.length > 1 ? categoryParts[categoryParts.length - 1] : '';
-    
+
     setFormData({
       title: note.title || '',
       content: note.content || '',
       category: mainCategory,
-      subcategory: subcategory
+      subcategory: subcategory,
+      tags: note.tags || []
     });
+    setTagInput('');
     setShowModal(true);
+  };
+
+  const handleAddTag = () => {
+    const tag = tagInput.trim();
+    if (!tag) return;
+    if (!formData.tags.includes(tag)) {
+      setFormData({ ...formData, tags: [...formData.tags, tag] });
+    }
+    setTagInput('');
+  };
+
+  const handleRemoveTag = (tag) => {
+    setFormData({ ...formData, tags: formData.tags.filter(t => t !== tag) });
+  };
+
+  const openOriginChat = (sessionId) => {
+    // Chat.jsx's own mount-time session restore already reads this exact
+    // key - setting it before navigating reuses that existing mechanism
+    // instead of building a second, parallel deep-link path.
+    localStorage.setItem('liara_active_session', String(sessionId));
+    navigate('/chat');
   };
 
   const handleDeleteNote = (note) => {
@@ -275,7 +318,8 @@ const NotesFileManager = () => {
     const noteData = {
       title: formData.title,
       content: formData.content,
-      category: fullCategory
+      category: fullCategory,
+      tags: formData.tags
     };
 
     setIsSubmitting(true);
@@ -294,17 +338,19 @@ const NotesFileManager = () => {
     }
   };
 
-  const truncateContent = (html, maxLength = 120) => {
+  const stripHtml = (html) => {
     if (!html) return '';
-    
-    // Convert HTML to plain text
     const temp = document.createElement('div');
     temp.innerHTML = html;
-    let text = temp.textContent || temp.innerText || '';
-    
-    // Clean up whitespace
-    text = text.replace(/\s+/g, ' ').trim();
-    
+    const text = temp.textContent || temp.innerText || '';
+    return text.replace(/\s+/g, ' ').trim();
+  };
+
+  const truncateContent = (html, maxLength = 120) => {
+    if (!html) return '';
+
+    let text = stripHtml(html);
+
     // If short enough, return as is
     if (text.length <= maxLength) {
       return text;
@@ -392,8 +438,26 @@ const NotesFileManager = () => {
               </span>
             </div>
             <div className="header-controls">
-              <select 
-                value={sortBy} 
+              <div className="notes-search-box">
+                <input
+                  type="text"
+                  className="notes-search-input"
+                  placeholder="🔍 Titel, Inhalt oder Tag durchsuchen..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                {searchQuery && (
+                  <button
+                    className="notes-search-clear"
+                    onClick={() => setSearchQuery('')}
+                    title="Suche zurücksetzen"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <select
+                value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 className="sort-select"
               >
@@ -472,6 +536,20 @@ const NotesFileManager = () => {
                   <div className="note-preview">
                     {truncateContent(note.content || '', 120)}
                   </div>
+                  {note.tags && note.tags.length > 0 && (
+                    <div className="note-card-tags">
+                      {note.tags.map(tag => (
+                        <span
+                          key={tag}
+                          className="note-tag-chip"
+                          onClick={() => setSearchQuery(tag)}
+                          title={`Nach "${tag}" filtern`}
+                        >
+                          🏷️ {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="note-card-footer">
                   <span className="note-category">
@@ -481,6 +559,18 @@ const NotesFileManager = () => {
                   <span className="note-date">
                     {new Date(note.updated_at || note.created_at).toLocaleDateString('de-DE')}
                   </span>
+                  {note.session_id && (
+                    <>
+                      <span className="note-separator">·</span>
+                      <button
+                        className="note-origin-chat-link"
+                        onClick={() => openOriginChat(note.session_id)}
+                        title="Zum Chat, aus dem diese Notiz entstanden ist"
+                      >
+                        💬 Ursprungschat
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -541,6 +631,30 @@ const NotesFileManager = () => {
                   onChange={(e) => setFormData({...formData, subcategory: e.target.value})}
                   placeholder="z.B. 'Meeting' oder 'Ideen'"
                 />
+              </div>
+
+              <div className="form-group">
+                <label>Tags (optional)</label>
+                <div className="tag-input-group">
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddTag(); } }}
+                    placeholder="Tag eingeben und Enter drücken..."
+                  />
+                  <button type="button" onClick={handleAddTag} className="add-tag-btn">+</button>
+                </div>
+                {formData.tags.length > 0 && (
+                  <div className="tags-display">
+                    {formData.tags.map(tag => (
+                      <span key={tag} className="tag">
+                        {tag}
+                        <button type="button" onClick={() => handleRemoveTag(tag)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -605,6 +719,16 @@ const NotesFileManager = () => {
                   <div>📅 <strong>Erstellt:</strong> {new Date(viewNote.created_at).toLocaleString('de-DE')}</div>
                   {viewNote.updated_at && (
                     <div>🔄 <strong>Aktualisiert:</strong> {new Date(viewNote.updated_at).toLocaleString('de-DE')}</div>
+                  )}
+                  {viewNote.session_id && (
+                    <div>
+                      💬 <button
+                        className="note-origin-chat-link"
+                        onClick={() => openOriginChat(viewNote.session_id)}
+                      >
+                        Ursprungschat öffnen
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
