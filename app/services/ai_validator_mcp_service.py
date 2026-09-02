@@ -20,6 +20,14 @@ MCP_PORT = 3333
 MCP_URL = f"http://{MCP_HOST}:{MCP_PORT}"
 MCP_TIMEOUT = 30.0
 
+# code_review()/validate_code_with_model() ask for up to 2048 generated
+# tokens from a local (CPU-bound, non-GPU) 7b model on the adapter's Ollama
+# backend - confirmed live to take 30s+, longer than MCP_TIMEOUT allows,
+# causing generate_text() to time out and silently return None. These calls
+# are all background/fire-and-forget (see _run_background_proposal_validation
+# in code_agent.py), so a generous timeout costs nothing a user waits on.
+MCP_GENERATE_TIMEOUT = 180.0
+
 # "qwen2.5-coder:7b" (the original default) isn't pulled on this adapter's
 # Ollama backend (502). Its cloud replacement "gpt-oss:120b-cloud" IS pulled
 # but is rejected with 403 "Model not allowed" by this MCP adapter's own
@@ -171,13 +179,14 @@ class MCPValidatorService:
             
             response = await self.client.post(
                 f"{self.url}/generate",
-                json=payload
+                json=payload,
+                timeout=MCP_GENERATE_TIMEOUT
             )
             response.raise_for_status()
-            
+
             data = response.json()
             result = MCPGenerateResponse(**data)
-            
+
             logger.info(f"✅ Generated text using {model}")
             return result
         except Exception as e:
