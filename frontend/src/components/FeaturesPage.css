@@ -156,7 +156,7 @@
 }
 
 .sentiment-card.neutral {
-  border-color: var(--color-text-muted), 0.3);
+  border-color: var(--color-text-muted);
 }
 
 .sentiment-card.negative {
