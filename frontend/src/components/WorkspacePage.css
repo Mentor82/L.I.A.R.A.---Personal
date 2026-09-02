@@ -728,7 +728,7 @@
 
 .workspace-file-name {
   font-size: var(--ws-ui-font-size);
-  font-weight: 600;
+  font-weight: 400;
   color: var(--color-text);
   word-break: break-all;
 }
@@ -1448,5 +1448,57 @@
 .status-item.agent-tag:hover { background: rgba(0, 229, 255, 0.1); }
 .status-item.agent-tag.active { background: rgba(0, 229, 255, 0.2); border-color: #00e5ff; box-shadow: 0 0 8px rgba(0, 229, 255, 0.3); }
 .workspace-file-icon { margin-right: 0.4rem; font-size: 0.85rem; opacity: 0.85; }
+
+/* Explorer right-click context menu - fixed-position (viewport coordinates
+   set inline via style={{left, top}} in WorkspacePage.jsx), same card
+   language as .workspace-packages-popover but laid out as a vertical list
+   of full-width action rows, the standard native-context-menu shape. */
+.workspace-context-menu {
+  position: fixed;
+  z-index: var(--z-dropdown, 100);
+  min-width: 190px;
+  background: var(--color-bg-alt);
+  border: 1px solid rgba(159, 122, 234, 0.3);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.workspace-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4rem 0.55rem;
+  font-size: var(--ws-ui-font-size);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.workspace-context-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.workspace-context-menu button.danger {
+  color: var(--color-danger);
+}
+
+.workspace-context-menu button.danger:hover {
+  background: var(--bg-danger-subtle);
+}
+
+.workspace-context-menu-divider {
+  height: 1px;
+  margin: 0.25rem 0.2rem;
+  background: var(--color-border);
+}
 
 

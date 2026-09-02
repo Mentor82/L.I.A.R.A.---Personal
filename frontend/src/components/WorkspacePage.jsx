@@ -165,13 +165,50 @@ export function isImageFile(filename) {
   return /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(filename);
 }
 
+// File-type icon lookup, in the spirit of a VS Code icon theme (code-server
+// reference) but with this app's existing emoji-icon language rather than a
+// new icon-font dependency. Exact filename matches (README, Dockerfile, …)
+// are checked before generic extensions, since those carry more specific
+// meaning than their raw extension (or have none at all).
+const EXACT_FILENAME_ICONS = {
+  'dockerfile': '🐳',
+  'license': '⚖️',
+  'license.md': '⚖️',
+  'license.txt': '⚖️',
+  'package.json': '📦',
+  '.gitignore': '🌿',
+  '.gitattributes': '🌿',
+  '.env': '🔐',
+};
+
+const EXTENSION_ICONS = {
+  py: '🐍', jl: '🟣',
+  js: '🟨', jsx: '🟨', mjs: '🟨', cjs: '🟨',
+  ts: '🔷', tsx: '🔷',
+  json: '📋',
+  md: '📝',
+  css: '🎨', scss: '🎨', less: '🎨',
+  html: '🌐', htm: '🌐',
+  yml: '⚙️', yaml: '⚙️', toml: '⚙️', ini: '⚙️', cfg: '⚙️', conf: '⚙️',
+  sh: '💻', bash: '💻', ps1: '💻',
+  sql: '🗄️',
+  csv: '📊',
+  pdf: '📕',
+  zip: '🗜️', tar: '🗜️', gz: '🗜️', '7z': '🗜️', rar: '🗜️',
+  xlsx: '📗', xls: '📗',
+  docx: '📘', doc: '📘',
+  lock: '🔒',
+};
+
 function getFileIcon(filename) {
   if (isImageFile(filename)) return '🖼️';
-  if (filename.endsWith('.py')) return '🐍';
-  if (filename.endsWith('.jl')) return '🟣';
-  if (filename.endsWith('.json')) return '📋';
-  if (filename.endsWith('.md')) return '📝';
-  return '📄';
+
+  const lower = filename.toLowerCase();
+  if (EXACT_FILENAME_ICONS[lower]) return EXACT_FILENAME_ICONS[lower];
+  if (lower.startsWith('readme')) return 'ℹ️';
+
+  const ext = lower.includes('.') ? lower.slice(lower.lastIndexOf('.') + 1) : '';
+  return EXTENSION_ICONS[ext] || '📄';
 }
 
 /**
@@ -195,6 +232,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
           onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); handlers.onFolderDragEnter(node.path); }}
           onDragLeave={(e) => { e.stopPropagation(); handlers.onFolderDragLeave(); }}
           onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handlers.onFolderDrop(node.path, e.dataTransfer.files); }}
+          onContextMenu={(e) => handlers.onContextMenu(e, node)}
         >
           <button
             className="workspace-file-open workspace-folder-open"
@@ -233,7 +271,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
 
   return (
     <li className={activeTab === node.path ? 'active' : ''}>
-      <div className="workspace-tree-row" style={indent}>
+      <div className="workspace-tree-row" style={indent} onContextMenu={(e) => handlers.onContextMenu(e, node)}>
         <button className="workspace-file-open" onClick={() => handlers.onOpenFile(node.path)}>
           <span className="workspace-file-icon">{getFileIcon(node.name)}</span>
           <span className="workspace-file-name">{node.name}</span>
@@ -256,6 +294,85 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Explorer right-click context menu - a VS Code Explorer staple that was
+ * missing entirely before (the tree row's hover-visible action icons were
+ * the only way to rename/delete/etc.). Reuses the exact same `handlers`
+ * object the always-visible icons already call, so there's exactly one
+ * implementation of each action, not a second copy. Renders at a fixed
+ * viewport position (the right-click coordinates), clamped so it can't run
+ * off the right/bottom edge of the window.
+ */
+function WorkspaceContextMenu({ menu, onClose, handlers }) {
+  const menuRef = useRef(null);
+
+  // Close on any click outside the menu, or on Escape - the two standard
+  // ways every native/OS context menu dismisses itself.
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) onClose();
+    };
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [onClose]);
+
+  const { node, x, y } = menu;
+  const isFolder = node.type === 'folder';
+
+  // Rough clamp against an assumed max menu footprint - exact size isn't
+  // known until after render, but this keeps it on-screen in the common
+  // case (right-clicking near the sidebar's own right/bottom edge).
+  const left = Math.min(x, window.innerWidth - 200);
+  const top = Math.min(y, window.innerHeight - 260);
+
+  const copyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(node.path);
+    } catch {
+      // Clipboard API can be unavailable (insecure context, permissions) -
+      // silently no-op rather than surfacing an error for a convenience action.
+    }
+    onClose();
+  };
+
+  const run = (fn) => { fn(); onClose(); };
+
+  return (
+    <div className="workspace-context-menu" style={{ left, top }} ref={menuRef}>
+      {!isFolder && (
+        <button onClick={() => run(() => handlers.onOpenFile(node.path))}>📄 Öffnen</button>
+      )}
+      {isFolder && (
+        <>
+          <button onClick={() => run(() => handlers.onNewFileHere(node.path))}>➕ Neue Datei hier</button>
+          <button onClick={() => run(() => handlers.onNewFolderHere(node.path))}>📁 Neuer Ordner hier</button>
+          <button onClick={() => run(() => handlers.onUploadHere(node.path))}>⬆️ Hierher hochladen</button>
+        </>
+      )}
+      {!isFolder && (
+        <button onClick={() => run(() => handlers.onToggleContext(node.path))}>
+          💬 {node.selected_for_context ? 'Aus Chat-Kontext entfernen' : 'Zu Chat-Kontext hinzufügen'}
+        </button>
+      )}
+      {!isFolder && (
+        <button onClick={() => run(() => handlers.onDownload(node.path))}>⬇️ Herunterladen</button>
+      )}
+      <button onClick={() => run(() => handlers.onRename(node.path, node.name))}>✏️ Umbenennen</button>
+      <button onClick={copyPath}>📋 Pfad kopieren</button>
+      <div className="workspace-context-menu-divider" />
+      <button
+        className="danger"
+        onClick={() => run(() => handlers.onDelete(node.path, isFolder ? 'folder' : 'file'))}
+      >🗑️ Löschen</button>
+    </div>
   );
 }
 
@@ -535,6 +652,12 @@ function WorkspacePage() {
   const uploadInputRef = useRef(null);
   const uploadTargetRef = useRef('');
   const [dragOverTarget, setDragOverTarget] = useState(null);
+
+  // Explorer right-click context menu - {x, y, node} while open, null while
+  // closed. Coordinates are the click position (viewport-relative), not
+  // tied to the row itself, so WorkspaceContextMenu can render as a fixed-
+  // position sibling rather than needing to be nested inside the tree.
+  const [contextMenu, setContextMenu] = useState(null);
 
   // Project-wide text search - searchResults === null means "not searching,
   // show the normal Explorer tree"; an object (even with an empty results
@@ -1160,6 +1283,11 @@ function WorkspacePage() {
     onNewFileHere: openNewFileModal,
     onNewFolderHere: openNewFolderModal,
     onUploadHere: triggerUpload,
+    onContextMenu: (e, node) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ x: e.clientX, y: e.clientY, node });
+    },
     onFolderDragEnter: (path) => setDragOverTarget(path),
     onFolderDragLeave: () => setDragOverTarget(null),
     onFolderDrop: (path, fileList) => { setDragOverTarget(null); handleUpload(fileList, path); },
@@ -1629,6 +1757,14 @@ function WorkspacePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {contextMenu && (
+        <WorkspaceContextMenu
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          handlers={treeHandlers}
+        />
       )}
     </div>
   );
