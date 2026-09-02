@@ -18,6 +18,19 @@
   border-radius: 16px;
   overflow: hidden;
   color: var(--color-text);
+
+  /* IDE-chrome font tokens (code-server/VS Code convention): the workbench
+     UI (Explorer, tabs, toolbar, status bar) runs a size smaller than body
+     text, with a separate, even smaller size for meta/label text - not one
+     value reused everywhere. Consolidates what used to be a dozen
+     slightly-different one-off rem values (0.7/0.72/0.75/0.78/0.8rem for
+     the same conceptual role) into one source of truth. The actual
+     monospace font (editor content) is set in WorkspacePage.jsx's
+     EDITOR_FONT_STACK - kept in sync manually, since CodeMirror's
+     EditorView.theme() can't read a CSS custom property from here. */
+  --ws-mono-font: 'JetBrains Mono', 'Fira Code', Consolas, Menlo, 'Courier New', monospace;
+  --ws-ui-font-size: 0.8125rem;   /* 13px - VS Code's workbench chrome size */
+  --ws-ui-font-size-sm: 0.6875rem; /* 11px - meta text: file size, timestamps, badges, section labels */
 }
 
 /* Breaks out of .app-main's centered 1280px reading-width container (App.css
@@ -58,7 +71,7 @@
 /* Explorer collapse toggle lives in the header (not inside the sidebar
    itself) so it stays reachable once the sidebar is collapsed to nothing. */
 .workspace-header-left .workspace-icon-btn {
-  font-size: 0.78rem;
+  font-size: var(--ws-ui-font-size-sm);
 }
 
 .workspace-header-right {
@@ -133,7 +146,7 @@
   gap: 0.5rem;
   font-size: 0.8rem;
   color: var(--color-text-muted);
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--ws-mono-font);
 }
 
 .workspace-packages-add {
@@ -469,7 +482,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.68rem;
+  font-size: var(--ws-ui-font-size-sm);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-faint);
@@ -578,7 +591,7 @@
   color: var(--color-text-faint);
   min-width: 1.5rem;
   text-align: right;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--ws-mono-font);
 }
 
 .workspace-search-line-text {
@@ -587,7 +600,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--ws-mono-font);
 }
 
 .workspace-search-highlight {
@@ -678,7 +691,7 @@
 }
 
 .workspace-tree-chevron {
-  font-size: 0.7rem;
+  font-size: var(--ws-ui-font-size-sm);
   color: var(--color-text-faint);
   width: 0.8rem;
   flex-shrink: 0;
@@ -710,7 +723,7 @@
 }
 
 .workspace-file-name {
-  font-size: 0.8rem;
+  font-size: var(--ws-ui-font-size);
   font-weight: 600;
   color: var(--color-text);
   word-break: break-all;
@@ -724,7 +737,7 @@
 }
 
 .workspace-file-size {
-  font-size: 0.7rem;
+  font-size: var(--ws-ui-font-size-sm);
   color: var(--color-text-faint);
 }
 
@@ -734,7 +747,7 @@
   align-items: center;
   padding: 0.1rem 0.5rem;
   border-radius: 10px;
-  font-size: 0.7rem;
+  font-size: var(--ws-ui-font-size-sm);
   font-weight: 500;
   border: 1px solid;
   white-space: nowrap;
@@ -774,7 +787,7 @@
   background: var(--bg-hover);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: var(--ws-ui-font-size-sm);
   line-height: 1;
   padding: 0.18rem 0.32rem;
   cursor: pointer;
@@ -841,7 +854,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.75rem;
+  font-size: var(--ws-ui-font-size-sm);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-faint);
@@ -867,7 +880,7 @@
   background: var(--bg-muted);
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: var(--ws-ui-font-size);
   transition: all 0.2s ease;
 }
 
@@ -1201,7 +1214,7 @@
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--ws-mono-font);
   font-size: 0.78rem;
   color: var(--color-text-muted);
   margin-bottom: 0.4rem;
@@ -1371,7 +1384,7 @@
   border: 1px solid rgba(121, 40, 202, 0.4);
   border-radius: 6px;
   color: var(--color-text);
-  font-size: 0.75rem;
+  font-size: var(--ws-ui-font-size);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1400,7 +1413,7 @@
   padding: 0.2rem 0.75rem;
   background: var(--bg-input);
   border-top: 1px solid var(--color-border);
-  font-size: 0.7rem;
+  font-size: var(--ws-ui-font-size-sm);
   color: var(--color-text-muted);
   flex-shrink: 0;
   user-select: none;
@@ -1417,16 +1430,16 @@
 .status-item.session-tag { color: #a0aec0; font-weight: 500; }
 .status-item.file-tag { color: var(--color-text); font-weight: 500; }
 .status-item.proposals-tag { color: #f6ad55; font-weight: 600; }
-.status-item.env-tag { color: #68d391; font-family: monospace; }
+.status-item.env-tag { color: #68d391; font-family: var(--ws-mono-font); }
 .status-item.terminal-tag {
   background: transparent; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 4px;
-  color: var(--color-text); font-size: 0.72rem; padding: 0.15rem 0.45rem; cursor: pointer; transition: all 0.2s ease;
+  color: var(--color-text); font-size: var(--ws-ui-font-size-sm); padding: 0.15rem 0.45rem; cursor: pointer; transition: all 0.2s ease;
 }
 .status-item.terminal-tag:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(0, 229, 255, 0.4); }
 .status-item.terminal-tag.active { background: rgba(0, 229, 255, 0.15); border-color: #00e5ff; color: #00e5ff; }
 .status-item.agent-tag {
   background: transparent; border: 1px solid rgba(0, 229, 255, 0.3); border-radius: 4px;
-  color: #00e5ff; font-size: 0.72rem; padding: 0.15rem 0.45rem; cursor: pointer; transition: all 0.2s ease;
+  color: #00e5ff; font-size: var(--ws-ui-font-size-sm); padding: 0.15rem 0.45rem; cursor: pointer; transition: all 0.2s ease;
 }
 .status-item.agent-tag:hover { background: rgba(0, 229, 255, 0.1); }
 .status-item.agent-tag.active { background: rgba(0, 229, 255, 0.2); border-color: #00e5ff; box-shadow: 0 0 8px rgba(0, 229, 255, 0.3); }

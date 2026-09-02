@@ -46,6 +46,13 @@ const FONT_SIZE_PRESETS = [
 ];
 const DEFAULT_FONT_SIZE = 14; // matches the backend column's DEFAULT before a user ever picks a preset
 
+// Same family as code-server/VS Code's own editor.fontFamily convention
+// (a deliberate coding font first, native monospace fallbacks after) -
+// JetBrains Mono/Fira Code are already used for the Terminal and search
+// matches elsewhere on this page, Consolas/Menlo cover Windows/Mac when
+// neither webfont is installed locally.
+const EDITOR_FONT_STACK = "'JetBrains Mono', 'Fira Code', Consolas, Menlo, 'Courier New', monospace";
+
 // Reads the app-wide dark/light choice straight off the DOM attribute
 // PageLayout/UserPreferences already resolve it to (see utils/theme.js's
 // applyTheme) rather than re-deriving system-preference logic here, and
@@ -490,12 +497,19 @@ function WorkspacePage() {
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   // Single EditorView.theme() extension shared by both panes - font size is
   // Workspace-wide, not per-pane, so one preference change updates both at
-  // once. Line-height is fixed at a comfortable 1.6 alongside it (issue #5's
-  // "sinnvolle Zeilenhöhe") rather than exposed as its own control.
+  // once. Previously had no fontFamily at all, so the editor silently fell
+  // back to the browser's own default monospace font (varies by OS/browser -
+  // Consolas, DejaVu Sans Mono, whatever) instead of a deliberate choice.
+  // EDITOR_FONT_STACK matches the mono font already used elsewhere in this
+  // page (Terminal, search matches) plus native fallbacks for platforms
+  // without those two installed, same idea as code-server/VS Code's own
+  // editor.fontFamily default. Line-height tightened from a prose-like 1.6
+  // to 1.45 - closer to VS Code's own ~1.35-1.5 "auto" editor line-height,
+  // denser and more IDE-like than the old, more spacious value.
   const fontSizeExtension = useMemo(() => EditorView.theme({
-    '&': { fontSize: `${fontSize}px` },
-    '.cm-content': { lineHeight: '1.6' },
-    '.cm-gutters': { fontSize: `${fontSize}px` },
+    '&': { fontSize: `${fontSize}px`, fontFamily: EDITOR_FONT_STACK },
+    '.cm-content': { lineHeight: '1.45', fontFamily: EDITOR_FONT_STACK },
+    '.cm-gutters': { fontSize: `${fontSize}px`, fontFamily: EDITOR_FONT_STACK },
   }), [fontSize]);
 
   const [agentEnabled, setAgentEnabled] = useState(false);
