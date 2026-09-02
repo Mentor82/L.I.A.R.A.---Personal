@@ -20,6 +20,15 @@ MCP_PORT = 3333
 MCP_URL = f"http://{MCP_HOST}:{MCP_PORT}"
 MCP_TIMEOUT = 30.0
 
+# "qwen2.5-coder:7b" (the previous default here) isn't actually pulled on
+# this MCP adapter's Ollama backend - confirmed live via GET /models, every
+# call defaulting to it was silently failing with a 502. gpt-oss:120b-cloud
+# is the same model already proven reliable this session for structured/
+# JSON output elsewhere (delegate_code_task, context compaction) - these
+# calls are all background/fire-and-forget, so its extra size costs nothing
+# a user waits on.
+MCP_CODE_MODEL = "gpt-oss:120b-cloud"
+
 # ============================================================================
 # RESPONSE MODELS
 # ============================================================================
@@ -180,7 +189,7 @@ class MCPValidatorService:
         self,
         code: str,
         language: str,
-        model: str = "qwen2.5-coder:7b"
+        model: str = MCP_CODE_MODEL
     ) -> Dict[str, Any]:
         """
         Use AI model to validate/analyze code
@@ -258,7 +267,7 @@ Provide your review in JSON format with "issues", "improvements", "rating" (1-10
 Respond ONLY with valid JSON."""
             
             result = await self.generate_text(
-                model="qwen2.5-coder:7b",
+                model=MCP_CODE_MODEL,
                 prompt=prompt,
                 temperature=0.4,
                 num_predict=2048
@@ -308,7 +317,7 @@ Provide the fixed code in JSON format with "fixed_code" and "explanation".
 Respond ONLY with valid JSON."""
             
             result = await self.generate_text(
-                model="qwen2.5-coder:7b",
+                model=MCP_CODE_MODEL,
                 prompt=prompt,
                 temperature=0.2,
                 num_predict=2048

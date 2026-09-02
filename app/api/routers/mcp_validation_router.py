@@ -9,7 +9,7 @@ from typing import Optional, List
 from datetime import datetime
 import logging
 
-from services.ai_validator_mcp_service import get_mcp_validator
+from services.ai_validator_mcp_service import get_mcp_validator, MCP_CODE_MODEL
 from core.dependencies import require_active_user, require_admin
 from api.models.base_models import User
 
@@ -25,21 +25,21 @@ class CodeRequest(BaseModel):
     """Code validation request"""
     code: str
     language: str
-    model: Optional[str] = "qwen2.5-coder:7b"
+    model: Optional[str] = MCP_CODE_MODEL
 
 class CodeReviewRequest(BaseModel):
     """Code review request"""
     code: str
     language: str
     focus: Optional[str] = "general"  # general, security, performance, readability
-    model: Optional[str] = "qwen2.5-coder:7b"
+    model: Optional[str] = MCP_CODE_MODEL
 
 class FixSuggestionsRequest(BaseModel):
     """Fix suggestions request"""
     code: str
     language: str
     issues: List[str]
-    model: Optional[str] = "qwen2.5-coder:7b"
+    model: Optional[str] = MCP_CODE_MODEL
 
 class TextGenerationRequest(BaseModel):
     """Text generation request"""
