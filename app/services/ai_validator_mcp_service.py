@@ -20,14 +20,13 @@ MCP_PORT = 3333
 MCP_URL = f"http://{MCP_HOST}:{MCP_PORT}"
 MCP_TIMEOUT = 30.0
 
-# "qwen2.5-coder:7b" (the previous default here) isn't actually pulled on
-# this MCP adapter's Ollama backend - confirmed live via GET /models, every
-# call defaulting to it was silently failing with a 502. gpt-oss:120b-cloud
-# is the same model already proven reliable this session for structured/
-# JSON output elsewhere (delegate_code_task, context compaction) - these
-# calls are all background/fire-and-forget, so its extra size costs nothing
-# a user waits on.
-MCP_CODE_MODEL = "gpt-oss:120b-cloud"
+# "qwen2.5-coder:7b" (the original default) isn't pulled on this adapter's
+# Ollama backend (502). Its cloud replacement "gpt-oss:120b-cloud" IS pulled
+# but is rejected with 403 "Model not allowed" by this MCP adapter's own
+# model allowlist ("Hardened" in its OpenAPI title) - it only permits local
+# models. qwen2.5:7b is local, present in GET /models, and confirmed live via
+# curl to pass the allowlist (200 OK) on this adapter.
+MCP_CODE_MODEL = "qwen2.5:7b"
 
 # ============================================================================
 # RESPONSE MODELS
