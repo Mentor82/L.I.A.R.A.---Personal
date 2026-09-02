@@ -284,11 +284,22 @@ export function getModelContextLimit(modelName) {
   return 8192;
 }
 
-export function SessionContextBar({ messages, modelName }) {
-  const limit = getModelContextLimit(modelName);
-  
+export function SessionContextBar({ messages, modelName, contextInfo }) {
+  // contextInfo (from the backend's own ContextBudgetManager, via the SSE
+  // 'metadata' event) is the real, post-compaction prompt size for the last
+  // turn - preferred whenever available. The client-side sum-over-all-
+  // messages estimate below is only a fallback for before the first turn in
+  // this session has round-tripped since page load (a fresh page load, or a
+  // session just switched to) - it never reflected server-side compaction,
+  // so it only ever grew, even long after compaction kept the real prompt
+  // bounded.
+  const usingRealValue = contextInfo?.tokens != null && contextInfo?.limit != null;
+  const limit = usingRealValue ? contextInfo.limit : getModelContextLimit(modelName);
+
   let totalTokens = 0;
-  if (messages && messages.length > 0) {
+  if (usingRealValue) {
+    totalTokens = contextInfo.tokens;
+  } else if (messages && messages.length > 0) {
     totalTokens = messages.reduce((acc, m) => {
       if (m.tokens?.total) return acc + m.tokens.total;
       if (m.tokens?.in || m.tokens?.out) return acc + (m.tokens.in || 0) + (m.tokens.out || 0) + (m.tokens.think || 0);
@@ -314,7 +325,10 @@ export function SessionContextBar({ messages, modelName }) {
 
   const formatTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
-  const tooltip = `📊 Kontext-Budget & Auto-Summarize:\n• Aktuell: ${totalTokens.toLocaleString()} / ${limit.toLocaleString()} Tokens (${percent}%)\n• Status: ${statusText}\n• Auto-Kompaktierung: Aktiv ab ${thresholdPercent}% (${thresholdTokens.toLocaleString()} Tokens)\n• Modell: ${modelName || 'Standard'}`;
+  const sourceNote = usingRealValue
+    ? 'tatsächlicher Prompt-Umfang nach Kompaktierung (Server)'
+    : 'grobe Schätzung - wird nach der ersten Antwort in dieser Session durch den echten Wert ersetzt';
+  const tooltip = `📊 Kontext-Budget & Auto-Summarize:\n• Aktuell: ${totalTokens.toLocaleString()} / ${limit.toLocaleString()} Tokens (${percent}%)\n• Quelle: ${sourceNote}\n• Status: ${statusText}\n• Auto-Kompaktierung: Aktiv ab ${thresholdPercent}% (${thresholdTokens.toLocaleString()} Tokens)\n• Modell: ${modelName || 'Standard'}`;
 
   return (
     <div className="session-context-bar" title={tooltip}>

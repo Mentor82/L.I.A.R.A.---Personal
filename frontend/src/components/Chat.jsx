@@ -108,6 +108,14 @@ function Chat() {
   const [currentMood, setCurrentMood] = useState(null);
   const [liveSentiment, setLiveSentiment] = useState(null);  // Live-Sentiment während Eingabe
   const [memoryContext, setMemoryContext] = useState(null);  // Memory-Context von Neo4j
+  // Real, post-compaction prompt size for the active session's most recent
+  // turn (from the SSE 'metadata' event's context_tokens/context_limit) -
+  // SessionContextBar prefers this over its own client-side sum-over-all-
+  // messages estimate, which never reflected that server-side compaction
+  // keeps the actual prompt bounded. null until the first turn in this
+  // session has round-tripped since page load, and reset on session switch
+  // so a stale reading from a different session's model/limit never shows.
+  const [contextInfo, setContextInfo] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);  // Hochgeladenes Bild
   const [selectedImageBase64, setSelectedImageBase64] = useState(null); // Base64 für Vision
   const [imagePreview, setImagePreview] = useState(null);    // Bild-Vorschau URL
@@ -217,6 +225,14 @@ function Chat() {
     const interval = setInterval(fetchMood, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Catch-all for activeSessionId changing via any path (new session,
+  // mount-time restore, etc.) - switchSession's own explicit reset above
+  // covers the common case, this covers the rest so a stale reading from a
+  // different session's model/limit never lingers.
+  useEffect(() => {
+    setContextInfo(null);
+  }, [activeSessionId]);
 
   // Load chat sessions from database on mount
   useEffect(() => {
@@ -521,6 +537,9 @@ function Chat() {
         onEvent: async (parsed) => {
           if (parsed.type === 'metadata') {
             updateAssistantMessage({ model: parsed.model, mood: parsed.mood });
+            if (parsed.context_tokens != null && parsed.context_limit != null) {
+              setContextInfo({ tokens: parsed.context_tokens, limit: parsed.context_limit });
+            }
           } else if (parsed.type === 'memory_context') {
             setMemoryContext(parsed.data);
             updateAssistantMessage({ memoryContext: parsed.data });
@@ -831,6 +850,7 @@ function Chat() {
   const switchSession = async (sessionId) => {
     sessionActionTakenRef.current = true;
     setActiveSessionId(sessionId);
+    setContextInfo(null);
     setHistorySidebarOpen(false);
     
     // Load messages for this session if not already loaded
@@ -1173,7 +1193,7 @@ function Chat() {
           </label>
           {messages.length > 0 && (
             <>
-              <SessionContextBar messages={messages} modelName={selectedModel} />
+              <SessionContextBar messages={messages} modelName={selectedModel} contextInfo={contextInfo} />
               <span className="chat-message-count" title="Nachrichten im Verlauf">
                 💬 {messages.length}
               </span>

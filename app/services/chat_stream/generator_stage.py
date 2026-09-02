@@ -276,6 +276,13 @@ async def stream_ollama_response(
         metadata = {'type': 'metadata', 'model': model, 'mood': mood_snapshot["mood"]}
         if session_id:
             metadata['session_id'] = session_id
+        # The real, post-compaction prompt size for this turn - not the same
+        # thing as summing every stored message's tokens (what
+        # SessionContextBar used to do client-side), which only ever grows
+        # and never reflects that compaction is actually keeping the real
+        # prompt bounded. See context_res above (ContextBudgetManager).
+        metadata['context_tokens'] = context_res.optimized_tokens
+        metadata['context_limit'] = context_res.decision.context_limit
         yield f"data: {json.dumps(metadata)}\n\n"
 
         if memory_context:
