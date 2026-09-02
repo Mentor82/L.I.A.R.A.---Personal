@@ -22,6 +22,19 @@ import {
 } from './MobileChatComponents';
 import './MobileChat.css';
 
+// Placeholder id for a chat that only exists in the UI because no DB session
+// could be created yet. It is never sent to the backend and never persisted -
+// the backend creates the real session on the first send (request without
+// session_id) and reports its id back via the SSE metadata event, which we
+// then adopt. Using a client-side Date.now() id instead would make the UI
+// believe in a session the backend does not know, so nothing of that
+// conversation would ever be persisted.
+const PENDING_SESSION_ID = 'pending';
+
+// Matches the desktop chat: after this long without a single SSE event the
+// user gets told the request is unusually slow (it keeps running).
+const STALL_THRESHOLD_MS = 45000;
+
 export default function MobileChat({ user, onLogout }) {
   const { t } = useTranslation();
   const { setViewMode } = useViewMode();
@@ -32,15 +45,16 @@ export default function MobileChat({ user, onLogout }) {
   const [chatSessions, setChatSessions] = useState(() => {
     try {
       const saved = localStorage.getItem('liara_chat_sessions');
-      return saved ? JSON.parse(saved) : [{ id: Date.now(), title: t('mobile.newChat'), messages: [], timestamp: new Date().toISOString() }];
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return [{ id: Date.now(), title: t('mobile.newChat'), messages: [], timestamp: new Date().toISOString() }];
+      return [];
     }
   });
 
   const [activeSessionId, setActiveSessionId] = useState(() => {
     const saved = localStorage.getItem('liara_active_session');
-    return saved ? parseInt(saved, 10) : null;
+    const parsed = saved ? parseInt(saved, 10) : NaN;
+    return Number.isNaN(parsed) ? null : parsed;
   });
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -49,6 +63,13 @@ export default function MobileChat({ user, onLogout }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [sessionError, setSessionError] = useState(false);
+  // Same informational stall watchdog the desktop chat already has: a request
+  // can sit with zero SSE events for minutes under heavy server load, which
+  // from the user's seat is indistinguishable from a hung send button. The
+  // request is never given up on, this only tells the user what's going on.
+  const [stalled, setStalled] = useState(false);
+  const lastActivityRef = useRef(Date.now());
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState(() => {
     return localStorage.getItem('liara_selected_model') || 'llama3.2:3b';
@@ -90,6 +111,13 @@ export default function MobileChat({ user, onLogout }) {
         } catch (msgErr) {
           console.warn('Could not load session messages:', msgErr);
         }
+      } else {
+        // The DB is the source of truth - no sessions means no active
+        // session, otherwise a stale localStorage id would be sent to the
+        // backend which does not know it.
+        setChatSessions([]);
+        setActiveSessionId(null);
+        localStorage.removeItem('liara_active_session');
       }
     } catch (e) {
       console.warn('Could not load sessions from backend:', e);
@@ -123,11 +151,16 @@ export default function MobileChat({ user, onLogout }) {
   // Load messages when selecting a session
   const handleSelectSession = async (sessionId) => {
     setActiveSessionId(sessionId);
-    localStorage.setItem('liara_active_session', sessionId.toString());
+    if (sessionId === PENDING_SESSION_ID) {
+      localStorage.removeItem('liara_active_session');
+    } else {
+      localStorage.setItem('liara_active_session', sessionId.toString());
+      setSessionError(false);
+    }
     setDrawerOpen(false);
 
     const target = chatSessions.find((s) => s.id === sessionId);
-    if (target && (!target.messages || target.messages.length === 0)) {
+    if (target && sessionId !== PENDING_SESSION_ID && (!target.messages || target.messages.length === 0)) {
       try {
         const msgs = await getSessionMessages(sessionId);
         setChatSessions((prev) =>
@@ -156,6 +189,18 @@ export default function MobileChat({ user, onLogout }) {
       scrollToBottom(true);
     }
   }, [messages, generating, loading]);
+
+  // Polls instead of using a single timeout so a late-arriving event clears
+  // the notice again via the touch in the SSE handler below.
+  useEffect(() => {
+    if (!generating) return undefined;
+    const interval = setInterval(() => {
+      if (Date.now() - lastActivityRef.current > STALL_THRESHOLD_MS) {
+        setStalled(true);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [generating]);
 
   // Handle textarea auto-grow
   const handleInputChange = (e) => {
@@ -216,6 +261,18 @@ export default function MobileChat({ user, onLogout }) {
     }
   };
 
+  // Opens an empty, clearly client-only chat. The real DB session is created
+  // by the backend on the first send and adopted via the metadata event.
+  const startPendingSession = () => {
+    setChatSessions((prev) => [
+      { id: PENDING_SESSION_ID, title: t('mobile.newChat'), messages: [], timestamp: new Date().toISOString() },
+      ...prev.filter((s) => s.id !== PENDING_SESSION_ID),
+    ]);
+    setActiveSessionId(PENDING_SESSION_ID);
+    localStorage.removeItem('liara_active_session');
+    setSessionError(true);
+  };
+
   const handleNewChat = async () => {
     try {
       const newSession = await createChatSession(t('mobile.newChat'));
@@ -225,36 +282,45 @@ export default function MobileChat({ user, onLogout }) {
         messages: [],
         timestamp: new Date().toISOString(),
       };
-      setChatSessions((prev) => [sessionObj, ...prev]);
+      setChatSessions((prev) => [sessionObj, ...prev.filter((s) => s.id !== PENDING_SESSION_ID)]);
       setActiveSessionId(newSession.id);
       localStorage.setItem('liara_active_session', newSession.id.toString());
-    } catch {
-      const localId = Date.now();
-      const localSession = { id: localId, title: t('mobile.newChat'), messages: [], timestamp: new Date().toISOString() };
-      setChatSessions((prev) => [localSession, ...prev]);
-      setActiveSessionId(localId);
-      localStorage.setItem('liara_active_session', localId.toString());
+      setSessionError(false);
+    } catch (err) {
+      // No fake Date.now() id here: the backend would not know it, would
+      // create a replacement session on the first send and the UI would keep
+      // talking about an id that never existed. Show the error instead and
+      // let the backend create the session with the first message.
+      console.warn('Could not create chat session:', err);
+      startPendingSession();
     }
     setDrawerOpen(false);
   };
 
   const handleDeleteSession = async (sessionId, e) => {
     e.stopPropagation();
-    try {
-      await deleteChatSession(sessionId);
-    } catch {}
+    if (sessionId !== PENDING_SESSION_ID) {
+      try {
+        await deleteChatSession(sessionId);
+      } catch (err) {
+        console.warn('Could not delete chat session:', err);
+      }
+    } else {
+      // The placeholder the banner refers to is gone, so the banner must go too.
+      setSessionError(false);
+    }
     setChatSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== sessionId);
-      if (filtered.length > 0) {
-        if (activeSessionId === sessionId) {
+      if (activeSessionId === sessionId) {
+        if (filtered.length > 0) {
           setActiveSessionId(filtered[0].id);
           localStorage.setItem('liara_active_session', filtered[0].id.toString());
+        } else {
+          setActiveSessionId(null);
+          localStorage.removeItem('liara_active_session');
         }
-        return filtered;
       }
-      const fresh = [{ id: Date.now(), title: t('mobile.newChat'), messages: [], timestamp: new Date().toISOString() }];
-      setActiveSessionId(fresh[0].id);
-      return fresh;
+      return filtered;
     });
   };
 
@@ -269,17 +335,32 @@ export default function MobileChat({ user, onLogout }) {
 
     // Ensure we have an active session id
     let currSessionId = activeSessionId;
-    if (!currSessionId) {
+    if (!currSessionId || currSessionId === PENDING_SESSION_ID) {
       try {
         const fresh = await createChatSession(t('mobile.newChat'));
         currSessionId = fresh.id;
         setActiveSessionId(currSessionId);
         localStorage.setItem('liara_active_session', currSessionId.toString());
-        setChatSessions((prev) => [{ id: fresh.id, title: fresh.title, messages: [] }, ...prev]);
-      } catch {
-        currSessionId = Date.now();
-        setActiveSessionId(currSessionId);
-        localStorage.setItem('liara_active_session', currSessionId.toString());
+        setChatSessions((prev) => [
+          { id: fresh.id, title: fresh.title, messages: [] },
+          ...prev.filter((s) => s.id !== PENDING_SESSION_ID),
+        ]);
+        setSessionError(false);
+      } catch (err) {
+        // Never fall back to a Date.now() id: the backend would not know it
+        // and would silently create a replacement session, leaving the UI
+        // pointing at an id that does not exist. Send without session_id
+        // instead - the backend creates the session and returns its id in
+        // the metadata event, which we adopt below.
+        console.warn('Could not create chat session, letting backend create one:', err);
+        currSessionId = PENDING_SESSION_ID;
+        setActiveSessionId(PENDING_SESSION_ID);
+        localStorage.removeItem('liara_active_session');
+        setChatSessions((prev) =>
+          prev.some((s) => s.id === PENDING_SESSION_ID)
+            ? prev
+            : [{ id: PENDING_SESSION_ID, title: t('mobile.newChat'), messages: [], timestamp: new Date().toISOString() }, ...prev]
+        );
       }
     }
 
@@ -317,6 +398,8 @@ export default function MobileChat({ user, onLogout }) {
 
     setLoading(true);
     setGenerating(true);
+    lastActivityRef.current = Date.now();
+    setStalled(false);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -327,11 +410,15 @@ export default function MobileChat({ user, onLogout }) {
         {
           message: textToSend,
           model: selectedModel,
-          session_id: currSessionId,
+          session_id: currSessionId === PENDING_SESSION_ID ? undefined : currSessionId,
           images: imageToSend ? [imageToSend.base64] : undefined,
         },
         {
           signal: controller.signal,
+          onActivity: () => {
+            lastActivityRef.current = Date.now();
+            setStalled(false);
+          },
           onEvent: async (parsed) => {
             if (parsed.type === 'thinking') {
               setLoading(false);
@@ -366,6 +453,21 @@ export default function MobileChat({ user, onLogout }) {
                 })
               );
             } else if (parsed.type === 'metadata') {
+              // The backend is the source of truth for the session id: it
+              // creates one when we send without session_id and replaces
+              // sessions it does not own. Adopt it so the UI never keeps
+              // talking about an id the backend does not know.
+              if (parsed.session_id && parsed.session_id !== currSessionId) {
+                const backendSessionId = parsed.session_id;
+                const staleSessionId = currSessionId;
+                currSessionId = backendSessionId;
+                setActiveSessionId(backendSessionId);
+                localStorage.setItem('liara_active_session', backendSessionId.toString());
+                setSessionError(false);
+                setChatSessions((prev) =>
+                  prev.map((s) => (s.id === staleSessionId ? { ...s, id: backendSessionId } : s))
+                );
+              }
               setChatSessions((prev) =>
                 prev.map((s) => {
                   if (s.id !== currSessionId) return s;
@@ -505,6 +607,7 @@ export default function MobileChat({ user, onLogout }) {
     } finally {
       setLoading(false);
       setGenerating(false);
+      setStalled(false);
       abortControllerRef.current = null;
       setChatSessions((prev) =>
         prev.map((s) => {
@@ -527,6 +630,7 @@ export default function MobileChat({ user, onLogout }) {
     }
     setLoading(false);
     setGenerating(false);
+    setStalled(false);
   };
 
   const filteredSessions = chatSessions.filter((s) =>
@@ -583,10 +687,15 @@ export default function MobileChat({ user, onLogout }) {
 
       {/* Messages Feed */}
       <main className="mobile-chat-feed">
+        {sessionError && (
+          <div className="mobile-session-warning" role="status">
+            {t('mobile.sessionError')}
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="mobile-chat-empty">
             <div className="mobile-empty-logo">
-              <img src={liaraLogo} alt="LIARA" />
+              <img src={liaraLogo} alt="LIARA" className="mobile-empty-logo-img" />
             </div>
             <h2>{t('mobile.welcomeTitle')}</h2>
             <p>{t('mobile.welcomeSubtitle')}</p>
@@ -628,6 +737,11 @@ export default function MobileChat({ user, onLogout }) {
                       <span />
                     </div>
                   ) : null}
+
+                  {/* Request is still running but has been quiet for a while */}
+                  {stalled && generating && !isUser && index === messages.length - 1 && (
+                    <div className="mobile-stall-notice">{t('mobile.stallNotice')}</div>
+                  )}
 
                   {/* Attached Action Cards */}
                   {msg.workspaceArtifacts && <WorkspaceArtifactsBlock artifacts={msg.workspaceArtifacts} />}
