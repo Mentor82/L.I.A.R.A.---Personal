@@ -377,6 +377,60 @@ function WorkspaceContextMenu({ menu, onClose, handlers }) {
 }
 
 /**
+ * Renders a proposal's background validation result (syntax/lint + semantic
+ * review, see code_agent.py's run_delegated_code_task /
+ * _run_background_proposal_validation) - only present once that background
+ * check has actually finished, since attach_proposal_validation() writes it
+ * onto the proposal well after the chat response that triggered it already
+ * streamed. No "checking..." placeholder shown in the meantime: not every
+ * proposal goes through validation (only ones delegate_code_task created for
+ * a recognized code file), so a permanent pending spinner for the others
+ * would be misleading.
+ */
+function ProposalValidationCard({ validation }) {
+  const syntax = validation.syntax;
+  const semantic = validation.semantic;
+  const syntaxIcon = syntax?.status === 'ok' ? '✅' : syntax?.status === 'warning' ? '⚠️' : '❌';
+
+  return (
+    <div className="workspace-validation-card">
+      <div className="workspace-validation-header">🩺 Automatische Prüfung ({validation.language})</div>
+      {syntax && (
+        <div className="workspace-validation-row">
+          <span>{syntaxIcon} Syntax/Lint: {syntax.status}{syntax.message ? ` - ${syntax.message}` : ''}</span>
+          {(syntax.errors?.length > 0 || syntax.warnings?.length > 0) && (
+            <ul className="workspace-validation-list">
+              {[...(syntax.errors || []), ...(syntax.warnings || [])].map((issue, i) => (
+                <li key={i}>{issue.message}{issue.line ? ` (Zeile ${issue.line})` : ''}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {semantic && (
+        <div className="workspace-validation-row">
+          <span>
+            🧠 Semantische Review
+            {semantic.review?.rating != null ? `: ${semantic.review.rating}/10` : ''}
+            {semantic.status === 'error' ? ` - ${semantic.message}` : ''}
+          </span>
+          {semantic.review?.issues?.length > 0 && (
+            <ul className="workspace-validation-list">
+              {semantic.review.issues.map((issue, i) => (
+                <li key={i}>{typeof issue === 'string' ? issue : JSON.stringify(issue)}</li>
+              ))}
+            </ul>
+          )}
+          {semantic.raw_review && !semantic.review && (
+            <p className="workspace-validation-raw">{semantic.raw_review}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Right-hand chat panel scoped to the Workspace's current session - reuses
  * the exact same /api/chat/stream agent Chat.jsx talks to (same session_id,
  * same tool registry, same workspace_propose_change tool), not a separate
@@ -801,6 +855,18 @@ function WorkspacePage() {
     }
     setPackagesOpen(false);
   }, [sessionId, agentEnabled]);
+
+  // Background code validation (delegate_code_task, see code_agent.py's
+  // _run_background_proposal_validation) lands on a proposal well after it
+  // was created - a plain one-shot load wouldn't ever pick that up without
+  // a manual refresh. Cheap local-file read, only runs while there's
+  // actually something pending to show it on; stops the moment the list
+  // empties (every proposal resolved).
+  useEffect(() => {
+    if (!sessionId || !agentEnabled || proposals.length === 0) return undefined;
+    const interval = setInterval(() => loadProposals(sessionId), 6000);
+    return () => clearInterval(interval);
+  }, [sessionId, agentEnabled, proposals.length]);
 
   // Debounced project-wide search - fires 300ms after the user stops typing
   // rather than on every keystroke. Clearing the query reverts to the
@@ -1451,6 +1517,7 @@ function WorkspacePage() {
                 </div>
                 {p.description && <p className="workspace-proposal-description">{p.description}</p>}
                 {p.kind !== 'package' && <DiffView diff={p.diff} />}
+                {p.validation && <ProposalValidationCard validation={p.validation} />}
                 <div className="workspace-modal-actions">
                   <button className="workspace-btn-secondary" onClick={() => handleRejectProposal(p.id)}>Ablehnen</button>
                   <button className="primary" onClick={() => handleApproveProposal(p.id)}>Annehmen</button>

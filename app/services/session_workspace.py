@@ -924,6 +924,29 @@ def list_proposals(user_id: int, session_id: int, status: Optional[str] = None) 
     return [p for p in proposals if p.get("status") == status]
 
 
+def attach_proposal_validation(user_id: int, session_id: int, proposal_id: str, validation: dict) -> bool:
+    """
+    Attaches a background code-validation result (syntax/lint + semantic
+    review, see code_agent.py's run_delegated_code_task) onto a still-pending
+    proposal, so the user sees it before deciding to accept - never blocks
+    the chat response that triggered it, since this runs as a fire-and-
+    forget background task well after that response already streamed.
+    Best-effort side channel: if the proposal was already resolved (accepted
+    or rejected) by the time validation finishes, this is a no-op rather than
+    resurrecting a decision the user already made.
+    """
+    with workspace_lock(user_id, session_id):
+        proposals = _load_proposals(user_id, session_id)
+        for p in proposals:
+            if p.get("id") == proposal_id:
+                if p.get("status") != "pending":
+                    return False
+                p["validation"] = validation
+                _save_proposals(user_id, session_id, proposals)
+                return True
+    return False
+
+
 def resolve_proposal(user_id: int, session_id: int, proposal_id: str, approve: bool) -> dict:
     """
     Applies (approve=True) or discards (approve=False) a pending proposal.

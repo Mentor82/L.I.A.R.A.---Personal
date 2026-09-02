@@ -395,6 +395,49 @@
   margin: 0.2rem 0 0.6rem;
 }
 
+/* Background code-validation result (delegate_code_task) attached onto a
+   proposal - only rendered once present, see ProposalValidationCard. */
+.workspace-validation-card {
+  margin: 0.6rem 0;
+  padding: 0.65rem 0.85rem;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.workspace-validation-header {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.workspace-validation-row {
+  font-size: 0.8rem;
+  color: var(--color-text);
+}
+
+.workspace-validation-list {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.workspace-validation-list li {
+  margin: 0.15rem 0;
+}
+
+.workspace-validation-raw {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  font-family: var(--ws-mono-font, monospace);
+}
+
 .workspace-body {
   display: grid;
   grid-template-columns: 280px 1fr;

@@ -2,11 +2,14 @@
 Specialized Code Agent für L.I.A.R.A.
 Nutzt das ACI (Agent-Computer Interface) für token-effiziente Software-Entwicklung.
 """
+import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
 
 from services.agents.base_agent import BaseAgent
 import services.aci as aci
+
+logger = logging.getLogger(__name__)
 
 # Reuses the exact reasoning already proven live for delegate_research this
 # session - reliable at multi-step native tool-calling, so worth the same
@@ -366,6 +369,76 @@ class CodeAgent(BaseAgent):
         }
 
 
+# Maps a proposed file's extension to the language string both validator
+# services expect. Files with no mapped extension (docs, config formats
+# neither service knows) are skipped for validation entirely rather than
+# forcing a guess - not every proposal is code.
+PROPOSAL_VALIDATION_LANGUAGES = {
+    "py": "python", "js": "javascript", "jsx": "javascript", "mjs": "javascript", "cjs": "javascript",
+    "ts": "typescript", "tsx": "typescript",
+    "sh": "bash", "bash": "bash",
+    "json": "json", "yml": "yaml", "yaml": "yaml",
+    "c": "c", "cpp": "cpp", "cc": "cpp", "h": "c", "hpp": "cpp",
+    "go": "go", "rs": "rust", "php": "php", "rb": "ruby",
+    "sql": "sql", "html": "html", "htm": "html", "css": "css", "java": "java",
+}
+
+
+async def _run_background_proposal_validation(user_id: int, session_id: int, proposals: list) -> None:
+    """
+    Fire-and-forget background check for proposals a delegated CodeAgent run
+    just created - never awaited by the caller, so it can take as long as it
+    needs (the MCP semantic review is itself an LLM call) without adding a
+    millisecond of latency to the chat response that triggered it. Writes
+    straight onto the proposal via attach_proposal_validation() once done -
+    the Workspace tab's own proposal list is the "visible follow-up card"
+    here, not a second chat message, since that's exactly where the user
+    already looks to decide whether to accept.
+    """
+    from datetime import datetime, timezone
+    from services.session_workspace import attach_proposal_validation
+
+    for p in proposals:
+        if p.get("action") == "delete" or not p.get("new_content"):
+            continue
+        filename = p.get("filename", "")
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        language = PROPOSAL_VALIDATION_LANGUAGES.get(ext)
+        if not language:
+            continue
+
+        code = p["new_content"]
+        validation: Dict[str, Any] = {
+            "filename": filename,
+            "language": language,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        try:
+            from services.ai_validator_service import get_ai_validator_service
+            validator = await get_ai_validator_service()
+            syntax_result = await validator.validate_code(code, language)
+            validation["syntax"] = {
+                "status": syntax_result.status,
+                "errors": [e.model_dump() for e in syntax_result.errors],
+                "warnings": [w.model_dump() for w in syntax_result.warnings],
+            }
+        except Exception as e:
+            validation["syntax"] = {"status": "error", "message": str(e)}
+
+        try:
+            from services.ai_validator_mcp_service import get_mcp_validator
+            mcp = await get_mcp_validator()
+            validation["semantic"] = await mcp.code_review(code, language)
+        except Exception as e:
+            validation["semantic"] = {"status": "error", "message": str(e)}
+
+        try:
+            attach_proposal_validation(user_id, session_id, p["id"], validation)
+        except Exception as e:
+            logger.error(f"Failed to attach validation to proposal {p.get('id')}: {e}")
+
+
 async def run_delegated_code_task(task: str, user_id: Optional[int], session_id: Optional[int]) -> Dict[str, Any]:
     """
     Runs a CodeAgent sub-instance (propose_only=True - every write becomes a
@@ -374,9 +447,19 @@ async def run_delegated_code_task(task: str, user_id: Optional[int], session_id:
     run_delegated_research(). Requires an active Workspace session (the same
     session_id as the chat itself) since CodeAgent's ACI tools operate on
     session-scoped files - there's no sensible "code task" without one.
+
+    Diffs the pending-proposal list before/after the run (rather than
+    threading proposal_id through every tool handler's return value back up
+    through base_agent.py's generic history_log, which doesn't currently
+    capture tool *results* at all, only calls) to find exactly which
+    proposals this run just created, then kicks off background validation
+    for them - fire-and-forget, never awaited here.
     """
     if user_id is None or session_id is None:
         return {"error": "delegate_code_task braucht eine aktive Workspace-Session (Chat mit Session-ID)."}
+
+    from services.session_workspace import list_proposals
+    before_ids = {p["id"] for p in list_proposals(user_id, session_id, status="pending")}
 
     sub_agent = CodeAgent(
         user_id=user_id,
@@ -387,6 +470,14 @@ async def run_delegated_code_task(task: str, user_id: Optional[int], session_id:
     )
     sub_agent.system_prompt += CODE_DELEGATION_BUDGET_INSTRUCTION
     result = await sub_agent.run(task=task, user_id=user_id, session_id=session_id)
+
+    new_proposals = [
+        p for p in list_proposals(user_id, session_id, status="pending")
+        if p["id"] not in before_ids
+    ]
+    if new_proposals:
+        import asyncio
+        asyncio.create_task(_run_background_proposal_validation(user_id, session_id, new_proposals))
 
     if result.get("success"):
         return {"answer": result["answer"]}
