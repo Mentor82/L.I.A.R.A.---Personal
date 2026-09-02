@@ -123,6 +123,8 @@
   "mobile": {
     "title": "Liara Mobile",
     "beta": "Beta",
+    "welcomeTitle": "Welcome to Liara",
+    "welcomeSubtitle": "How can I help you today?",
     "newChat": "New Chat",
     "history": "Chat History",
     "searchChats": "Search chats...",

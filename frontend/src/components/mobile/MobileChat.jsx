@@ -588,7 +588,7 @@ export default function MobileChat({ onLogout }) {
         {messages.length === 0 ? (
           <div className="mobile-chat-empty">
             <div className="mobile-empty-logo">
-              <img src={liaraLogo} alt="LIARA" />
+              <img src={liaraLogo} alt="LIARA" className="mobile-empty-logo-img" />
             </div>
             <h2>{t('mobile.welcomeTitle')}</h2>
             <p>{t('mobile.welcomeSubtitle')}</p>
