@@ -10,6 +10,19 @@ from sqlalchemy.sql import func
 from core.database import Base
 import enum
 
+# Note.session_id below has a string ForeignKey("chat_sessions.id") -
+# SQLAlchemy can only resolve that at mapper-configuration time if
+# ChatSession's module has been imported somewhere in the process first (its
+# class body is what registers the "chat_sessions" table onto this shared
+# Base's metadata). The live app is fine either way (main.py transitively
+# imports it via dashboard_activities.py's own identical noqa import), but a
+# narrower entry point - a standalone script, a test, a future refactor of
+# main.py's import order - importing only this module would hit
+# `NoReferencedTableError: ... could not find table 'chat_sessions'`
+# (confirmed live). Importing it here for its side effect only removes that
+# footgun regardless of what else has or hasn't been imported yet.
+from api.models.chat_session import ChatSession  # noqa: F401
+
 
 class UserRole(str, enum.Enum):
     """User Roles für RBAC"""
