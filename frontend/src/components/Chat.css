@@ -516,6 +516,14 @@
 }
 
 .bubble-text {
+  /* Previously unset - inherited the global 16px body base, one step
+     larger than every other UI text size in the app. --text-sm is the
+     project's own existing "one step down" token (modern-design.css's
+     type scale), not an arbitrary new value. Headings/code blocks inside
+     markdown keep their own fixed px sizes (unaffected by an ancestor
+     font-size change), so only body text - paragraphs, lists, blockquotes,
+     table cells - actually shrinks here. */
+  font-size: var(--text-sm, 0.875rem);
   line-height: 1.6;
 }
 
