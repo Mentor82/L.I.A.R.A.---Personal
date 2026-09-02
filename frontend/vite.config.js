@@ -18,7 +18,7 @@ export default defineConfig({
   build: {
     minify: 'terser',
     cssMinify: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         manualChunks(id) {
           const normalized = id.replace(/\\/g, '/');
