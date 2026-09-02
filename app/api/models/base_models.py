@@ -19,8 +19,14 @@ import enum
 # narrower entry point - a standalone script, a test, a future refactor of
 # main.py's import order - importing only this module would hit
 # `NoReferencedTableError: ... could not find table 'chat_sessions'`
-# (confirmed live). Importing it here for its side effect only removes that
-# footgun regardless of what else has or hasn't been imported yet.
+# (confirmed live). ChatMessage has to come along too: configure_mappers()
+# resolves every pending mapper's relationships together, not just the ones
+# a given query touches, and ChatSession.messages is itself a string
+# relationship("ChatMessage", ...) - confirmed live as the very next error
+# once ChatSession alone was imported. Same pairing dashboard_activities.py
+# already relies on (imports both, with the identical noqa reasoning there
+# for the opposite direction: ChatMessage.session needing ChatSession).
+from api.models.chat_message import ChatMessage  # noqa: F401
 from api.models.chat_session import ChatSession  # noqa: F401
 
 
