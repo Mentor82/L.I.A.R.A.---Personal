@@ -756,6 +756,7 @@ async def chat_with_liara(
                 elif intent == 'create_note':
                     details = detector.extract_note_details(request.message)
                     details['user_id'] = current_user.id
+                    details['session_id'] = request.session_id
                     action_result = await executor.execute_create_note(details)
                 
                 # LIST Intents

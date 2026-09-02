@@ -1,8 +1,19 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { notesAPI, moodAPI } from '../services/api';
 import './Notes.css';
 
 function Notes() {
+  const navigate = useNavigate();
+
+  // Chat.jsx's own mount-time session restore already reads this exact key
+  // (see loadSessions there) - setting it before navigating reuses that
+  // existing mechanism instead of building a second, parallel deep-link path.
+  const openOriginChat = (sessionId) => {
+    localStorage.setItem('liara_active_session', String(sessionId));
+    navigate('/chat');
+  };
+
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -459,6 +470,15 @@ function Notes() {
                   <span className="note-date">
                     {new Date(note.updated_at).toLocaleDateString('de-DE')}
                   </span>
+                  {note.session_id && (
+                    <button
+                      className="note-origin-chat-link"
+                      onClick={() => openOriginChat(note.session_id)}
+                      title="Zum Chat, aus dem diese Notiz entstanden ist"
+                    >
+                      💬 Ursprungschat öffnen
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

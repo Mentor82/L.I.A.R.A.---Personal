@@ -183,7 +183,8 @@ class ActionExecutor:
                 tags=details.get('tags', []),
                 is_pinned=False,
                 is_archived=False,
-                user_id=details.get('user_id', user_id)
+                user_id=details.get('user_id', user_id),
+                session_id=details.get('session_id')
             )
             
             self.db.add(note)

@@ -180,12 +180,19 @@ def execute_productivity_tool(
     tool_name: str,
     user_id: int,
     params: Dict[str, Any],
-    session_factory=None
+    session_factory=None,
+    session_id: Optional[int] = None
 ) -> Optional[Dict[str, Any]]:
-    """Executes a productivity tool and returns a result dict, or None if not handled."""
+    """Executes a productivity tool and returns a result dict, or None if not handled.
+
+    session_id is the originating chat_sessions.id (if any) - not a tool
+    parameter the LLM supplies, but injected by the caller from the actual
+    request context, the same way user_id already is. Only create_note uses
+    it today (see Note.session_id); every other tool ignores it.
+    """
     sf = session_factory or SessionLocal
     if tool_name == "create_note":
-        return _execute_create_note(user_id, params, sf)
+        return _execute_create_note(user_id, params, sf, session_id)
     elif tool_name == "list_notes":
         return _execute_list_notes(user_id, params, sf)
     elif tool_name == "create_task":
@@ -205,7 +212,9 @@ def execute_productivity_tool(
     return None
 
 
-def _execute_create_note(user_id: int, params: Dict[str, Any], session_factory) -> Dict[str, Any]:
+def _execute_create_note(
+    user_id: int, params: Dict[str, Any], session_factory, session_id: Optional[int] = None
+) -> Dict[str, Any]:
     title = (params.get("title") or "").strip()
     content = (params.get("content") or "").strip()
     if not title:
@@ -227,6 +236,7 @@ def _execute_create_note(user_id: int, params: Dict[str, Any], session_factory) 
             category=category,
             tags=tags,
             parent_id=parent_id,
+            session_id=session_id,
             is_pinned=False,
             is_archived=False
         )

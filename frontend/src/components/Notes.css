@@ -521,6 +521,21 @@
   font-size: 0.8rem;
 }
 
+.note-origin-chat-link {
+  background: none;
+  border: none;
+  color: #9f7aea;
+  font-size: 0.78rem;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.note-origin-chat-link:hover {
+  color: #c084fc;
+  text-decoration: underline;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .notes-header {

@@ -169,6 +169,7 @@ async def stream_chat(
             elif action_intent == 'create_note':
                 details = intent_detector.extract_note_details(request.message)
                 details['user_id'] = current_user.id
+                details['session_id'] = request.session_id
                 action_result = await executor.execute_create_note(details)
         elif action_intent.startswith('list_'):
             if action_intent == 'list_tasks':

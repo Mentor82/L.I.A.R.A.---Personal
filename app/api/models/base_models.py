@@ -123,6 +123,11 @@ class Note(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     parent_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)  # Hierarchie
+    # Optionaler Bezug zum Ursprungschat, falls die Notiz vom create_note-Tool
+    # aus einer Konversation heraus angelegt wurde (manuell erstellte Notizen
+    # bleiben NULL). SET NULL statt CASCADE: eine gelöschte Chat-Session soll
+    # nie die davon erzeugte Notiz mitreißen, nur den Verweis verwaisen lassen.
+    session_id = Column(Integer, ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
     category = Column(String(100), nullable=True)

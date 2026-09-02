@@ -250,7 +250,7 @@ class ToolExecutor:
             return self._execute_workspace_propose_dependency(user_id, session_id, parameters)
 
         # 📅 Productivity & Memory Tools (Notes, Tasks, Calendar, 4D Memory)
-        prod_res = execute_productivity_tool(tool_def.name, user_id, parameters)
+        prod_res = execute_productivity_tool(tool_def.name, user_id, parameters, session_id=session_id)
         if prod_res is not None:
             return prod_res
 

@@ -38,6 +38,10 @@ class NoteUpdate(BaseModel):
 class NoteResponse(NoteBase):
     """Schema for note response."""
     id: int
+    # Only ever set server-side by the create_note tool when called from
+    # within a chat - never client-provided, so it's on NoteResponse only,
+    # not NoteBase/NoteCreate/NoteUpdate.
+    session_id: Optional[int] = None
     is_pinned: bool
     is_archived: bool
     is_expanded: bool
