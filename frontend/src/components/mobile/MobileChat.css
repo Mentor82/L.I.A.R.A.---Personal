@@ -87,7 +87,17 @@
   left: 50%;
   transform: translateX(-50%);
   width: 220px;
-  background: var(--bg-card, #13141f);
+  /* --bg-card is a subtle ~5% tint meant for cards sitting on an opaque
+     page background - this dropdown floats directly over the scrolling
+     chat feed with nothing solid behind it, so that tint let message
+     text underneath bleed through and overlap the model names.
+     --bg-dropdown has the same problem in dark mode (only the light
+     theme's is solid). Frosted-glass instead of either: opaque enough
+     that nothing underneath reads as text, blurred rather than flat
+     solid so it still keeps the app's translucent look. */
+  background: rgba(20, 28, 46, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(0, 229, 255, 0.3);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
@@ -139,7 +149,10 @@
   top: calc(100% + 0.4rem);
   right: 0;
   width: 190px;
-  background: var(--bg-card, #13141f);
+  /* Same fix as .mobile-model-dropdown above - see comment there. */
+  background: rgba(20, 28, 46, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
