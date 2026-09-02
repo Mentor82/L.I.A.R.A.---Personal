@@ -92,12 +92,11 @@
      chat feed with nothing solid behind it, so that tint let message
      text underneath bleed through and overlap the model names.
      --bg-dropdown has the same problem in dark mode (only the light
-     theme's is solid). Frosted-glass instead of either: opaque enough
-     that nothing underneath reads as text, blurred rather than flat
-     solid so it still keeps the app's translucent look. */
+     theme's is solid). 75% opacity keeps a bit of the app's translucent
+     look while staying legible - confirmed live, no blur needed (and
+     backdrop-filter's vendor-prefix handling isn't reliable through this
+     project's minifier target list anyway). */
   background: rgba(20, 28, 46, 0.75);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(0, 229, 255, 0.3);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
@@ -151,8 +150,6 @@
   width: 190px;
   /* Same fix as .mobile-model-dropdown above - see comment there. */
   background: rgba(20, 28, 46, 0.75);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
