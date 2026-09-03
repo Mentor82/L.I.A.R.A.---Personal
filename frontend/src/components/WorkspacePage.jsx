@@ -13,6 +13,7 @@ import DiffView from './DiffView';
 import MarkdownMessage from './MarkdownMessage';
 import AgentDrawer from './AgentDrawer';
 import WorkspaceTerminal from './WorkspaceTerminal';
+import WorkspacePreview from './WorkspacePreview';
 import EditorPane from './EditorPane';
 import './WorkspacePage.css';
 
@@ -752,10 +753,15 @@ function WorkspacePage() {
   // (like a normal IDE terminal), not in the right-hand panel column, so it
   // doesn't need to fight Agent-Chat/Agent Hub for a slot.
   const [shellOpen, setShellOpen] = useState(false);
+  // Live Preview ("Browser im Browser", WorkspacePreview) - docks the same
+  // way as the Terminal, as an independent sibling panel rather than a tab
+  // inside it, so either can be open alone or both stacked at once.
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const toggleAgentPanel = () => setAgentPanelOpen((v) => !v);
   const toggleAgentDrawer = () => setAgentDrawerOpen((v) => !v);
   const toggleShell = () => setShellOpen((v) => !v);
+  const togglePreview = () => setPreviewOpen((v) => !v);
 
   useEffect(() => {
     (async () => {
@@ -1383,6 +1389,13 @@ function WorkspacePage() {
           >
             💻
           </button>
+          <button
+            className={`workspace-icon-btn ${previewOpen ? 'active' : ''}`}
+            title={previewOpen ? 'Live Preview ausblenden' : 'Live Preview einblenden'}
+            onClick={togglePreview}
+          >
+            🌐
+          </button>
           <div className="workspace-env-status">
             <button
               className="workspace-env-chip"
@@ -1693,6 +1706,10 @@ function WorkspacePage() {
         {shellOpen && sessionId && (
           <WorkspaceTerminal sessionId={sessionId} onClose={() => setShellOpen(false)} />
         )}
+
+        {previewOpen && sessionId && (
+          <WorkspacePreview sessionId={sessionId} onClose={() => setPreviewOpen(false)} />
+        )}
         </div>
 
         {agentPanelOpen && (
@@ -1741,6 +1758,13 @@ function WorkspacePage() {
             title="Sandboxed Terminal & Prozesse ein-/ausblenden"
           >
             💻 Terminal {shellOpen ? '▾' : '▴'}
+          </button>
+          <button
+            className={`status-item terminal-tag ${previewOpen ? 'active' : ''}`}
+            onClick={togglePreview}
+            title="Live Preview ein-/ausblenden"
+          >
+            🌐 Preview {previewOpen ? '▾' : '▴'}
           </button>
           <button
             className={`status-item agent-tag ${agentDrawerOpen ? 'active' : ''}`}

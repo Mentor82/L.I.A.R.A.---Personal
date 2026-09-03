@@ -746,6 +746,25 @@ export const workspaceAPI = {
       method: 'POST',
     });
   },
+
+  // Live Preview ("Browser im Browser") for a dev server started in the
+  // Workspace terminal - see api/routers/workspace_preview.py. startPreview
+  // also causes the backend to set a short-lived, path-scoped cookie
+  // (Set-Cookie via this same-origin fetch, credentials default to
+  // same-origin so the browser keeps it) that the later <iframe src=...>
+  // navigation authenticates with automatically - no token appears in the
+  // returned preview_url or anywhere else in the DOM.
+  async startPreview(sessionId, insidePort) {
+    return apiFetch(`/workspace/sessions/${sessionId}/preview/start?inside_port=${insidePort}`, {
+      method: 'POST',
+    });
+  },
+
+  async stopPreview(sessionId) {
+    return apiFetch(`/workspace/sessions/${sessionId}/preview/stop`, {
+      method: 'POST',
+    });
+  },
 };
 
 /**

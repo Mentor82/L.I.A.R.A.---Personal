@@ -50,19 +50,21 @@ different worker than the one that started its daemon.
 import asyncio
 import logging
 import os
+import secrets
 import subprocess
 import time
 from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.dependencies import require_active_user
+from core.security import verify_access_token
 from api.models.base_models import User
 from services.redis_service import get_redis_service
 
@@ -76,6 +78,22 @@ PIDFILE_DIR = Path("/opt/liara/preview_daemons")  # created here (mirko-owned, l
 REDIS_KEY_PREFIX = "workspace_preview:"
 REDIS_TTL_SECONDS = 25 * 60  # slightly longer than preview_daemon.py's own 20min idle exit
 DAEMON_STARTUP_TIMEOUT = 5.0
+
+# An <iframe src="..."> load, and every subresource request the embedded
+# page then makes on its own (JS, CSS, its own XHR/fetch calls, HMR
+# websocket) can't carry a custom Authorization header - only whatever the
+# browser attaches automatically. core/dependencies.py's get_current_user_ws
+# already rules out a query-string token for exactly this class of route
+# ("far more likely to leak into reverse-proxy/access logs, browser
+# diagnostics, or monitoring than a protocol value") - and a query token
+# would only cover the *first* request anyway, since the dev server's own
+# HTML/JS has no reason to propagate it onto every asset URL it emits. A
+# short-lived, narrowly-scoped cookie (opaque token, not the user's real
+# JWT) solves both: browsers attach cookies to every same-path request
+# automatically, and even if it leaked, it grants nothing but this one
+# session's preview iframe for a few minutes.
+PREVIEW_COOKIE_NAME = "liara_ws_preview"
+PREVIEW_TOKEN_REDIS_PREFIX = "workspace_preview_token:"
 
 # Hop-by-hop headers per RFC 7230 6.1 - never forwarded either direction,
 # same list any reverse proxy needs to strip.
@@ -91,6 +109,29 @@ def _session_owned(db, session_id: int, user_id: int) -> bool:
         {"session_id": session_id, "user_id": user_id},
     ).first()
     return row is not None
+
+
+def _authorize_preview_request(request: Request, session_id: int, db: Session) -> None:
+    """Raises HTTPException(401/403) unless this request is allowed to load
+    session_id's preview content - via a real Authorization Bearer header
+    (e.g. a direct API call/test) or the short-lived preview cookie
+    start_preview() sets (the normal iframe path - see PREVIEW_COOKIE_NAME's
+    module-level comment for why a cookie and not a query token)."""
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        payload = verify_access_token(auth_header[7:].strip())
+        user_id = payload.get("user_id") if payload else None
+        if user_id is not None and _session_owned(db, session_id, user_id):
+            return
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+
+    token = request.cookies.get(PREVIEW_COOKIE_NAME)
+    if token:
+        entry = get_redis_service().get_cached_json(f"{PREVIEW_TOKEN_REDIS_PREFIX}{token}")
+        if entry and entry.get("session_id") == session_id:
+            return
+
+    raise HTTPException(status_code=401, detail="Keine gültige Preview-Authentifizierung - /preview/start erneut aufrufen.")
 
 
 def _find_session_shell_sudo_pid(session_id: int) -> Optional[int]:
@@ -217,6 +258,7 @@ async def _get_or_start_daemon(session_id: int, inside_port: int) -> int:
 @router.post("/sessions/{session_id}/preview/start")
 async def start_preview(
     session_id: int,
+    response: Response,
     inside_port: int = 5173,
     current_user: User = Depends(require_active_user),
     db: Session = Depends(get_db),
@@ -224,7 +266,25 @@ async def start_preview(
     if not _session_owned(db, session_id, current_user.id):
         raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
     local_port = await _get_or_start_daemon(session_id, inside_port)
-    return {"ok": True, "preview_url": f"/workspace/preview/{session_id}/", "inside_port": inside_port, "local_port": local_port}
+
+    # New opaque token every start (not reused across sessions/calls) -
+    # scoped in Redis to this exact session_id, so it authorizes nothing
+    # else. Cookie path is the proxy route's own prefix only, not "/", so it
+    # never gets attached to unrelated API calls.
+    token = secrets.token_urlsafe(24)
+    get_redis_service().cache_json(
+        f"{PREVIEW_TOKEN_REDIS_PREFIX}{token}", {"session_id": session_id}, ttl=REDIS_TTL_SECONDS
+    )
+    response.set_cookie(
+        key=PREVIEW_COOKIE_NAME,
+        value=token,
+        max_age=REDIS_TTL_SECONDS,
+        path=f"/api/workspace/preview/{session_id}/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return {"ok": True, "preview_url": f"/api/workspace/preview/{session_id}/", "inside_port": inside_port, "local_port": local_port}
 
 
 @router.post("/sessions/{session_id}/preview/stop")
@@ -252,11 +312,14 @@ async def proxy_preview(
     session_id: int,
     path: str,
     request: Request,
-    current_user: User = Depends(require_active_user),
     db: Session = Depends(get_db),
 ):
-    if not _session_owned(db, session_id, current_user.id):
-        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+    # Deliberately not Depends(require_active_user) here - see
+    # _authorize_preview_request's own docstring. This route is the one
+    # actually loaded *inside* the iframe, including every subresource
+    # request the embedded page makes on its own, none of which can carry a
+    # custom Authorization header.
+    _authorize_preview_request(request, session_id, db)
 
     redis = get_redis_service()
     cache_key = f"{REDIS_KEY_PREFIX}{session_id}"
