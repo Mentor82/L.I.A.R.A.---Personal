@@ -546,7 +546,8 @@ def store_message_with_concepts(
     content: str,
     role: str,
     timestamp: Optional[datetime] = None,
-    session_id: Optional[int] = None
+    session_id: Optional[int] = None,
+    source_type: Optional[str] = None
 ) -> Dict:
     """
     Speichert Message in Neo4j mit auto-extrahierten Concepts
@@ -560,12 +561,28 @@ def store_message_with_concepts(
         session_id: PostgreSQL chat_sessions.id - lets later queries (e.g.
             "find the last assistant reply in this conversation") scope by
             the actual conversation instead of across the whole user
+        source_type: 'tool_result' | 'user_statement' | 'assistant_reply' -
+            drives the starting epistemic_state/confidence (see
+            memory_verification.py's SOURCE_TYPE_TO_EPISTEMIC_STATE /
+            EPISTEMIC_STATE_CONFIDENCE - naming aligned with the sibling
+            LIARA repo's ADR-007 "Epistemic Subgraph"). Defaults to deriving from `role` when not given
+            explicitly - a tool_result caller must pass it, since there's no
+            way to infer "this text came from a verified tool call" from
+            role/content alone.
 
     Returns:
         Dict mit Statistiken
     """
     if timestamp is None:
         timestamp = datetime.utcnow()
+
+    from services.memory_verification import (
+        classify_source_type, initial_confidence_for, epistemic_state_for
+    )
+
+    resolved_source_type = source_type or classify_source_type(role)
+    confidence = initial_confidence_for(resolved_source_type)
+    epistemic_state = epistemic_state_for(resolved_source_type).value
 
     neo4j = get_neo4j_service()
     embedding_service = get_embedding_service()
@@ -586,6 +603,15 @@ def store_message_with_concepts(
         # retry finds the existing node, sets nothing again, and the MERGE
         # relationship below is a no-op - the whole call now converges to
         # the same state instead of failing.
+        #
+        # source_type/confidence/valid_from/valid_until (bi-temporal, Zep-
+        # pattern): a superseded memory is never deleted, only invalidated
+        # (valid_until set) with a SUPERSEDES edge to whatever replaced it -
+        # see invalidate_message()/supersede_message() below. valid_until
+        # starts null (still valid); confidence starts at the source's trust
+        # level and can be adjusted later (contradiction penalty, explicit
+        # correction) without changing what's on record about where the
+        # memory originally came from.
         session.run("""
             MATCH (u:User {user_id: $user_id})
             MERGE (m:Message {user_id: $user_id, message_id: $message_id})
@@ -594,7 +620,13 @@ def store_message_with_concepts(
                 m.role = $role,
                 m.session_id = $session_id,
                 m.timestamp = datetime($timestamp),
-                m.created_at = datetime()
+                m.created_at = datetime(),
+                m.source_type = $source_type,
+                m.epistemic_state = $epistemic_state,
+                m.confidence = $confidence,
+                m.valid_from = datetime($timestamp),
+                m.valid_until = null,
+                m.superseded_by = null
             MERGE (u)-[:SENT]->(m)
         """,
             user_id=user_id,
@@ -602,7 +634,10 @@ def store_message_with_concepts(
             content=content[:500],
             role=role,
             session_id=session_id,
-            timestamp=timestamp.isoformat()
+            timestamp=timestamp.isoformat(),
+            source_type=resolved_source_type,
+            epistemic_state=epistemic_state,
+            confidence=confidence
         )
     
     # 2. Concepts extrahieren
@@ -740,21 +775,34 @@ def get_relevant_context(
     context_items = []
     for concept_item in top_concepts:
         with neo4j.driver.session() as session:
+            # valid_until IS NOT NULL means a SUPERSEDES edge invalidated this
+            # message (see supersede_message() below) - it stays in the graph
+            # for the audit trail (bi-temporal, Zep-pattern) but must not be
+            # surfaced as current context anymore. Old Message nodes from
+            # before the epistemic-state migration have valid_until = NULL
+            # (never set), so they pass this filter unaffected - no backfill
+            # needed for this query to be safe, only to have accurate
+            # confidence/epistemic_state on them (see migrate_legacy_messages()).
             result = session.run("""
                 MATCH (c:Concept {text: $concept, user_id: $user_id})<-[:CONTAINS]-(m:Message)
-                RETURN m.message_id as message_id, m.content as content, 
-                       m.role as role, m.timestamp as timestamp
+                WHERE m.valid_until IS NULL
+                RETURN m.message_id as message_id, m.content as content,
+                       m.role as role, m.timestamp as timestamp,
+                       coalesce(m.confidence, 0.5) as confidence,
+                       coalesce(m.epistemic_state, 'INFERENCE') as epistemic_state
                 ORDER BY m.timestamp DESC
                 LIMIT 3
             """, concept=concept_item['concept'], user_id=user_id)
-            
+
             messages = []
             for record in result:
                 messages.append({
                     'message_id': record['message_id'],
                     'content': record['content'],
                     'role': record['role'],
-                    'timestamp': str(record['timestamp'])
+                    'timestamp': str(record['timestamp']),
+                    'confidence': record['confidence'],
+                    'epistemic_state': record['epistemic_state']
                 })
             
             context_items.append({
@@ -766,6 +814,205 @@ def get_relevant_context(
     
     logger.info(f"Found {len(context_items)} relevant concepts for context injection")
     return context_items
+
+
+def supersede_message(
+    user_id: int,
+    old_message_id: int,
+    new_message_id: int,
+    reason: str = ""
+) -> bool:
+    """
+    Invalidiert eine bestehende Erinnerung zugunsten einer neueren, besser
+    belegten - bi-temporal (Zep-Pattern): der alte Message-Knoten bleibt
+    erhalten (Audit-Trail), wird aber nicht mehr als aktueller Stand
+    zurückgegeben (get_relevant_context() filtert per valid_until IS NULL).
+
+    Für den Fall, dass die neue, bessere Erinnerung selbst als Message-Knoten
+    existiert (z.B. eine neue, korrekte Assistant-Antwort im selben Thema).
+    Trigger a (tool_executor.py, automatischer Tool-Widerspruch) hat dagegen
+    keinen neuen Message-Knoten zur Hand - dort ist der Tool-Call selbst der
+    Beleg, ohne eigenen Message-Eintrag - und ruft daher stattdessen
+    invalidate_message(..., hard=True) auf (siehe dort).
+
+    Legt eine (new)-[:SUPERSEDES]->(old) Kante an (Relation-Name aus
+    memory_verification.MemoryRelation, deckungsgleich mit ADR-007's
+    EvolutionRelation.SUPERSEDES im Schwester-Repo).
+    """
+    from services.memory_verification import EpistemicState, MemoryRelation
+
+    neo4j = get_neo4j_service()
+    with neo4j.driver.session() as session:
+        result = session.run(f"""
+            MATCH (old:Message {{user_id: $user_id, message_id: $old_message_id}})
+            MATCH (new:Message {{user_id: $user_id, message_id: $new_message_id}})
+            SET old.valid_until = datetime(),
+                old.superseded_by = $new_message_id,
+                old.epistemic_state = $superseded_state
+            MERGE (new)-[r:{MemoryRelation.SUPERSEDES.value}]->(old)
+            ON CREATE SET r.reason = $reason, r.created_at = datetime()
+            RETURN old.message_id as invalidated
+        """,
+            user_id=user_id,
+            old_message_id=old_message_id,
+            new_message_id=new_message_id,
+            superseded_state=EpistemicState.SUPERSEDED.value,
+            reason=reason
+        )
+        invalidated = result.single()
+
+    if invalidated:
+        logger.info(
+            f"Message {old_message_id} superseded by {new_message_id} "
+            f"for user {user_id} ({reason or 'no reason given'})"
+        )
+        return True
+    logger.warning(
+        f"supersede_message: old={old_message_id} or new={new_message_id} "
+        f"not found for user {user_id}"
+    )
+    return False
+
+
+def invalidate_message(
+    user_id: int,
+    message_id: int,
+    reason: str = "",
+    contradicting_message_id: Optional[int] = None,
+    hard: bool = False
+) -> bool:
+    """
+    Markiert eine Erinnerung als widerlegt (CONTRADICTED), ohne dass es
+    zwingend einen Ersatz-Message-Knoten gibt (anders als supersede_message).
+    Für Trigger b (Nutzer-Widerspruch ohne nachprüfbaren Tool-Call - reine,
+    weiche Konfidenz-Abwertung statt hartem Invalidieren) UND für den Fall,
+    dass eine Nachprüfung stattfand, aber kein neuer Message-Knoten das
+    Ergebnis trägt (z.B. eine Tool-Antwort, die nicht selbst gespeichert
+    wird). Setzt confidence standardmäßig per UNVERIFIED_CONTRADICTION_PENALTY
+    nur herab statt sie auf 0 zu setzen - BeliefMem-Gedanke: Unsicherheit
+    halten, nicht hart auf falsch springen, solange keine echte Verifikation
+    vorliegt.
+
+    hard=True (Trigger c, bewusstes correct_memory-Kommando): der Nutzer hat
+    die alte Erinnerung nicht nur heuristisch angezweifelt, sondern explizit
+    und eindeutig als falsch benannt - Konfidenz wird direkt auf einen
+    Rest-Wert nahe 0 gesetzt statt nur graduell abgewertet.
+
+    Wenn eine contradicting_message_id vorliegt (z.B. Trigger c, explizite
+    Korrektur mit Beleg), wird zusätzlich eine CONTRADICTS-Kante angelegt.
+    """
+    from services.memory_verification import (
+        EpistemicState, MemoryRelation, UNVERIFIED_CONTRADICTION_PENALTY
+    )
+
+    neo4j = get_neo4j_service()
+    with neo4j.driver.session() as session:
+        if hard:
+            result = session.run("""
+                MATCH (m:Message {user_id: $user_id, message_id: $message_id})
+                SET m.epistemic_state = $contradicted_state,
+                    m.confidence = 0.05
+                RETURN m.message_id as flagged
+            """,
+                user_id=user_id,
+                message_id=message_id,
+                contradicted_state=EpistemicState.CONTRADICTED.value
+            )
+        else:
+            result = session.run("""
+                MATCH (m:Message {user_id: $user_id, message_id: $message_id})
+                SET m.epistemic_state = $contradicted_state,
+                    m.confidence = CASE
+                        WHEN m.confidence IS NULL THEN 0.3
+                        WHEN m.confidence - $penalty < 0.0 THEN 0.0
+                        ELSE m.confidence - $penalty
+                    END
+                RETURN m.message_id as flagged
+            """,
+                user_id=user_id,
+                message_id=message_id,
+                contradicted_state=EpistemicState.CONTRADICTED.value,
+                penalty=UNVERIFIED_CONTRADICTION_PENALTY
+            )
+        flagged = result.single()
+
+        if flagged and contradicting_message_id is not None:
+            session.run(f"""
+                MATCH (a:Message {{user_id: $user_id, message_id: $contradicting_id}})
+                MATCH (b:Message {{user_id: $user_id, message_id: $message_id}})
+                MERGE (a)-[r:{MemoryRelation.CONTRADICTS.value}]->(b)
+                ON CREATE SET r.reason = $reason, r.created_at = datetime()
+            """,
+                user_id=user_id,
+                contradicting_id=contradicting_message_id,
+                message_id=message_id,
+                reason=reason
+            )
+
+    if flagged:
+        logger.info(
+            f"Message {message_id} flagged CONTRADICTED for user {user_id} "
+            f"({reason or 'no reason given'})"
+        )
+        return True
+    logger.warning(f"invalidate_message: message {message_id} not found for user {user_id}")
+    return False
+
+
+def migrate_legacy_messages(user_id: Optional[int] = None, batch_size: int = 500) -> Dict:
+    """
+    Backfill für Message-Knoten von vor der Epistemic-State-Einführung
+    (2026-09-03): setzt source_type/epistemic_state/confidence/valid_from
+    anhand des vorhandenen role-Felds, valid_until bleibt null (weiterhin
+    gültig). Ohne diesen Lauf würden alte Knoten in get_relevant_context()
+    zwar noch auftauchen (valid_until IS NULL trifft auf sie automatisch zu),
+    aber mit den irreführenden Fallback-Werten aus der Abfrage
+    (confidence=0.5, epistemic_state='INFERENCE') statt ihrer tatsächlichen,
+    aus role ableitbaren Einstufung.
+
+    Idempotent - nur Knoten ohne epistemic_state werden angefasst, ein
+    erneuter Lauf ändert nichts mehr.
+    """
+    from services.memory_verification import classify_source_type, initial_confidence_for, epistemic_state_for
+
+    neo4j = get_neo4j_service()
+    user_filter = "AND m.user_id = $user_id" if user_id is not None else ""
+
+    updated = 0
+    with neo4j.driver.session() as session:
+        while True:
+            result = session.run(f"""
+                MATCH (m:Message)
+                WHERE m.epistemic_state IS NULL {user_filter}
+                RETURN m.user_id as user_id, m.message_id as message_id, m.role as role
+                LIMIT $batch_size
+            """, user_id=user_id, batch_size=batch_size)
+            rows = list(result)
+            if not rows:
+                break
+
+            for row in rows:
+                source_type = classify_source_type(row['role'])
+                session.run("""
+                    MATCH (m:Message {user_id: $user_id, message_id: $message_id})
+                    SET m.source_type = coalesce(m.source_type, $source_type),
+                        m.epistemic_state = $epistemic_state,
+                        m.confidence = coalesce(m.confidence, $confidence),
+                        m.valid_from = coalesce(m.valid_from, m.timestamp, datetime())
+                """,
+                    user_id=row['user_id'],
+                    message_id=row['message_id'],
+                    source_type=source_type,
+                    epistemic_state=epistemic_state_for(source_type).value,
+                    confidence=initial_confidence_for(source_type)
+                )
+                updated += 1
+
+            if len(rows) < batch_size:
+                break
+
+    logger.info(f"migrate_legacy_messages: backfilled {updated} Message nodes")
+    return {"updated": updated}
 
 
 def get_user_memory_stats(user_id: int) -> Dict:

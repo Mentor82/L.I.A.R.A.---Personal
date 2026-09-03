@@ -19,6 +19,7 @@ from services.search_broker import get_search_broker
 from services.web_safety.proxy_sandbox import get_proxy_sandbox
 from services import session_workspace
 from services.productivity_tools import execute_productivity_tool
+from services.memory_verification import detect_capability_denial
 
 WORKSPACE_AGENT_TOOLS = (
     "workspace_list_files", "workspace_read_file", "workspace_propose_change",
@@ -154,6 +155,23 @@ class ToolExecutor:
                 )
 
             logger.info("Tool '%s' completed successfully in %dms", tool_call.tool_name, elapsed_ms)
+
+            # Trigger a (memory_verification.py): der Tool-Call ist gerade
+            # erfolgreich durchgelaufen - falls eine frühere KI-Antwort genau
+            # das ("das kann/unterstützt X nicht") verneint hatte, ist dieser
+            # Erfolg selbst der Beleg dafür, dass die alte Verneinung falsch
+            # war. Stärkster der drei Trigger, daher sofortiges hartes
+            # Invalidieren statt nur weicher Abwertung (anders als Trigger b).
+            try:
+                await self._invalidate_contradicted_capability_denials(
+                    tool_def, tool_call.parameters, user_id
+                )
+            except Exception as invalidation_err:
+                logger.warning(
+                    "Trigger-a memory invalidation failed for tool '%s': %s",
+                    tool_call.tool_name, invalidation_err
+                )
+
             return {
                 "success": True,
                 "tool": tool_call.tool_name,
@@ -264,6 +282,50 @@ class ToolExecutor:
         # Fallback to stub function
         else:
             return await tool_def.function(**parameters)
+
+    async def _invalidate_contradicted_capability_denials(
+        self, tool_def: ToolDefinition, parameters: Dict[str, Any], user_id: int
+    ) -> None:
+        """Trigger a: siehe Aufrufstelle oben. Sucht per Embedding-Similarity
+        thematisch passende frühere Assistant-Antworten und invalidiert jede,
+        die eine Fähigkeits-Verneinung enthält - der gerade erfolgreiche
+        Tool-Call widerlegt sie. Query kombiniert Tool-Beschreibung und
+        Parameter-Werte statt nur des Tool-Namens, da Erinnerungen über
+        Concept-Embeddings aus dem tatsächlichen Antworttext gefunden werden,
+        nicht über den rohen internen Tool-Bezeichner.
+        """
+        from services.memory_integration import get_relevant_context, invalidate_message
+
+        param_text = " ".join(str(v) for v in parameters.values() if v)
+        query_text = f"{tool_def.description} {param_text}"[:300]
+        if not query_text.strip():
+            return
+
+        matches = await asyncio.to_thread(
+            get_relevant_context, user_id=user_id, query_text=query_text, limit=5
+        )
+        seen_message_ids = set()
+        for item in matches:
+            for msg in item.get('related_messages', []):
+                mid = msg.get('message_id')
+                if (
+                    mid is not None
+                    and mid not in seen_message_ids
+                    and msg.get('role') == 'assistant'
+                    and msg.get('epistemic_state') != 'CONTRADICTED'
+                    and detect_capability_denial(msg.get('content', ''))
+                ):
+                    seen_message_ids.add(mid)
+                    invalidate_message(
+                        user_id=user_id,
+                        message_id=mid,
+                        reason=f"tool '{tool_def.name}' succeeded, contradicting a prior capability denial",
+                        hard=True
+                    )
+                    logger.info(
+                        "Trigger a: invalidated stale capability-denial message %s for user %s (tool '%s')",
+                        mid, user_id, tool_def.name
+                    )
 
     def _execute_workspace_list(self, user_id: int, session_id: int) -> Dict:
         files = session_workspace.list_session_files(user_id, session_id)

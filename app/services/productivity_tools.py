@@ -13,7 +13,7 @@ from core.database import SessionLocal
 from api.models.base_models import Note, CalendarEvent, Task
 
 try:
-    from services.memory_integration import store_in_4d_memory, get_relevant_context
+    from services.memory_integration import store_in_4d_memory, get_relevant_context, invalidate_message
 except ImportError:
     def store_in_4d_memory(*args, **kwargs):
         pass
@@ -21,13 +21,16 @@ except ImportError:
     def get_relevant_context(*args, **kwargs):
         return []
 
+    def invalidate_message(*args, **kwargs):
+        return False
+
 logger = logging.getLogger(__name__)
 
 PRODUCTIVITY_TOOL_NAMES = (
     "create_note", "list_notes",
     "create_task", "list_tasks", "update_task_status",
     "create_calendar_event", "list_calendar_events",
-    "search_memory", "store_memory"
+    "search_memory", "store_memory", "correct_memory"
 )
 
 
@@ -171,6 +174,29 @@ def register_productivity_tools(registry) -> None:
         privacy_level="low"
     ))
 
+    # Trigger c (memory_verification.py): explizite, bewusst angeforderte
+    # Korrektur - höchste Priorität der drei Verifikations-Trigger, im
+    # Unterschied zu Trigger b (chat_streaming.py's heuristisch erkannter
+    # Nutzer-Widerspruch) hart statt weich, weil hier ein bewusster,
+    # eindeutiger Korrektur-Befehl vorliegt statt nur eines Heuristik-Treffers.
+    registry.register_tool(ToolDefinition(
+        name="correct_memory",
+        description=(
+            "Korrigiert eine falsche/veraltete Erinnerung im 4D-Gedächtnis, wenn der Nutzer "
+            "explizit sagt, dass etwas Gespeichertes falsch war. Sucht die passendste frühere "
+            "Erinnerung zur query, markiert sie als widerlegt (CONTRADICTED) und speichert die "
+            "korrekte Fassung neu."
+        ),
+        category=ToolCategory.MEMORY,
+        parameters=[
+            ToolParameter(name="query", type="string", description="Wonach in der falschen alten Erinnerung gesucht werden soll", required=True),
+            ToolParameter(name="correction", type="string", description="Der korrekte, richtige Inhalt", required=True)
+        ],
+        function=_stub_fn,
+        requires_consent=False,
+        privacy_level="low"
+    ))
+
 
 async def _stub_fn(**kwargs):
     return {"error": "Not implemented"}
@@ -209,6 +235,8 @@ def execute_productivity_tool(
         return _execute_search_memory(user_id, params)
     elif tool_name == "store_memory":
         return _execute_store_memory(user_id, params, sf)
+    elif tool_name == "correct_memory":
+        return _execute_correct_memory(user_id, params, sf)
     return None
 
 
@@ -622,5 +650,59 @@ def _execute_store_memory(user_id: int, params: Dict[str, Any], session_factory)
         "content": content,
         "category": category,
         "message": f"✅ Erinnerung / Fakt erfolgreich im 4D-Gedächtnis gespeichert: \"{content}\""
+    }
+
+
+def _execute_correct_memory(user_id: int, params: Dict[str, Any], session_factory) -> Dict[str, Any]:
+    """Trigger c (memory_verification.py): explizite, bewusste Korrektur.
+
+    Sucht per bestehender Semantik-Suche (dieselbe wie search_memory) nach der
+    zur query passendsten früheren Erinnerung, invalidiert sie hart
+    (epistemic_state=CONTRADICTED, confidence -> nahe 0) und speichert die
+    korrekte Fassung als neue Notiz - derselbe Speicherpfad wie store_memory,
+    damit die Korrektur dauerhaft und durchsuchbar bleibt.
+
+    Absichtlich KEIN neuer :Message-Knoten für die Korrektur (anders als
+    supersede_message's new-Message-Fall): eine synthetische Message-ID aus
+    einem Tool-Aufruf würde in denselben ID-Raum wie echte chat_messages.id
+    schreiben und könnte kollidieren - die Korrektur landet stattdessen im
+    Notizen-Pfad, der einen eigenen, unabhängigen ID-Raum hat.
+    """
+    query = (params.get("query") or "").strip()
+    correction = (params.get("correction") or "").strip()
+    if not query or not correction:
+        return {"error": "Sowohl query (was war falsch) als auch correction (was stimmt) müssen angegeben werden"}
+
+    invalidated_count = 0
+    try:
+        matches = get_relevant_context(user_id=user_id, query_text=query, limit=3)
+        seen_message_ids = set()
+        for item in matches:
+            for msg in item.get('related_messages', []):
+                mid = msg.get('message_id')
+                if mid is None or mid in seen_message_ids:
+                    continue
+                seen_message_ids.add(mid)
+                try:
+                    if invalidate_message(user_id=user_id, message_id=mid, reason=f"correct_memory: {correction[:100]}", hard=True):
+                        invalidated_count += 1
+                except Exception as inv_err:
+                    logger.warning(f"correct_memory: invalidate_message failed for {mid}: {inv_err}")
+    except Exception as e:
+        logger.warning(f"correct_memory: lookup of old memory failed: {e}")
+
+    store_result = _execute_store_memory(
+        user_id, {"content": correction, "category": "correction"}, session_factory
+    )
+
+    return {
+        "success": True,
+        "invalidated_count": invalidated_count,
+        "correction": correction,
+        "note_id": store_result.get("note_id"),
+        "message": (
+            f"✅ {invalidated_count} alte, widersprüchliche Erinnerung(en) als widerlegt markiert. "
+            f"Korrektur gespeichert: \"{correction}\""
+        )
     }
 

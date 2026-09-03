@@ -32,7 +32,8 @@ from liara_engine.nlp.sentiment_analyzer import get_sentiment_analyzer
 from liara_engine.memory.mood_system import MoodSystem
 from services.config_service import get_config_service
 from services.embedding_service import get_embedding_service
-from services.memory_integration import get_relevant_context
+from services.memory_integration import get_relevant_context, invalidate_message
+from services.memory_verification import detect_correction_signal
 from services.neo4j_service import get_neo4j_service
 from services.ollama_capabilities import get_model_num_predict
 from services.redis_service import get_redis_service
@@ -188,7 +189,35 @@ async def stream_chat(
     if user_prefs['memory_enabled']:
         try:
             relevant_concepts = get_relevant_context(user_id=current_user.id, query_text=request.message, limit=5)
+
+            # Trigger b (siehe memory_verification.py): der Nutzer widerspricht
+            # gerade einer früheren Erinnerung, die semantisch zu seiner neuen
+            # Nachricht passt. Kein Blind-Overwrite - re-run des ursprünglichen
+            # Tool-Calls wäre der starke Beleg (Trigger a), ist hier aber nicht
+            # möglich: welcher Tool-Call (falls überhaupt einer) eine gegebene
+            # Assistant-Message erzeugt hat, wird aktuell nicht mitgespeichert.
+            # Ohne diesen Beleg bleibt nur die schwache, weiche Abwertung
+            # (UNVERIFIED_CONTRADICTION_PENALTY) statt eines harten Invalidierens
+            # - BeliefMem-Gedanke: Unsicherheit halten, nicht raten.
             if relevant_concepts:
+                correction = detect_correction_signal(request.message)
+                if correction['is_correction']:
+                    for item in relevant_concepts:
+                        for msg in item['related_messages']:
+                            if msg['role'] == 'assistant' and msg.get('epistemic_state') != 'CONTRADICTED':
+                                try:
+                                    invalidate_message(
+                                        user_id=current_user.id,
+                                        message_id=msg['message_id'],
+                                        reason=f"user correction signal (indicators: {correction['indicators']})"
+                                    )
+                                except Exception as inv_err:
+                                    logger.warning(f"invalidate_message failed: {inv_err}")
+                                break
+                        else:
+                            continue
+                        break
+
                 enhanced_context += "\n\n### Relevante Erinnerungen (basierend auf früheren Gesprächen):\n"
                 for item in relevant_concepts:
                     enhanced_context += f"\n**Konzept: {item['concept']}** (Similarity: {item['similarity']:.2f})\n"
@@ -204,7 +233,12 @@ async def stream_chat(
                         # is explicitly flagged as non-authoritative so the
                         # model re-verifies (e.g. via an actual tool call)
                         # instead of repeating its own possibly-outdated words.
-                        if msg['role'] == 'assistant':
+                        if msg.get('epistemic_state') == 'CONTRADICTED':
+                            enhanced_context += (
+                                f"  - (frühere Antwort, VOM NUTZER BEREITS ALS FALSCH MARKIERT "
+                                f"- NICHT wiederholen, sondern neu prüfen): {msg['content'][:100]}...\n"
+                            )
+                        elif msg['role'] == 'assistant':
                             enhanced_context += (
                                 f"  - (deine eigene frühere Antwort - KEINE verifizierte Tatsache, "
                                 f"insbesondere zu Tool-/System-Fähigkeiten ggf. veraltet; im Zweifel "
