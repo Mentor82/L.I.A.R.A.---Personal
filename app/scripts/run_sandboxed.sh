@@ -27,6 +27,13 @@ if [ -z "${LIARA_SANDBOX_NETNS:-}" ] && command -v unshare >/dev/null 2>&1; then
   exec env LIARA_SANDBOX_NETNS=1 unshare --net --map-root-user -- "$0" "$@"
 fi
 
+# loopback starts DOWN in a fresh unshare --net namespace - see
+# run_sandboxed_shell.sh's matching comment for the full explanation (found
+# live while building the Workspace preview feature). --map-root-user's
+# root is scoped to this namespace only, enough to bring lo up ourselves
+# without touching the isolation from the outside world.
+ip link set dev lo up 2>/dev/null || true
+
 cd "$WORKSPACE_DIR"
 
 # Issue #5 (Workspace consolidation): each session gets its own Python venv

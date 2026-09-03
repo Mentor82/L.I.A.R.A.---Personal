@@ -25,6 +25,18 @@ if [ -z "${LIARA_SANDBOX_NETNS:-}" ] && command -v unshare >/dev/null 2>&1; then
   exec env LIARA_SANDBOX_NETNS=1 unshare --net --map-root-user -- "$0" "$@"
 fi
 
+# unshare --net hands us a fresh net namespace with a loopback interface
+# that exists but starts DOWN - found live 2026-09-03 while building the
+# Workspace preview feature: a dev server bound fine inside the sandbox, but
+# connecting to 127.0.0.1 from *any* process in the same namespace (inside
+# or outside the sandbox) failed with "Network is unreachable", because
+# loopback traffic itself doesn't route until `lo` is up - not specific to
+# the preview bridge. --map-root-user makes us root *inside this new
+# namespace only* (no host-level privilege gained), which is exactly enough
+# to bring lo up ourselves. Isolation from the outside world is unaffected -
+# this only makes 127.0.0.1 *within* the sandbox's own namespace usable.
+ip link set dev lo up 2>/dev/null || true
+
 cd "$WORKSPACE_DIR"
 
 # shellcheck source=_ensure_session_venv.sh
