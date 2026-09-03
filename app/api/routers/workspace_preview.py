@@ -1,0 +1,292 @@
+"""
+Workspace Live Preview - "Browser im Browser" for the sandboxed Workspace
+terminal (workspace_terminal.py). Lets a dev server started inside the
+sandbox (npm run dev, vite, python3 -m http.server, ...) be embedded as an
+iframe in the frontend, even though that server's socket lives inside the
+sandbox's own isolated network namespace and is otherwise unreachable.
+
+Layering (see scripts/preview_daemon.py's own docstring for the full
+reasoning on *why* it's split this way):
+  1. scripts/preview_daemon.py (root, sudoers-whitelisted) - the ONLY
+     privileged piece. Relays raw TCP bytes between a normal localhost
+     socket in the host namespace and 127.0.0.1:<inside_port> inside the
+     target sandbox process's namespace. Nothing HTTP-aware in there at all.
+  2. This router (unprivileged, runs as the backend's own OS user) - finds
+     the session's sandbox PID, starts/stops that daemon via sudo, and
+     reverse-proxies ordinary HTTP requests to the daemon's local port. All
+     the auth/session-ownership/path logic lives here, in normal, reviewable
+     application code - the privileged script never sees a URL.
+
+Required sudoers rule (added manually via `sudo visudo` - NOT something
+this codebase or update.sh ever writes to /etc/sudoers.d itself, same as
+the existing liara-runner rule):
+
+    mirko ALL=(root) NOPASSWD: /opt/liara/venv314/bin/python3 /opt/liara/app/scripts/preview_daemon.py *
+
+(Replace `mirko` with whatever OS user actually runs the gunicorn workers,
+and the venv path with the real interpreter path, on the target host.)
+Sudoers can only pin the *script path*, not validate the arguments that
+follow `*` - that validation happens inside preview_daemon.py itself
+(_is_valid_runner_pid, port range checks), the same division of
+responsibility run_sandboxed.sh already uses.
+
+Per-session state (which local port a running daemon is listening on) is
+kept in Redis, not an in-process dict - gunicorn runs multiple worker
+processes, and the proxy request for a given session can land on a
+different worker than the one that started its daemon.
+"""
+import asyncio
+import logging
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Optional
+
+import httpx
+import psutil
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from core.database import get_db
+from core.dependencies import require_active_user
+from api.models.base_models import User
+from services.redis_service import get_redis_service
+
+router = APIRouter(prefix="/workspace", tags=["Workspace Preview"])
+logger = logging.getLogger(__name__)
+
+RUNNER_USER = "liara-runner"
+DAEMON_SCRIPT = str(Path(__file__).resolve().parent.parent.parent / "scripts" / "preview_daemon.py")
+PYTHON_BIN = os.sys.executable
+PIDFILE_DIR = Path("/opt/liara/preview_daemons")  # created here (mirko-owned, like the rest of /opt/liara); root writes pidfiles into it fine regardless of ownership
+
+REDIS_KEY_PREFIX = "workspace_preview:"
+REDIS_TTL_SECONDS = 25 * 60  # slightly longer than preview_daemon.py's own 20min idle exit
+DAEMON_STARTUP_TIMEOUT = 5.0
+
+# Hop-by-hop headers per RFC 7230 6.1 - never forwarded either direction,
+# same list any reverse proxy needs to strip.
+HOP_BY_HOP_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailer", "transfer-encoding", "upgrade", "content-length", "host",
+}
+
+
+def _session_owned(db, session_id: int, user_id: int) -> bool:
+    row = db.execute(
+        text("SELECT id FROM chat_sessions WHERE id = :session_id AND user_id = :user_id"),
+        {"session_id": session_id, "user_id": user_id},
+    ).first()
+    return row is not None
+
+
+def _find_session_runner_pid(user_id: int, session_id: int) -> Optional[int]:
+    """Same matching approach as workspace_terminal.py's process listing:
+    the most recent liara-runner process whose cwd/cmdline shows it belongs
+    to this session's workspace dir. Picks the newest match (highest
+    create_time) since a session can have had several shells over time and
+    only the current one's netns is worth bridging into."""
+    session_marker = f"/session_files/{user_id}/{session_id}"
+    best_pid, best_created = None, -1.0
+    for p in psutil.process_iter(['pid', 'username', 'cmdline', 'create_time']):
+        try:
+            info = p.info
+            if info.get('username') != RUNNER_USER:
+                continue
+            cmd_str = " ".join(info.get('cmdline') or [])
+            matched = session_marker in cmd_str
+            if not matched:
+                try:
+                    matched = session_marker in p.cwd()
+                except (psutil.AccessDenied, psutil.NoSuchProcess):
+                    pass
+            if matched and (info.get('create_time') or 0) > best_created:
+                best_pid, best_created = info['pid'], info['create_time']
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return best_pid
+
+
+def _pick_free_local_port() -> int:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+async def _wait_until_connectable(port: int, timeout: float) -> bool:
+    import socket
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", port), timeout=0.5
+            )
+            writer.close()
+            return True
+        except (ConnectionRefusedError, OSError, asyncio.TimeoutError):
+            await asyncio.sleep(0.2)
+    return False
+
+
+async def _start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
+    """Always starts a fresh preview_daemon.py and returns its local port -
+    called both for a first-ever preview and to replace a stale/dead one
+    (see proxy_preview's retry-on-ConnectError below). No liveness probing
+    of the *old* daemon here on purpose: signalling a root-owned process
+    from this unprivileged worker isn't possible (PermissionError either
+    way, alive or dead), so "is it still there" is answered empirically by
+    whoever actually tries to connect to it, not guessed at up front."""
+    target_pid = _find_session_runner_pid(user_id, session_id)
+    if target_pid is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Keine laufende Workspace-Shell für diese Session gefunden - Terminal-Tab öffnen und den Dev-Server starten, bevor die Preview geladen wird."
+        )
+
+    local_port = _pick_free_local_port()
+    # mkdir here (unprivileged mirko), not inside preview_daemon.py: this
+    # process needs the directory to exist too, to open logfile below,
+    # before the root-run daemon ever starts - and since /opt/liara is
+    # already mirko-owned (same as every other path under it this backend
+    # writes to), no sudo/chmod dance is needed for the directory itself,
+    # only for the daemon binary's own privileged actions later.
+    PIDFILE_DIR.mkdir(parents=True, exist_ok=True)
+    pidfile = str(PIDFILE_DIR / f"{session_id}.pid")
+    logfile = str(PIDFILE_DIR / f"{session_id}.log")
+
+    # stdout/stderr go to a logfile, not a PIPE this process would need to
+    # keep draining for the daemon's entire (up to 20min idle-timeout)
+    # lifetime - the daemon outlives this request by design.
+    with open(logfile, "ab") as log_f:
+        proc = await asyncio.create_subprocess_exec(
+            "sudo", "-n", PYTHON_BIN, DAEMON_SCRIPT, "start",
+            str(target_pid), str(inside_port), str(local_port), pidfile,
+            stdout=log_f, stderr=log_f,
+        )
+
+    if not await _wait_until_connectable(local_port, DAEMON_STARTUP_TIMEOUT):
+        # Either the sudoers rule is missing/wrong, or the target process
+        # died, or nothing's listening on inside_port yet inside the
+        # sandbox - all indistinguishable from here, so surface the logfile
+        # tail instead of guessing.
+        tail = ""
+        try:
+            tail = Path(logfile).read_text(errors="replace")[-500:]
+        except OSError:
+            pass
+        logger.error(f"preview_daemon.py did not become connectable for session {session_id}: {tail}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Preview-Daemon nicht erreichbar geworden (Timeout). {tail}"
+        )
+
+    redis = get_redis_service()
+    redis.cache_json(f"{REDIS_KEY_PREFIX}{session_id}", {
+        "local_port": local_port,
+        "inside_port": inside_port,
+        "pidfile": pidfile,
+        "target_pid": target_pid,
+        "started_at": time.time(),
+    }, ttl=REDIS_TTL_SECONDS)
+    return local_port
+
+
+async def _get_or_start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
+    """Returns the local (host-namespace) port already relaying to
+    <inside_port> for this session, trusting a cached Redis entry as-is
+    (see _start_daemon's docstring for why no liveness check happens here)
+    and starting a fresh preview_daemon.py only if there's no cache entry
+    at all or it points at a different inside_port than requested."""
+    redis = get_redis_service()
+    cached = redis.get_cached_json(f"{REDIS_KEY_PREFIX}{session_id}")
+    if cached and cached.get("inside_port") == inside_port:
+        return cached["local_port"]
+    return await _start_daemon(user_id, session_id, inside_port)
+
+
+@router.post("/sessions/{session_id}/preview/start")
+async def start_preview(
+    session_id: int,
+    inside_port: int = 5173,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    if not _session_owned(db, session_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+    local_port = await _get_or_start_daemon(current_user.id, session_id, inside_port)
+    return {"ok": True, "preview_url": f"/workspace/preview/{session_id}/", "inside_port": inside_port, "local_port": local_port}
+
+
+@router.post("/sessions/{session_id}/preview/stop")
+async def stop_preview(
+    session_id: int,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    if not _session_owned(db, session_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+    redis = get_redis_service()
+    key = f"{REDIS_KEY_PREFIX}{session_id}"
+    cached = redis.get_cached_json(key)
+    if cached:
+        subprocess.run(
+            ["sudo", "-n", PYTHON_BIN, DAEMON_SCRIPT, "stop", cached["pidfile"]],
+            capture_output=True, timeout=5,
+        )
+        redis.client.delete(key)
+    return {"ok": True}
+
+
+@router.api_route("/preview/{session_id}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+async def proxy_preview(
+    session_id: int,
+    path: str,
+    request: Request,
+    current_user: User = Depends(require_active_user),
+    db: Session = Depends(get_db),
+):
+    if not _session_owned(db, session_id, current_user.id):
+        raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
+
+    redis = get_redis_service()
+    cache_key = f"{REDIS_KEY_PREFIX}{session_id}"
+    cached = redis.get_cached_json(cache_key)
+    if not cached:
+        raise HTTPException(status_code=409, detail="Keine aktive Preview für diese Session - erst /preview/start aufrufen.")
+
+    forward_headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}
+    body = await request.body()
+
+    # One retry-with-restart: the cached daemon may have idle-timed-out
+    # (preview_daemon.py's own 20min cutoff) since it was started, in which
+    # case its port is simply refused now - restart it once transparently
+    # instead of making the user manually hit "Start Preview" again for
+    # something that looks, from their side, like it should just still work.
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                upstream = await client.request(
+                    request.method, f"http://127.0.0.1:{cached['local_port']}/{path}",
+                    params=request.query_params, headers=forward_headers, content=body,
+                )
+            break
+        except httpx.ConnectError:
+            if attempt == 2:
+                raise HTTPException(status_code=502, detail="Preview-Server antwortet nicht (läuft der Dev-Server im Workspace-Terminal noch?)")
+            redis.client.delete(cache_key)
+            new_port = await _start_daemon(current_user.id, session_id, cached["inside_port"])
+            cached = {**cached, "local_port": new_port}
+
+    response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}
+    return StreamingResponse(
+        iter([upstream.content]),
+        status_code=upstream.status_code,
+        headers=response_headers,
+        media_type=upstream.headers.get("content-type"),
+    )

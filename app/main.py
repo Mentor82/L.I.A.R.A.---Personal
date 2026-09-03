@@ -10,6 +10,7 @@ from api.routers.chat_sessions import router as chat_sessions_router
 from api.routers.code_exec_router import router as code_exec_router
 from api.routers.workspace_router import router as workspace_router
 from api.routers.workspace_terminal import router as workspace_terminal_router
+from api.routers.workspace_preview import router as workspace_preview_router
 from api.routers.liara_router import router as liara_router
 from api.routers.mood_router import router as mood_router
 from api.routers.sentiment_router import router as sentiment_router
@@ -224,6 +225,7 @@ app.include_router(chat_sessions_router)
 app.include_router(code_exec_router)  # Sandboxed Code Execution (chat "Run" button) + session workspace files
 app.include_router(workspace_router)  # Workspace v1 - file create/save/rename/delete + chat-context selection
 app.include_router(workspace_terminal_router)  # Workspace WebSocket PTY - sandboxed interactive shell per session
+app.include_router(workspace_preview_router)  # Workspace Live Preview - "Browser im Browser" for dev servers started in the sandbox
 app.include_router(liara_router)
 app.include_router(mood_router)
 app.include_router(sentiment_router)  # Live Sentiment Analysis
