@@ -199,10 +199,27 @@ async def stream_chat(
             # Ohne diesen Beleg bleibt nur die schwache, weiche Abwertung
             # (UNVERIFIED_CONTRADICTION_PENALTY) statt eines harten Invalidierens
             # - BeliefMem-Gedanke: Unsicherheit halten, nicht raten.
-            if relevant_concepts:
-                correction = detect_correction_signal(request.message)
-                if correction['is_correction']:
-                    for item in relevant_concepts:
+            correction = detect_correction_signal(request.message)
+            if correction['is_correction']:
+                # Eigener, niedrigerer Schwellwert statt relevant_concepts
+                # (0.78) wiederzuverwenden: Live getestet 2026-09-03 - ein
+                # exaktes Konzept-Wort, das wortwörtlich in einer Korrektur
+                # wiederholt wird ("...der Flauschomat wird sehr wohl
+                # unterstützt"), erreichte gegen die passende alte Erinnerung
+                # nur 0.62 Cosine-Similarity (Wort-Embedding vs. Satz-Embedding
+                # der Anfrage liegen einfach weiter auseinander als zwei
+                # ähnliche Sätze). 0.78 ist für die normale Kontext-Injection
+                # richtig konservativ (siehe GENERIC_LOW_SIGNAL_CONCEPTS-
+                # Kommentar oben), aber hier unnötig streng: eine falsch-
+                # positive Abwertung kostet nur -0.3 Konfidenz (weich,
+                # reversibel), während ein verpasster echter Widerspruch die
+                # Poisoning-Lücke, die dieses ganze System schließen soll,
+                # einfach offen lässt.
+                correction_candidates = get_relevant_context(
+                    user_id=current_user.id, query_text=request.message, limit=5, min_similarity=0.5
+                )
+                if correction_candidates:
+                    for item in correction_candidates:
                         for msg in item['related_messages']:
                             if msg['role'] == 'assistant' and msg.get('epistemic_state') != 'CONTRADICTED':
                                 try:
@@ -218,6 +235,7 @@ async def stream_chat(
                             continue
                         break
 
+            if relevant_concepts:
                 enhanced_context += "\n\n### Relevante Erinnerungen (basierend auf früheren Gesprächen):\n"
                 for item in relevant_concepts:
                     enhanced_context += f"\n**Konzept: {item['concept']}** (Similarity: {item['similarity']:.2f})\n"

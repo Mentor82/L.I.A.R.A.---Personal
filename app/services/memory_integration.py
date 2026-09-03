@@ -724,13 +724,22 @@ def get_relevant_context(
     # 1. Query Embedding generieren
     query_embedding = embedding_service.generate_embedding(query_text)
 
-    # 2. Alle Concepts des Users abrufen
+    # 2. Alle Concepts des Users abrufen - ORDER BY created_at DESC vor dem
+    # LIMIT (Bug gefunden 2026-09-03 beim Live-Test des Korrektur-Triggers,
+    # siehe memory_verification.py): ohne Sortierung liefert Neo4j bei >1000
+    # Concepts eine beliebige Teilmenge zurück, die neu erstellte Concepts
+    # komplett auslassen kann - ein frisch gespeichertes Concept war dadurch
+    # für get_relevant_context() unsichtbar, obwohl seine Similarity zur
+    # Anfrage der höchste Wert aller Concepts gewesen wäre. Neueste Concepts
+    # sind für "was ist gerade relevant" ohnehin die richtige Priorität,
+    # falls die 1000er-Grenze überhaupt greift.
     with neo4j.driver.session() as session:
         result = session.run("""
             MATCH (c:Concept {user_id: $user_id})
             WHERE c.embedding IS NOT NULL
             RETURN c.text as concept, c.embedding as embedding,
                    c.mention_count as mentions, c.created_at as created_at
+            ORDER BY c.created_at DESC
             LIMIT 1000
         """, user_id=user_id)
 
