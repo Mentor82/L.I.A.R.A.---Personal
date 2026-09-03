@@ -120,12 +120,29 @@ class RedisSessionService:
         """Lazy load Redis client"""
         if self._client is None:
             try:
+                # socket_timeout/retry_on_timeout/health_check_interval
+                # (issue found 2026-09-03 via prod logs): without a timeout,
+                # a stalled socket read just hangs; without retry_on_timeout,
+                # a single transient network blip raises straight through to
+                # the ASGI app as an unhandled 500 instead of one silent
+                # retry - observed live as a redis.exceptions.TimeoutError
+                # crashing a request, followed by the gunicorn worker
+                # recycling. health_check_interval makes idle pooled
+                # connections PING themselves periodically so a connection
+                # that went stale (e.g. dropped by the OS/network while
+                # idle) gets detected and replaced before the next real
+                # command hits it, rather than after.
                 self._client = redis.Redis(
                     host=self.host,
                     port=self.port,
                     password=self._password,
                     db=self.db,
-                    decode_responses=True
+                    decode_responses=True,
+                    socket_timeout=5,
+                    socket_connect_timeout=5,
+                    socket_keepalive=True,
+                    retry_on_timeout=True,
+                    health_check_interval=30
                 )
                 # Test connection
                 self._client.ping()
