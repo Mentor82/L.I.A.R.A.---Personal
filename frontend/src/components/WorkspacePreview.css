@@ -1,12 +1,15 @@
 /* "Browser im Browser" - live preview of a dev server running in the
-   Workspace sandbox terminal. Same docked-panel shape as WorkspaceTerminal
-   (workspace-shell-panel) so the two stack consistently when both open. */
+   Workspace sandbox terminal. Rides as a pseudo-tab in the primary editor
+   pane's own tab strip (WorkspacePage.jsx's extraTab/extraTabPane), so it
+   fills the same flex slot a file's .workspace-editor-wrapper normally
+   would - flex:1/min-height:0, not a fixed docked-panel height, matching
+   that same "how EditorPane's content pane grows" convention. */
 
 .workspace-preview-panel {
   width: 100%;
   min-width: 0;
-  flex-shrink: 0;
-  height: 420px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-card);

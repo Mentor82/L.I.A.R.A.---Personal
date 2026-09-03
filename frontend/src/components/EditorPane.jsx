@@ -151,7 +151,19 @@ export function EditorPane({
   sessionId, isSecondary, onSplit, onCloseSplitPane,
   cmTheme, fontSizeExtension, isActivePane,
   pythonVersion, onPythonVersionChange,
+  // Exactly one non-file tab (the Live Preview iframe, see WorkspacePage.jsx)
+  // can ride alongside the file tabs in the primary pane's own strip -
+  // undefined for the split pane, which has no preview concept. extraTabPane
+  // is kept mounted at all times (visibility toggled via CSS, not
+  // conditional rendering) so switching back to a file tab and back doesn't
+  // tear down the iframe/its running preview daemon connection - the same
+  // "keep every instance mounted, toggle display" approach
+  // WorkspaceTerminal.jsx's SingleTerminalInstance already uses for its own
+  // multiple shell tabs.
+  extraTab, extraTabPane,
 }) {
+  const showExtraTab = !!(extraTab && extraTab.active);
+
   return (
     <section className={`workspace-main ${isActivePane ? 'active-pane' : ''}`}>
       {isSecondary && (
@@ -164,74 +176,91 @@ export function EditorPane({
         {tabs.map((t) => (
           <button
             key={t.name}
-            className={`workspace-tab ${activeTabName === t.name ? 'active' : ''}`}
+            className={`workspace-tab ${!showExtraTab && activeTabName === t.name ? 'active' : ''}`}
             onClick={() => onSelectTab(t.name)}
           >
             {t.isImage ? '🖼️ ' : ''}{t.name}{t.dirty ? ' •' : ''}
             <span className="workspace-tab-close" onClick={(e) => { e.stopPropagation(); onCloseTab(t.name); }}>✕</span>
           </button>
         ))}
+        {extraTab && (
+          <button
+            className={`workspace-tab ${showExtraTab ? 'active' : ''}`}
+            onClick={extraTab.onSelect}
+          >
+            {extraTab.label}
+            <span className="workspace-tab-close" onClick={(e) => { e.stopPropagation(); extraTab.onClose(); }}>✕</span>
+          </button>
+        )}
       </div>
 
-      {tabData ? (
-        tabData.isImage ? (
-          <>
-            <ImageViewer
-              src={tabData.imageUrl}
-              filename={tabData.name}
-              size={tabData.size}
-              sessionId={sessionId}
-              onSplit={onSplit}
-              isSecondary={isSecondary}
-            />
-            {runHistory.length > 0 && (
-              <TerminalPanel history={runHistory} onClear={onClearHistory} sessionId={sessionId} />
-            )}
-          </>
-        ) : (
-          <>
-            <div className="workspace-toolbar">
-              <button className="workspace-btn-secondary" onClick={onSave} disabled={!tabData.dirty}>💾 Speichern</button>
-              <button className="workspace-btn-primary" onClick={onRun} disabled={!activeLang || running}>
-                {running ? 'Läuft…' : '▶ Ausführen'}
-              </button>
-              {activeLang?.runLanguage === 'python' && (
-                <select
-                  className="workspace-runtime-select"
-                  value={pythonVersion || 'python3.14'}
-                  onChange={(e) => onPythonVersionChange && onPythonVersionChange(e.target.value)}
-                  title="Python Sandbox-Version auswählen"
-                >
-                  <option value="python3.14">🐍 Python 3.14 (Standard)</option>
-                  <option value="python3.13">🐍 Python 3.13</option>
-                  <option value="python3.12">🐍 Python 3.12</option>
-                  <option value="python3.11">🐍 Python 3.11</option>
-                </select>
-              )}
-              {!isSecondary && (
-                <button className="workspace-btn-secondary" onClick={onSplit} title="Datei zusätzlich rechts daneben öffnen">🗗 Teilen</button>
-              )}
-            </div>
-            <div className="workspace-editor-wrapper">
-              <CodeMirror
-                value={tabData.content}
-                height="100%"
-                theme={cmTheme}
-                extensions={activeLang ? [activeLang.cm, fontSizeExtension] : [fontSizeExtension]}
-                onChange={onChangeContent}
-                onCreateEditor={onCreateEditor}
-              />
-            </div>
-            <TerminalPanel history={runHistory} onClear={onClearHistory} sessionId={sessionId} />
-          </>
-        )
-      ) : (
-        <div className="workspace-empty">
-          <div className="workspace-empty-icon">📄</div>
-          <p className="workspace-empty-title">Keine Datei geöffnet</p>
-          <p className="workspace-empty-subtitle">Datei aus der Liste öffnen oder eine neue anlegen.</p>
+      {extraTabPane && (
+        <div className="workspace-extra-tab-pane" style={{ display: showExtraTab ? 'contents' : 'none' }}>
+          {extraTabPane}
         </div>
       )}
+
+      <div style={{ display: showExtraTab ? 'none' : 'contents' }}>
+        {tabData ? (
+          tabData.isImage ? (
+            <>
+              <ImageViewer
+                src={tabData.imageUrl}
+                filename={tabData.name}
+                size={tabData.size}
+                sessionId={sessionId}
+                onSplit={onSplit}
+                isSecondary={isSecondary}
+              />
+              {runHistory.length > 0 && (
+                <TerminalPanel history={runHistory} onClear={onClearHistory} sessionId={sessionId} />
+              )}
+            </>
+          ) : (
+            <>
+              <div className="workspace-toolbar">
+                <button className="workspace-btn-secondary" onClick={onSave} disabled={!tabData.dirty}>💾 Speichern</button>
+                <button className="workspace-btn-primary" onClick={onRun} disabled={!activeLang || running}>
+                  {running ? 'Läuft…' : '▶ Ausführen'}
+                </button>
+                {activeLang?.runLanguage === 'python' && (
+                  <select
+                    className="workspace-runtime-select"
+                    value={pythonVersion || 'python3.14'}
+                    onChange={(e) => onPythonVersionChange && onPythonVersionChange(e.target.value)}
+                    title="Python Sandbox-Version auswählen"
+                  >
+                    <option value="python3.14">🐍 Python 3.14 (Standard)</option>
+                    <option value="python3.13">🐍 Python 3.13</option>
+                    <option value="python3.12">🐍 Python 3.12</option>
+                    <option value="python3.11">🐍 Python 3.11</option>
+                  </select>
+                )}
+                {!isSecondary && (
+                  <button className="workspace-btn-secondary" onClick={onSplit} title="Datei zusätzlich rechts daneben öffnen">🗗 Teilen</button>
+                )}
+              </div>
+              <div className="workspace-editor-wrapper">
+                <CodeMirror
+                  value={tabData.content}
+                  height="100%"
+                  theme={cmTheme}
+                  extensions={activeLang ? [activeLang.cm, fontSizeExtension] : [fontSizeExtension]}
+                  onChange={onChangeContent}
+                  onCreateEditor={onCreateEditor}
+                />
+              </div>
+              <TerminalPanel history={runHistory} onClear={onClearHistory} sessionId={sessionId} />
+            </>
+          )
+        ) : (
+          <div className="workspace-empty">
+            <div className="workspace-empty-icon">📄</div>
+            <p className="workspace-empty-title">Keine Datei geöffnet</p>
+            <p className="workspace-empty-subtitle">Datei aus der Liste öffnen oder eine neue anlegen.</p>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

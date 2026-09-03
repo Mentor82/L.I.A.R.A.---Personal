@@ -47,6 +47,12 @@ const FONT_SIZE_PRESETS = [
 ];
 const DEFAULT_FONT_SIZE = 14; // matches the backend column's DEFAULT before a user ever picks a preset
 
+// Sentinel activeTab value for the Live Preview pseudo-tab (WorkspacePreview) -
+// never a real filename (session_workspace.py's path validation wouldn't
+// accept "__"-prefixed segments anyway), so it can't collide with an
+// actually-open file's tab name.
+const PREVIEW_TAB_ID = '__workspace_preview__';
+
 // Same family as code-server/VS Code's own editor.fontFamily convention
 // (a deliberate coding font first, native monospace fallbacks after) -
 // JetBrains Mono/Fira Code are already used for the Terminal and search
@@ -753,15 +759,34 @@ function WorkspacePage() {
   // (like a normal IDE terminal), not in the right-hand panel column, so it
   // doesn't need to fight Agent-Chat/Agent Hub for a slot.
   const [shellOpen, setShellOpen] = useState(false);
-  // Live Preview ("Browser im Browser", WorkspacePreview) - docks the same
-  // way as the Terminal, as an independent sibling panel rather than a tab
-  // inside it, so either can be open alone or both stacked at once.
+  // Live Preview ("Browser im Browser", WorkspacePreview) - rides alongside
+  // the open file tabs in the primary editor pane's own tab strip (see
+  // EditorPane's extraTab/extraTabPane props), not a separate docked panel -
+  // previewOpen just tracks whether that pseudo-tab exists at all;
+  // PREVIEW_TAB_ID is what `activeTab` holds while it's the focused one, so
+  // switching to/from it works through the exact same activeTab state a
+  // real file tab uses. Kept mounted (CSS-hidden, not unmounted) whenever a
+  // file tab is focused instead, so switching back doesn't lose the running
+  // preview's UI state - same reasoning as WorkspaceTerminal.jsx's
+  // per-shell-tab SingleTerminalInstance.
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const toggleAgentPanel = () => setAgentPanelOpen((v) => !v);
   const toggleAgentDrawer = () => setAgentDrawerOpen((v) => !v);
   const toggleShell = () => setShellOpen((v) => !v);
-  const togglePreview = () => setPreviewOpen((v) => !v);
+  const togglePreview = () => {
+    if (previewOpen && activeTab === PREVIEW_TAB_ID) {
+      setPreviewOpen(false);
+      setActiveTab(tabs.length ? tabs[tabs.length - 1].name : null);
+    } else {
+      setPreviewOpen(true);
+      setActiveTab(PREVIEW_TAB_ID);
+    }
+  };
+  const closePreviewTab = () => {
+    setPreviewOpen(false);
+    if (activeTab === PREVIEW_TAB_ID) setActiveTab(tabs.length ? tabs[tabs.length - 1].name : null);
+  };
 
   useEffect(() => {
     (async () => {
@@ -1672,6 +1697,15 @@ function WorkspacePage() {
             isActivePane={!!splitTab && activePane === 'primary'}
             pythonVersion={pythonVersion}
             onPythonVersionChange={handlePythonVersionChange}
+            extraTab={previewOpen ? {
+              label: '🌐 Live Preview',
+              active: activeTab === PREVIEW_TAB_ID,
+              onSelect: () => setActiveTab(PREVIEW_TAB_ID),
+              onClose: closePreviewTab,
+            } : undefined}
+            extraTabPane={previewOpen && sessionId ? (
+              <WorkspacePreview sessionId={sessionId} onClose={closePreviewTab} />
+            ) : undefined}
           />
           {splitTab && (
             <EditorPane
@@ -1705,10 +1739,6 @@ function WorkspacePage() {
 
         {shellOpen && sessionId && (
           <WorkspaceTerminal sessionId={sessionId} onClose={() => setShellOpen(false)} />
-        )}
-
-        {previewOpen && sessionId && (
-          <WorkspacePreview sessionId={sessionId} onClose={() => setPreviewOpen(false)} />
         )}
         </div>
 
