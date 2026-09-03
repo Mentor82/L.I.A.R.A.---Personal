@@ -44,6 +44,10 @@ source "$(dirname "$0")/_ensure_session_venv.sh"
 SESSION_VENV="$(dirname "$WORKSPACE_DIR")/.venv"
 ensure_session_venv "$SESSION_VENV" || true
 
+# shellcheck source=_ensure_session_node_modules.sh
+source "$(dirname "$0")/_ensure_session_node_modules.sh"
+ensure_session_node_modules "$WORKSPACE_DIR" || true
+
 if [ -x "$SESSION_VENV/bin/python3" ]; then
   export PATH="$SESSION_VENV/bin:$PATH"
   export VIRTUAL_ENV="$SESSION_VENV"

@@ -48,6 +48,10 @@ cd "$WORKSPACE_DIR"
 # shellcheck source=_ensure_session_venv.sh
 source "$(dirname "$0")/_ensure_session_venv.sh"
 
+# shellcheck source=_ensure_session_node_modules.sh
+source "$(dirname "$0")/_ensure_session_node_modules.sh"
+ensure_session_node_modules "$WORKSPACE_DIR" || true
+
 PY_VER="3.14"
 if [[ "$LANGUAGE" =~ 3\.([0-9]+) ]]; then
   PY_VER="3.${BASH_REMATCH[1]}"
