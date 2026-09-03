@@ -55,7 +55,16 @@ fi
 export PYTHONPATH="$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
 # Memory/process/file-size caps mirror code_sandbox.py's one-shot limits.
-ulimit -v 1048576   # 1 GiB, matches MEMORY_LIMITS["python"]
+# ulimit -v raised from 1 GiB to 4 GiB (matching run_sandboxed.sh's Julia
+# case) after a live crash found 2026-09-04 while testing the new npm/Konva
+# support: `node` itself won't even start under 1 GiB - V8 reserves a large
+# virtual-address "CodeRange" region during Isolate init regardless of
+# actual heap usage, and a too-tight ulimit -v aborts that reservation with
+# a fatal, uncatchable OOM before any user code runs (confirmed live: fails
+# under 1 GiB, succeeds under 4 GiB). This is *address space*, not real
+# memory pressure - Node/Julia both need this headroom just to boot, unlike
+# Python, which is why only those two need the larger number.
+ulimit -v 4194304   # 4 GiB
 ulimit -u 32
 ulimit -f 204800    # matches MAX_SESSION_FILE (100 MiB), in 512-byte blocks
 

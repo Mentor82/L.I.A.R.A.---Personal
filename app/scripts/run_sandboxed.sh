@@ -118,7 +118,14 @@ case "$LANGUAGE" in
     # separate rule needed. Same network isolation as every other language
     # here (no exceptions) - this is NOT where `pip install` runs; that's
     # workspace_propose_dependency_change's job, via manage_venv.sh.
-    ulimit -v 2097152   # 2 GiB - shell pipelines can chain several processes
+    # Raised from 2 GiB to 4 GiB (matching the julia case just above) after
+    # a live crash found 2026-09-04: `node` won't even start under 2 GiB -
+    # V8 reserves a large virtual-address "CodeRange" during Isolate init
+    # regardless of actual heap usage, confirmed live to need 4 GiB just to
+    # boot (this is address space, not real memory pressure). A bash-mode
+    # script running `node ...` is exactly the npm/Konva support this was
+    # added for.
+    ulimit -v 4194304   # 4 GiB - shell pipelines can chain several processes, node needs the headroom to boot at all
     if [ -x "$SESSION_VENV/bin/python3" ]; then
       export PATH="$SESSION_VENV/bin:$PATH"
       export VIRTUAL_ENV="$SESSION_VENV"
