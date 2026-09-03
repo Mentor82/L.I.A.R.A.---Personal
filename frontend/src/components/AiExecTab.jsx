@@ -147,12 +147,13 @@ function AiExecTab({ sshTarget = null }) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
         ref={scrollRef}
         className="halo-mono"
         style={{
           flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
           padding: 'var(--space-md)',
           display: 'grid',
