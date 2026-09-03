@@ -165,7 +165,7 @@ def _relay_one_connection(conn: socket.socket, target_pid: int, inside_port: int
     proc = subprocess.Popen(
         ["nsenter", f"--net=/proc/{target_pid}/ns/net", "--",
          "python3", "-c", INNER_SCRIPT, str(inside_port)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     conn.setblocking(False)
     os.set_blocking(proc.stdin.fileno(), False)
@@ -198,6 +198,15 @@ def _relay_one_connection(conn: socket.socket, target_pid: int, inside_port: int
                         return
                     conn.sendall(data)
     finally:
+        exit_code = proc.poll()
+        if exit_code is not None and exit_code != 0:
+            try:
+                stderr_tail = proc.stderr.read()
+                print(f"nsenter relay for pid {target_pid} port {inside_port} exited {exit_code}: "
+                      f"{stderr_tail.decode(errors='replace') if stderr_tail else '(no stderr)'}",
+                      file=sys.stderr, flush=True)
+            except Exception:
+                pass
         try:
             proc.kill()
             proc.wait(timeout=2)
