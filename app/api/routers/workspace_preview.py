@@ -153,8 +153,14 @@ async def _start_daemon(session_id: int, inside_port: int) -> int:
 
     # stdout/stderr go to a logfile, not a PIPE this process would need to
     # keep draining for the daemon's entire (up to 20min idle-timeout)
-    # lifetime - the daemon outlives this request by design.
-    with open(logfile, "ab") as log_f:
+    # lifetime - the daemon outlives this request by design. Truncated
+    # ("wb", not "ab") on every fresh start: this same session_id path gets
+    # reused across restarts (idle-timeout, the ConnectError retry below),
+    # and an ever-appended logfile across a long session's lifetime is
+    # exactly the unbounded-growth trap terminal_exec_router.py's _tail()
+    # comment already flags for command output - old runs' logs aren't
+    # useful once a new daemon replaces them anyway.
+    with open(logfile, "wb") as log_f:
         proc = await asyncio.create_subprocess_exec(
             "sudo", "-n", PYTHON_BIN, DAEMON_SCRIPT, "start",
             str(sudo_pid), str(inside_port), str(local_port), pidfile,
@@ -165,10 +171,17 @@ async def _start_daemon(session_id: int, inside_port: int) -> int:
         # Either the sudoers rule is missing/wrong, or the target process
         # died, or nothing's listening on inside_port yet inside the
         # sandbox - all indistinguishable from here, so surface the logfile
-        # tail instead of guessing.
+        # tail instead of guessing. Seeks from the end instead of
+        # read_text()-ing the whole file (same reasoning as
+        # terminal_exec_router.py's own _tail() - a file this code doesn't
+        # itself bound the size of shouldn't ever be loaded in full just to
+        # keep its last 500 bytes).
         tail = ""
         try:
-            tail = Path(logfile).read_text(errors="replace")[-500:]
+            with open(logfile, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 500))
+                tail = f.read().decode("utf-8", errors="replace")
         except OSError:
             pass
         logger.error(f"preview_daemon.py did not become connectable for session {session_id}: {tail}")
