@@ -64,12 +64,18 @@ export PYTHONPATH="$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 # under 1 GiB, succeeds under 4 GiB). This is *address space*, not real
 # memory pressure - Node/Julia both need this headroom just to boot, unlike
 # Python, which is why only those two need the larger number.
-ulimit -v 4194304   # 4 GiB
-# ulimit -u raised from 32 to 128 after a live crash found 2026-09-04 while
-# testing Vite: Rolldown's Rayon thread pool sizes itself to the host's CPU
-# count and, combined with Node's own libuv/V8 background threads, blew
-# through 32 threads for this UID and aborted with
-# ThreadPoolBuildError/EAGAIN before Vite could even start.
+# Raised again to 8 GiB after a live crash found 2026-09-04 while testing
+# Vite: bare `node` boots fine at 4 GiB, but once Rolldown's native (Rust)
+# addon also loads into the same process and its Rayon thread pool tries to
+# spin up worker threads, thread creation fails with EAGAIN - RLIMIT_AS caps
+# the WHOLE process's address space, and V8's own CodeRange reservation was
+# already eating most of the 4 GiB budget, leaving too little headroom for
+# the extra thread stacks (glibc's pthread_create surfaces an mmap failure
+# from a tight RLIMIT_AS as EAGAIN, same errno as an RLIMIT_NPROC hit).
+ulimit -v 8388608   # 8 GiB
+# ulimit -u raised from 32 to 128 in the same investigation - turned out not
+# to be the actual cause (see ulimit -v comment above) but harmless to keep,
+# rayon's pool is still more threads than the old 32-thread cap allowed.
 ulimit -u 128
 ulimit -f 204800    # matches MAX_SESSION_FILE (100 MiB), in 512-byte blocks
 

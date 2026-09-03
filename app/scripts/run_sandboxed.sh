@@ -130,7 +130,18 @@ case "$LANGUAGE" in
     # boot (this is address space, not real memory pressure). A bash-mode
     # script running `node ...` is exactly the npm/Konva support this was
     # added for.
-    ulimit -v 4194304   # 4 GiB - shell pipelines can chain several processes, node needs the headroom to boot at all
+    # Raised again to 8 GiB after a live crash found 2026-09-04 while testing
+    # Vite: bare `node` boots fine at 4 GiB, but once Rolldown's native (Rust)
+    # addon also loads into the same process and its Rayon thread pool tries
+    # to spin up worker threads, thread creation fails with EAGAIN - RLIMIT_AS
+    # here caps the WHOLE process's address space, and V8's own CodeRange
+    # reservation was already eating most of the 4 GiB budget, leaving too
+    # little headroom for the extra thread stacks (glibc's pthread_create
+    # surfaces an mmap failure from a tight RLIMIT_AS as EAGAIN, same errno as
+    # an RLIMIT_NPROC hit, which is why this looked like a process-count
+    # problem at first - ulimit -u was raised too, see above, but it wasn't
+    # the actual cause).
+    ulimit -v 8388608   # 8 GiB - shell pipelines can chain several processes, node needs the headroom to boot at all
     if [ -x "$SESSION_VENV/bin/python3" ]; then
       export PATH="$SESSION_VENV/bin:$PATH"
       export VIRTUAL_ENV="$SESSION_VENV"
