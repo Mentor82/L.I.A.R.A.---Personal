@@ -27,8 +27,20 @@ the existing liara-runner rule):
 and the venv path with the real interpreter path, on the target host.)
 Sudoers can only pin the *script path*, not validate the arguments that
 follow `*` - that validation happens inside preview_daemon.py itself
-(_is_valid_runner_pid, port range checks), the same division of
+(_resolve_runner_pid, port range checks), the same division of
 responsibility run_sandboxed.sh already uses.
+
+Finding which sandbox process to bridge into: workspace_terminal.py stores
+the PID of the `sudo -n -u liara-runner -- ...` monitor process it forks
+for each connected shell in Redis (key workspace_shell_pid:<session_id>),
+cleared when that WebSocket disconnects. This router just reads that back -
+it does NOT try to independently rediscover "which liara-runner process
+belongs to this session" via psutil, because it can't: a bare `bash --norc
+-i` has no session-identifying string in its own cmdline, and reading its
+cwd cross-uid raises psutil.AccessDenied for this unprivileged process (this
+was tried and failed live - see git history). preview_daemon.py, running as
+root, has no such permission barrier and does the actual sudo-monitor ->
+real-liara-runner-descendant resolution itself.
 
 Per-session state (which local port a running daemon is listening on) is
 kept in Redis, not an in-process dict - gunicorn runs multiple worker
@@ -44,7 +56,6 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-import psutil
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
@@ -58,7 +69,6 @@ from services.redis_service import get_redis_service
 router = APIRouter(prefix="/workspace", tags=["Workspace Preview"])
 logger = logging.getLogger(__name__)
 
-RUNNER_USER = "liara-runner"
 DAEMON_SCRIPT = str(Path(__file__).resolve().parent.parent.parent / "scripts" / "preview_daemon.py")
 PYTHON_BIN = os.sys.executable
 PIDFILE_DIR = Path("/opt/liara/preview_daemons")  # created here (mirko-owned, like the rest of /opt/liara); root writes pidfiles into it fine regardless of ownership
@@ -83,31 +93,12 @@ def _session_owned(db, session_id: int, user_id: int) -> bool:
     return row is not None
 
 
-def _find_session_runner_pid(user_id: int, session_id: int) -> Optional[int]:
-    """Same matching approach as workspace_terminal.py's process listing:
-    the most recent liara-runner process whose cwd/cmdline shows it belongs
-    to this session's workspace dir. Picks the newest match (highest
-    create_time) since a session can have had several shells over time and
-    only the current one's netns is worth bridging into."""
-    session_marker = f"/session_files/{user_id}/{session_id}"
-    best_pid, best_created = None, -1.0
-    for p in psutil.process_iter(['pid', 'username', 'cmdline', 'create_time']):
-        try:
-            info = p.info
-            if info.get('username') != RUNNER_USER:
-                continue
-            cmd_str = " ".join(info.get('cmdline') or [])
-            matched = session_marker in cmd_str
-            if not matched:
-                try:
-                    matched = session_marker in p.cwd()
-                except (psutil.AccessDenied, psutil.NoSuchProcess):
-                    pass
-            if matched and (info.get('create_time') or 0) > best_created:
-                best_pid, best_created = info['pid'], info['create_time']
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return best_pid
+def _find_session_shell_sudo_pid(session_id: int) -> Optional[int]:
+    """Reads back the sudo-monitor PID workspace_terminal.py stored for this
+    session's currently-connected shell (see module docstring above) - None
+    if no shell is connected right now."""
+    entry = get_redis_service().get_cached_json(f"workspace_shell_pid:{session_id}")
+    return entry.get("sudo_pid") if entry else None
 
 
 def _pick_free_local_port() -> int:
@@ -134,7 +125,7 @@ async def _wait_until_connectable(port: int, timeout: float) -> bool:
     return False
 
 
-async def _start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
+async def _start_daemon(session_id: int, inside_port: int) -> int:
     """Always starts a fresh preview_daemon.py and returns its local port -
     called both for a first-ever preview and to replace a stale/dead one
     (see proxy_preview's retry-on-ConnectError below). No liveness probing
@@ -142,8 +133,8 @@ async def _start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
     from this unprivileged worker isn't possible (PermissionError either
     way, alive or dead), so "is it still there" is answered empirically by
     whoever actually tries to connect to it, not guessed at up front."""
-    target_pid = _find_session_runner_pid(user_id, session_id)
-    if target_pid is None:
+    sudo_pid = _find_session_shell_sudo_pid(session_id)
+    if sudo_pid is None:
         raise HTTPException(
             status_code=409,
             detail="Keine laufende Workspace-Shell für diese Session gefunden - Terminal-Tab öffnen und den Dev-Server starten, bevor die Preview geladen wird."
@@ -166,7 +157,7 @@ async def _start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
     with open(logfile, "ab") as log_f:
         proc = await asyncio.create_subprocess_exec(
             "sudo", "-n", PYTHON_BIN, DAEMON_SCRIPT, "start",
-            str(target_pid), str(inside_port), str(local_port), pidfile,
+            str(sudo_pid), str(inside_port), str(local_port), pidfile,
             stdout=log_f, stderr=log_f,
         )
 
@@ -191,13 +182,13 @@ async def _start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
         "local_port": local_port,
         "inside_port": inside_port,
         "pidfile": pidfile,
-        "target_pid": target_pid,
+        "sudo_pid": sudo_pid,
         "started_at": time.time(),
     }, ttl=REDIS_TTL_SECONDS)
     return local_port
 
 
-async def _get_or_start_daemon(user_id: int, session_id: int, inside_port: int) -> int:
+async def _get_or_start_daemon(session_id: int, inside_port: int) -> int:
     """Returns the local (host-namespace) port already relaying to
     <inside_port> for this session, trusting a cached Redis entry as-is
     (see _start_daemon's docstring for why no liveness check happens here)
@@ -207,7 +198,7 @@ async def _get_or_start_daemon(user_id: int, session_id: int, inside_port: int) 
     cached = redis.get_cached_json(f"{REDIS_KEY_PREFIX}{session_id}")
     if cached and cached.get("inside_port") == inside_port:
         return cached["local_port"]
-    return await _start_daemon(user_id, session_id, inside_port)
+    return await _start_daemon(session_id, inside_port)
 
 
 @router.post("/sessions/{session_id}/preview/start")
@@ -219,7 +210,7 @@ async def start_preview(
 ):
     if not _session_owned(db, session_id, current_user.id):
         raise HTTPException(status_code=403, detail="Kein Zugriff auf diese Session")
-    local_port = await _get_or_start_daemon(current_user.id, session_id, inside_port)
+    local_port = await _get_or_start_daemon(session_id, inside_port)
     return {"ok": True, "preview_url": f"/workspace/preview/{session_id}/", "inside_port": inside_port, "local_port": local_port}
 
 
@@ -280,7 +271,7 @@ async def proxy_preview(
             if attempt == 2:
                 raise HTTPException(status_code=502, detail="Preview-Server antwortet nicht (läuft der Dev-Server im Workspace-Terminal noch?)")
             redis.client.delete(cache_key)
-            new_port = await _start_daemon(current_user.id, session_id, cached["inside_port"])
+            new_port = await _start_daemon(session_id, cached["inside_port"])
             cached = {**cached, "local_port": new_port}
 
     response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in HOP_BY_HOP_HEADERS}

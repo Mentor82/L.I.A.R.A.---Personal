@@ -34,9 +34,14 @@ about why args aren't (and can't be) restricted by sudoers itself, only by
 this script's own validation below.
 
 Two modes:
-  start <target_pid> <inside_port> <local_port> <pidfile>
-    Validates target_pid is a real, currently-running `liara-runner`-owned
-    process (refuses anything else - this is the guard against relaying
+  start <sudo_pid> <inside_port> <local_port> <pidfile>
+    <sudo_pid> is the PID of the `sudo -n -u liara-runner -- ...` monitor
+    process workspace_terminal.py directly forked for this session's shell -
+    sudo forks again internally to actually become liara-runner, so this
+    script (running as root, with no cwd/ptrace permission barrier) walks
+    that process's descendants to find the real liara-runner-owned PID and
+    refuses to start if none exists (shell already exited, or sudo_pid was
+    never a real sudo invocation at all - this is the guard against relaying
     into an arbitrary process's namespace just because a caller claims a
     PID). Binds 127.0.0.1:<local_port> in the *current* (host) namespace,
     writes its own PID to <pidfile>, then serves forever: each accepted
@@ -96,25 +101,64 @@ while True:
 """
 
 
-def _is_valid_runner_pid(pid: int) -> bool:
-    """Refuses to nsenter into any process that isn't currently a real,
-    running liara-runner process - the one thing standing between "caller
-    passes a PID" and "this script blindly enters an arbitrary namespace"."""
+def _uid_of(pid: int):
     try:
         with open(f"/proc/{pid}/status") as f:
-            status = f.read()
+            for line in f:
+                if line.startswith("Uid:"):
+                    return int(line.split()[1])
     except FileNotFoundError:
-        return False
-    owner_line = next((l for l in status.splitlines() if l.startswith("Uid:")), "")
+        pass
+    return None
+
+
+def _children_of(pid: int):
+    """Reads /proc/<pid>/task/*/children - lists a process's direct
+    children, readable by root for any pid regardless of owning uid (unlike
+    /proc/<pid>/cwd, which needs ptrace permission - see
+    workspace_preview.py's module docstring for why the unprivileged
+    backend can't do this walk itself)."""
+    kids = set()
     try:
-        real_uid = int(owner_line.split()[1])
-    except (IndexError, ValueError):
-        return False
-    import pwd
-    try:
-        return pwd.getpwuid(real_uid).pw_name == RUNNER_USER
-    except KeyError:
-        return False
+        for tid in os.listdir(f"/proc/{pid}/task"):
+            try:
+                with open(f"/proc/{pid}/task/{tid}/children") as f:
+                    kids.update(int(x) for x in f.read().split())
+            except FileNotFoundError:
+                continue
+    except FileNotFoundError:
+        pass
+    return kids
+
+
+def _resolve_runner_pid(sudo_pid: int):
+    """workspace_terminal.py only knows (and can safely, permission-wise,
+    know) the PID of the `sudo -n -u liara-runner -- ...` monitor process it
+    directly forked - sudo itself forks again internally to actually become
+    liara-runner, and that descendant is what needs to be nsenter'd into.
+    Root has no permission barrier walking the process tree to find it, so
+    that resolution happens here (running as root), not in the unprivileged
+    backend. BFS rather than assuming a fixed depth: sudo's own process
+    tree shape isn't a contract this script should depend on. Returns the
+    first liara-runner-owned descendant found, or None if the shell has
+    since exited (sudo_pid dead or childless)."""
+    frontier = [sudo_pid]
+    seen = set()
+    while frontier:
+        pid = frontier.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        uid = _uid_of(pid)
+        if uid is not None:
+            import pwd
+            try:
+                if pwd.getpwuid(uid).pw_name == RUNNER_USER:
+                    return pid
+            except KeyError:
+                pass
+        frontier.extend(_children_of(pid))
+    return None
 
 
 def _relay_one_connection(conn: socket.socket, target_pid: int, inside_port: int):
@@ -165,12 +209,13 @@ def _relay_one_connection(conn: socket.socket, target_pid: int, inside_port: int
             pass
 
 
-def cmd_start(target_pid: int, inside_port: int, local_port: int, pidfile: str):
-    if not _is_valid_runner_pid(target_pid):
-        print(f"refusing: pid {target_pid} is not a running {RUNNER_USER} process", file=sys.stderr)
-        sys.exit(1)
+def cmd_start(sudo_pid: int, inside_port: int, local_port: int, pidfile: str):
     if not (1 <= inside_port <= 65535) or not (1 <= local_port <= 65535):
         print("invalid port", file=sys.stderr)
+        sys.exit(1)
+    target_pid = _resolve_runner_pid(sudo_pid)
+    if target_pid is None:
+        print(f"refusing: no {RUNNER_USER} descendant found under sudo pid {sudo_pid} (shell exited?)", file=sys.stderr)
         sys.exit(1)
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -248,7 +293,7 @@ def main():
     elif mode == "stop" and len(sys.argv) == 3:
         cmd_stop(sys.argv[2])
     else:
-        print("usage: preview_daemon.py start <target_pid> <inside_port> <local_port> <pidfile>", file=sys.stderr)
+        print("usage: preview_daemon.py start <sudo_pid> <inside_port> <local_port> <pidfile>", file=sys.stderr)
         print("       preview_daemon.py stop <pidfile>", file=sys.stderr)
         sys.exit(2)
 

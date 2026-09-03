@@ -41,6 +41,17 @@ from services.session_workspace import (
     ensure_session_venv_dir,
     ensure_session_metadata_dir,
 )
+from services.redis_service import get_redis_service
+
+# Key a running shell's PID lives under while connected - read by
+# workspace_preview.py to find which sandbox netns to bridge into, without
+# needing to re-derive "which liara-runner process belongs to this session"
+# via psutil (a bare `bash --norc -i` has no session-identifying info in its
+# own cmdline, and reading its cwd cross-uid raises psutil.AccessDenied - see
+# workspace_preview.py's module docstring for the fuller reasoning). No TTL:
+# cleared explicitly in the finally block below, for exactly the lifetime of
+# one connected WebSocket.
+SHELL_PID_REDIS_PREFIX = "workspace_shell_pid:"
 
 router = APIRouter(prefix="/workspace", tags=["Workspace Terminal"])
 
@@ -258,6 +269,17 @@ async def workspace_terminal_ws(websocket: WebSocket, session_id: int):
         os.execvp(shell_cmd[0], shell_cmd)
         os._exit(1)  # only reached if execvp itself failed
 
+    # `pid` here is sudo's own monitor process (this is *our* direct child
+    # from pty.fork(), still in the backend's own default namespace - sudo
+    # forks again internally to actually become liara-runner). Stored as-is,
+    # not resolved further: preview_daemon.py runs as root and can freely
+    # walk sudo's process tree to find the real liara-runner descendant and
+    # its netns, which this unprivileged handler cannot (reading another
+    # uid's /proc/<pid>/cwd raises psutil.AccessDenied here, but not for
+    # root).
+    redis = get_redis_service()
+    redis.cache_json(f"{SHELL_PID_REDIS_PREFIX}{session_id}", {"sudo_pid": pid}, ttl=24 * 60 * 60)
+
     try:
         fl = fcntl.fcntl(fd, fcntl.F_GETFL)
         fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
@@ -298,6 +320,10 @@ async def workspace_terminal_ws(websocket: WebSocket, session_id: int):
         except Exception:
             pass
     finally:
+        try:
+            redis.client.delete(f"{SHELL_PID_REDIS_PREFIX}{session_id}")
+        except Exception:
+            pass
         try:
             os.close(fd)
             os.kill(pid, 9)
