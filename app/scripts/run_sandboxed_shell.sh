@@ -65,7 +65,12 @@ export PYTHONPATH="$WORKSPACE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 # memory pressure - Node/Julia both need this headroom just to boot, unlike
 # Python, which is why only those two need the larger number.
 ulimit -v 4194304   # 4 GiB
-ulimit -u 32
+# ulimit -u raised from 32 to 128 after a live crash found 2026-09-04 while
+# testing Vite: Rolldown's Rayon thread pool sizes itself to the host's CPU
+# count and, combined with Node's own libuv/V8 background threads, blew
+# through 32 threads for this UID and aborted with
+# ThreadPoolBuildError/EAGAIN before Vite could even start.
+ulimit -u 128
 ulimit -f 204800    # matches MAX_SESSION_FILE (100 MiB), in 512-byte blocks
 
 export TERM=xterm-256color

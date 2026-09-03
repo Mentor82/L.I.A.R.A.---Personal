@@ -73,8 +73,13 @@ ensure_session_venv "$SESSION_VENV" "$PY_VER" || true
 # processes (blocks fork-bombs), and per-language virtual memory: Julia
 # reserves large virtual address space without using it proportionally, so it
 # gets a much higher ulimit -v than Python.
+# ulimit -u raised from 32 to 128 after a live crash found 2026-09-04 while
+# testing Vite: Rolldown's Rayon thread pool sizes itself to the host's CPU
+# count (8 here) and, combined with Node's own libuv/V8 background threads,
+# blew through 32 threads for this single UID and aborted with
+# ThreadPoolBuildError/EAGAIN before Vite could even start.
 ulimit -t 90
-ulimit -u 32
+ulimit -u 128
 # Per-file size cap, mirrors code_sandbox.py's RLIMIT_FSIZE preexec_fn layer
 # and MAX_SESSION_FILE (100 MiB) - unit here is 512-byte blocks, not bytes:
 # 104857600 bytes / 512 = 204800.
