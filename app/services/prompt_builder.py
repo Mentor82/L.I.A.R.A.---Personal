@@ -208,6 +208,43 @@ Für normale, kurze Antworten (auch mehrere Sätze) gilt das NICHT - nur für ei
 Pläne/Dokumente. Du kannst davor/danach ganz normal im Chat kommentieren."""
 
 
+def build_agent_roster_instructions() -> str:
+    """
+    Makes the model aware of the 4 specialized Agent Hub profiles
+    (AgentRegistry) it runs alongside and, critically, which of them it can
+    actually delegate to itself (code/research, via the delegate_code_task/
+    delegate_research tools) versus which only exist behind the user's own
+    explicit Agent Hub selection (productivity/vision - agent_router.py's
+    POST /agents/run, never triggered by the model). Added 2026-09 after a
+    live audit found AgentRegistry's own agent/task mapping was never
+    actually surfaced to the model - only the two delegate_* tool schema
+    entries hinted at code/research, and productivity/vision weren't
+    mentioned to it at all, anywhere. Built from AgentRegistry.list_agents()
+    rather than a hardcoded duplicate so this can't silently drift out of
+    sync with the registry the way a copy-pasted description would.
+    """
+    from services.agents.agent_registry import AgentRegistry
+
+    delegatable_ids = {"code", "research"}
+    lines = []
+    for profile in AgentRegistry.list_agents():
+        if profile["id"] in delegatable_ids:
+            reachability = "per delegate_code_task/delegate_research-Tool direkt von dir delegierbar"
+        else:
+            reachability = "NUR vom Nutzer selbst über den Agent Hub startbar - du kannst ihn nicht aufrufen"
+        lines.append(f"- {profile['icon']} **{profile['name']}** ({reachability}): {profile['description']}")
+    roster = "\n".join(lines)
+
+    return f"""WICHTIG - Spezialisierte Agenten (Agent Hub):
+Neben dir laufen 4 spezialisierte Agenten-Profile mit eigenem Tool-Set und Standardmodell:
+{roster}
+
+Nutze delegate_research/delegate_code_task gezielt für mehrschrittige Aufgaben in ihrem jeweiligen
+Fachbereich, statt sie selbst improvisiert nachzubilden. Behaupte NIEMALS, den Productivity- oder
+Vision-Agent selbst gestartet oder ausgeführt zu haben - du kannst sie nicht aufrufen, das kann
+ausschließlich der Nutzer über den Agent Hub."""
+
+
 def _get_tool_aware_system_prompt() -> str:
     """
     Erstellt Tool-aware System-Prompt mit Tool-Definitionen

@@ -27,6 +27,7 @@ from services.prompt_builder import (
     build_factcheck_instructions,
     build_consent_required_instructions,
     build_workspace_artifact_instructions,
+    build_agent_roster_instructions,
     _get_tool_aware_system_prompt,
 )
 from services.session_workspace import (
@@ -286,6 +287,9 @@ Formatiere deine Antworten automatisch je nach Inhalt:
 
 11. GEDÄCHTNIS & 4D-MEMORY PLATTFORMVERTRAG:
 {build_memory_contract_instructions()}
+
+12. SPEZIALISIERTE AGENTEN:
+{build_agent_roster_instructions()}
 """
 
     if not supports_tools:
@@ -331,7 +335,7 @@ Formatiere deine Antworten automatisch je nach Inhalt:
 
     if vision_context:
         prompt += (
-            f"\n\n12. VISUELLER SENSOR-KONTEXT (STRIKTE PRIORITÄTS- & DISZIPLIN-REGEL):\n"
+            f"\n\n13. VISUELLER SENSOR-KONTEXT (STRIKTE PRIORITÄTS- & DISZIPLIN-REGEL):\n"
             f"- Der folgende [Visuelle Sensor-Befund] ist die autoritative Wahrheit über das aktuelle Bild.\n"
             f"- Erfinde NIEMALS abweichende Bildinhalte und verfalle nicht in Vermutungen über frühere Bilder.\n"
             f"- Steht deine eigene Annahme im Konflikt mit [VISION_FACTS], verwirf deine Annahme ausnahmslos.\n"
