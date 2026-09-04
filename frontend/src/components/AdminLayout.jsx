@@ -80,7 +80,18 @@ function AdminLayout({ onLogout }) {
             </div>
           </NavLink>
 
-          <NavLink 
+          <NavLink
+            to="/admin/agents"
+            className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+          >
+            <span className="admin-nav-icon">🤖</span>
+            <div className="admin-nav-content">
+              <span className="admin-nav-title">Agenten</span>
+              <span className="admin-nav-desc">Agent-Profile</span>
+            </div>
+          </NavLink>
+
+          <NavLink
             to="/admin/logs" 
             className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
           >

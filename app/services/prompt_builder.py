@@ -222,12 +222,22 @@ def build_agent_roster_instructions() -> str:
     mentioned to it at all, anywhere. Built from AgentRegistry.list_agents()
     rather than a hardcoded duplicate so this can't silently drift out of
     sync with the registry the way a copy-pasted description would.
+
+    Opens its own short-lived DB session via get_db_context() (meant
+    exactly for this - manual DB access outside FastAPI's request-scoped
+    DI) rather than threading a `db` param through 3 call layers up to
+    generator_stage.py, so any admin override (agent_profiles table, see
+    agent_profiles_router.py) is picked up here too.
     """
+    from core.database import get_db_context
     from services.agents.agent_registry import AgentRegistry
 
     delegatable_ids = {"code", "research"}
+    with get_db_context() as db:
+        profiles = AgentRegistry.list_agents(db=db)
+
     lines = []
-    for profile in AgentRegistry.list_agents():
+    for profile in profiles:
         if profile["id"] in delegatable_ids:
             reachability = "per delegate_code_task/delegate_research-Tool direkt von dir delegierbar"
         else:

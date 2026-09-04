@@ -3,6 +3,7 @@ Agent Registry für L.I.A.R.A.
 Zentrale Verwaltung und Instanziierung von spezialisierten Agenten-Profilen.
 """
 from typing import Dict, List, Any, Optional
+from sqlalchemy.orm import Session
 from services.agents.base_agent import BaseAgent
 from services.agents.code_agent import CodeAgent
 from services.agents.research_agent import ResearchAgent
@@ -93,24 +94,51 @@ class AgentRegistry:
     }
 
     @classmethod
-    def list_agents(cls) -> List[Dict[str, Any]]:
-        """Gibt eine Übersicht aller registrierten Agenten-Profile zurück."""
+    def _apply_override(cls, agent_id: str, profile: Dict[str, Any], db: Optional[Session]) -> Dict[str, Any]:
+        """
+        Merges an admin override (agent_profiles table) onto a code-default
+        profile dict, if one exists - only the display fields
+        (name/description/default_model/icon/category) are ever
+        overridable; id/tools/class always come from the code default.
+        db=None (the default for every caller that doesn't care, e.g.
+        existing tests) skips the DB lookup entirely and returns the code
+        default unchanged, so this is fully backward-compatible.
+        """
+        if db is None:
+            return profile
+        from services.agent_profile_overrides_service import get_agent_profile_override
+        override = get_agent_profile_override(db, agent_id)
+        if not override:
+            return profile
+        return {**profile, **override}
+
+    @classmethod
+    def list_agents(cls, db: Optional[Session] = None) -> List[Dict[str, Any]]:
+        """
+        Gibt eine Übersicht aller registrierten Agenten-Profile zurück.
+        Optional `db`: merged Admin-Overrides (agent_profiles-Tabelle) über
+        die Code-Defaults - siehe _apply_override.
+        """
         result = []
-        for profile in cls._PROFILES.values():
+        for agent_id, profile in cls._PROFILES.items():
+            merged = cls._apply_override(agent_id, profile, db)
             result.append({
-                "id": profile["id"],
-                "name": profile["name"],
-                "description": profile["description"],
-                "default_model": profile["default_model"],
-                "icon": profile["icon"],
-                "category": profile["category"],
-                "tools": profile["tools"]
+                "id": merged["id"],
+                "name": merged["name"],
+                "description": merged["description"],
+                "default_model": merged["default_model"],
+                "icon": merged["icon"],
+                "category": merged["category"],
+                "tools": merged["tools"]
             })
         return result
 
     @classmethod
-    def get_profile(cls, agent_id: str) -> Optional[Dict[str, Any]]:
-        return cls._PROFILES.get(agent_id)
+    def get_profile(cls, agent_id: str, db: Optional[Session] = None) -> Optional[Dict[str, Any]]:
+        profile = cls._PROFILES.get(agent_id)
+        if not profile:
+            return None
+        return cls._apply_override(agent_id, profile, db)
 
     @classmethod
     def create_agent(
@@ -120,15 +148,17 @@ class AgentRegistry:
         session_id: Optional[int] = None,
         workspace_root: Optional[str] = None,
         model: Optional[str] = None,
-        max_steps: Optional[int] = None
+        max_steps: Optional[int] = None,
+        db: Optional[Session] = None
     ) -> BaseAgent:
         """Erzeugt eine konfigurierte Instanz des angeforderten Agenten."""
         profile = cls._PROFILES.get(agent_id)
         if not profile:
             raise ValueError(f"Unbekannter Agent-Typ: '{agent_id}'. Verfügbar: {list(cls._PROFILES.keys())}")
 
+        merged = cls._apply_override(agent_id, profile, db)
         agent_cls = profile["class"]
-        chosen_model = model or profile["default_model"]
+        chosen_model = model or merged["default_model"]
         steps = max_steps or 12
         uid = user_id or 1
 

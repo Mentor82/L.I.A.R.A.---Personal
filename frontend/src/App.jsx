@@ -46,6 +46,7 @@ const AdminLayout = lazy(() => import('./components/AdminLayout'))
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'))
 const UserManagement = lazy(() => import('./components/UserManagement'))
 const SystemConfig = lazy(() => import('./components/SystemConfig'))
+const AgentProfiles = lazy(() => import('./components/AgentProfiles'))
 const ServiceManagement = lazy(() => import('./components/ServiceManagement'))
 const TerminalTabs = lazy(() => import('./components/TerminalTabs'))
 const UpdateChecker = lazy(() => import('./components/UpdateChecker'))
@@ -433,6 +434,7 @@ function AuthenticatedApp({
                 <Route path="dashboard" element={<AdminDashboard />} />
                 <Route path="users" element={<UserManagement />} />
                 <Route path="system" element={<SystemConfig />} />
+                <Route path="agents" element={<AgentProfiles />} />
                 <Route path="logs" element={<LogReader />} />
                 <Route path="health" element={<SystemHealth />} />
                 <Route path="updates" element={<UpdateChecker />} />

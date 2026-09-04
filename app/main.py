@@ -31,6 +31,7 @@ from api.routers.location_router import router as location_router
 from api.routers.admin_health import router as admin_health_router
 from api.routers.admin_router import router as admin_router
 from api.routers.system_config_router import router as system_config_router
+from api.routers.agent_profiles_router import router as agent_profiles_router
 from api.routers.system_load import router as system_load_router
 from api.routers.public import router as public_router
 from api.routers.terminal_pty import router as terminal_pty_router
@@ -210,6 +211,7 @@ app.include_router(privacy_router)  # Privacy & Location Consent API
 app.include_router(location_router)  # Location Detection & Management
 app.include_router(admin_health_router)  # System Health Diagnostics (Admin)
 app.include_router(system_config_router)  # System Configuration (Admin)
+app.include_router(agent_profiles_router)  # Agent Registry display-field overrides (Admin)
 app.include_router(system_load_router)  # System Load (for SSE decision)
 app.include_router(public_router)  # Public endpoints (no auth required)
 app.include_router(admin_router, prefix="/admin", tags=["admin"])  # Admin Tools (Services, Terminal)

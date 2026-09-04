@@ -68,11 +68,11 @@ class AgentTaskStatus(BaseModel):
 
 
 @router.get("/types")
-def get_available_agents():
+def get_available_agents(db: Session = Depends(get_db)):
     """Gibt alle verfügbaren Agenten-Profile und deren Fähigkeiten zurück."""
     return {
         "success": True,
-        "agents": AgentRegistry.list_agents()
+        "agents": AgentRegistry.list_agents(db=db)
     }
 
 
@@ -179,7 +179,8 @@ async def start_agent_task(
             user_id=user.id,
             session_id=req.session_id,
             model=req.model,
-            max_steps=req.max_steps
+            max_steps=req.max_steps,
+            db=db
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
