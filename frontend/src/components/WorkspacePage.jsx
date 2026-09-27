@@ -6,15 +6,14 @@ import { python } from '@codemirror/lang-python';
 import { StreamLanguage } from '@codemirror/language';
 import { julia as juliaLegacyMode } from '@codemirror/legacy-modes/mode/julia';
 import { chatAPI, workspaceAPI, codeExecAPI, preferencesAPI } from '../services/api';
-import { streamChatSSE } from '../services/sseClient';
-import { getSessionMessages } from '../services/chatService';
 import CodeRunResult from './CodeRunResult';
 import DiffView from './DiffView';
-import MarkdownMessage from './MarkdownMessage';
+import WorkspaceChatPanel from './WorkspaceChatPanel';
 import AgentDrawer from './AgentDrawer';
 import WorkspaceTerminal from './WorkspaceTerminal';
 import WorkspacePreview from './WorkspacePreview';
 import EditorPane from './EditorPane';
+import WorkspaceContextMenu from './WorkspaceContextMenu';
 import './WorkspacePage.css';
 
 const PROPOSAL_ACTION_LABELS = {
@@ -300,84 +299,7 @@ function WorkspaceTreeNode({ node, depth, activeTab, collapsedFolders, dragOverT
   );
 }
 
-/**
- * Explorer right-click context menu - a VS Code Explorer staple that was
- * missing entirely before (the tree row's hover-visible action icons were
- * the only way to rename/delete/etc.). Reuses the exact same `handlers`
- * object the always-visible icons already call, so there's exactly one
- * implementation of each action, not a second copy. Renders at a fixed
- * viewport position (the right-click coordinates), clamped so it can't run
- * off the right/bottom edge of the window.
- */
-function WorkspaceContextMenu({ menu, onClose, handlers }) {
-  const menuRef = useRef(null);
 
-  // Close on any click outside the menu, or on Escape - the two standard
-  // ways every native/OS context menu dismisses itself.
-  useEffect(() => {
-    const handleClick = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) onClose();
-    };
-    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [onClose]);
-
-  const { node, x, y } = menu;
-  const isFolder = node.type === 'folder';
-
-  // Rough clamp against an assumed max menu footprint - exact size isn't
-  // known until after render, but this keeps it on-screen in the common
-  // case (right-clicking near the sidebar's own right/bottom edge).
-  const left = Math.min(x, window.innerWidth - 200);
-  const top = Math.min(y, window.innerHeight - 260);
-
-  const copyPath = async () => {
-    try {
-      await navigator.clipboard.writeText(node.path);
-    } catch {
-      // Clipboard API can be unavailable (insecure context, permissions) -
-      // silently no-op rather than surfacing an error for a convenience action.
-    }
-    onClose();
-  };
-
-  const run = (fn) => { fn(); onClose(); };
-
-  return (
-    <div className="workspace-context-menu" style={{ left, top }} ref={menuRef}>
-      {!isFolder && (
-        <button onClick={() => run(() => handlers.onOpenFile(node.path))}>📄 Öffnen</button>
-      )}
-      {isFolder && (
-        <>
-          <button onClick={() => run(() => handlers.onNewFileHere(node.path))}>➕ Neue Datei hier</button>
-          <button onClick={() => run(() => handlers.onNewFolderHere(node.path))}>📁 Neuer Ordner hier</button>
-          <button onClick={() => run(() => handlers.onUploadHere(node.path))}>⬆️ Hierher hochladen</button>
-        </>
-      )}
-      {!isFolder && (
-        <button onClick={() => run(() => handlers.onToggleContext(node.path))}>
-          💬 {node.selected_for_context ? 'Aus Chat-Kontext entfernen' : 'Zu Chat-Kontext hinzufügen'}
-        </button>
-      )}
-      {!isFolder && (
-        <button onClick={() => run(() => handlers.onDownload(node.path))}>⬇️ Herunterladen</button>
-      )}
-      <button onClick={() => run(() => handlers.onRename(node.path, node.name))}>✏️ Umbenennen</button>
-      <button onClick={copyPath}>📋 Pfad kopieren</button>
-      <div className="workspace-context-menu-divider" />
-      <button
-        className="danger"
-        onClick={() => run(() => handlers.onDelete(node.path, isFolder ? 'folder' : 'file'))}
-      >🗑️ Löschen</button>
-    </div>
-  );
-}
 
 /**
  * Renders a proposal's background validation result (syntax/lint + semantic
@@ -433,193 +355,7 @@ function ProposalValidationCard({ validation }) {
   );
 }
 
-/**
- * Right-hand chat panel scoped to the Workspace's current session - reuses
- * the exact same /api/chat/stream agent Chat.jsx talks to (same session_id,
- * same tool registry, same workspace_propose_change tool), not a separate
- * workspace-only agent (deliberate call, see the architecture discussion:
- * the session's workspace manifest + "add to context" files already flow
- * into that one shared agent server-side, keyed by session_id). This is
- * intentionally a minimal SSE consumer - only 'content', 'workspace_proposal'
- * and 'error' are handled, unlike Chat.jsx's full event set (thinking/tasks/
- * web search/agent steps), since this panel is for quick workspace-scoped
- * asks, not a replacement for the main chat.
- */
-function AgentChatPanel({ sessionId, onClose, onWorkspaceProposal }) {
-  const [messages, setMessages] = useState([]); // [{role: 'user'|'assistant', content}]
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [error, setError] = useState(null);
-  const scrollRef = useRef(null);
 
-  // Model selector - shares the same localStorage key Chat.jsx reads/writes
-  // (liara_selected_model), so picking one here also becomes the main chat's
-  // pre-selected model next time it opens, and vice versa - one "last used
-  // model" for the user, not two independently-drifting selections.
-  const [models, setModels] = useState([]);
-  const [model, setModel] = useState(() => localStorage.getItem('liara_selected_model') || 'llama3.2:3b');
-
-  useEffect(() => {
-    chatAPI.getModels()
-      .then((data) => setModels(data?.models || []))
-      .catch(() => setModels([]));
-  }, []);
-
-  const changeModel = (value) => {
-    setModel(value);
-    localStorage.setItem('liara_selected_model', value);
-  };
-
-  // Loads this session's existing conversation (the same one visible in
-  // /chat) so the panel isn't confusingly blank on open - it's one shared
-  // history, not a separate workspace-only thread.
-  useEffect(() => {
-    if (!sessionId) {
-      setMessages([]);
-      return;
-    }
-    let cancelled = false;
-    setLoadingHistory(true);
-    getSessionMessages(sessionId)
-      .then((list) => {
-        if (!cancelled) setMessages((list || []).map((m) => ({ role: m.role, content: m.content })));
-      })
-      .catch(() => {
-        if (!cancelled) setMessages([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingHistory(false);
-      });
-    return () => { cancelled = true; };
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages]);
-
-  const sendMessage = async () => {
-    const text = input.trim();
-    if (!text || sending || !sessionId) return;
-    setError(null);
-    setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
-    setSending(true);
-
-    const assistantMsgId = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : 'ws_msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
-
-    let assistantContent = '';
-
-    const updateAssistantMsg = (newContent) => {
-      assistantContent = newContent;
-      setMessages((prev) => {
-        const idx = prev.findIndex(m => m.id === assistantMsgId);
-        if (idx === -1) {
-          return [...prev, { id: assistantMsgId, role: 'assistant', content: assistantContent }];
-        }
-        const copy = [...prev];
-        copy[idx] = { ...copy[idx], content: assistantContent };
-        return copy;
-      });
-    };
-
-    try {
-      await streamChatSSE('/api/chat/stream', {
-        message: text,
-        model,
-        session_id: sessionId
-      }, {
-        onEvent: (parsed) => {
-          if (parsed.type === 'content') {
-            updateAssistantMsg(assistantContent + (parsed.text || ''));
-          } else if (parsed.type === 'workspace_proposal') {
-            onWorkspaceProposal?.();
-          }
-        }
-      });
-    } catch (err) {
-      setError(err.message || 'Fehler bei der Kommunikation mit LIARA.');
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantMsgId, role: 'assistant', content: `⚠️ ${err.message || 'Fehler bei der Kommunikation mit LIARA.'}` }
-      ]);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  // Once the assistant's reply has actually started streaming in (the last
-  // message is that growing entry), a separate "LIARA schreibt…" bubble
-  // would just duplicate it - only show it before the first content chunk
-  // arrives (last message is still the user's own).
-  const assistantIsReplying = messages.length > 0 && messages[messages.length - 1].role === 'assistant';
-
-  return (
-    <aside className="workspace-agent-panel">
-      <div className="workspace-agent-header">
-        <span>🤖 Agent-Chat</span>
-        <div className="workspace-agent-header-actions">
-          <select
-            className="workspace-agent-model-select"
-            value={model}
-            onChange={(e) => changeModel(e.target.value)}
-            title="Modell auswählen"
-          >
-            {models.length === 0 && <option value={model}>{model}</option>}
-            {models.map((m) => (
-              <option key={m.name} value={m.name}>{m.name} {m.speed}</option>
-            ))}
-          </select>
-          <button className="workspace-icon-btn" title="Schließen" onClick={onClose}>✕</button>
-        </div>
-      </div>
-
-      <div className="workspace-agent-body" ref={scrollRef}>
-        {loadingHistory && <p className="workspace-hint">Lade Verlauf…</p>}
-        {!loadingHistory && messages.length === 0 && (
-          <div className="workspace-empty">
-            <div className="workspace-empty-icon">🤖</div>
-            <p className="workspace-empty-title">Noch keine Nachrichten</p>
-            <p className="workspace-empty-subtitle">
-              Frag LIARA direkt zu dieser Session - Dateien im Kontext werden
-              automatisch berücksichtigt.
-            </p>
-          </div>
-        )}
-        {!loadingHistory && messages.length > 0 && (
-          <div className="workspace-agent-messages">
-            {messages.map((m, i) => (
-              <div key={i} className={`workspace-agent-message ${m.role === 'user' ? 'user' : 'assistant'}`}>
-                {m.role === 'user' ? m.content : <MarkdownMessage content={m.content} sessionId={sessionId} />}
-              </div>
-            ))}
-            {sending && !assistantIsReplying && (
-              <div className="workspace-agent-message assistant workspace-agent-typing">LIARA schreibt…</div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {error && <div className="workspace-error workspace-agent-error">{error} <button onClick={() => setError(null)}>✕</button></div>}
-
-      <div className="workspace-agent-input-row">
-        <input
-          type="text"
-          placeholder="Nachricht an LIARA…"
-          value={input}
-          disabled={sending || !sessionId}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-        />
-        <button className="workspace-btn-primary" disabled={sending || !input.trim() || !sessionId} onClick={sendMessage}>
-          {sending ? '…' : 'Senden'}
-        </button>
-      </div>
-    </aside>
-  );
-}
 
 
 function WorkspacePage() {
@@ -1743,8 +1479,25 @@ function WorkspacePage() {
         </div>
 
         {agentPanelOpen && (
-          <AgentChatPanel
+          <WorkspaceChatPanel
             sessionId={sessionId}
+            activeTab={activeTab}
+            activeTabData={activeTabData}
+            files={files}
+            onToggleContext={toggleContextSelection}
+            onOpenFile={openFile}
+            onInsertCode={(code) => {
+              const view = editorViewRef.current;
+              if (view) {
+                const selection = view.state.selection.main;
+                view.dispatch({
+                  changes: { from: selection.from, to: selection.to, insert: code },
+                  selection: { anchor: selection.from + code.length }
+                });
+              } else if (activeTab && activeTabData) {
+                updateTabContent(activeTab, (activeTabData.content || '') + '\n' + code);
+              }
+            }}
             onClose={() => setAgentPanelOpen(false)}
             onWorkspaceProposal={() => loadProposals(sessionId)}
           />

@@ -231,14 +231,18 @@ class BaseAgent:
         self, task: str, answer: str, user_id: Optional[int], session_id: Optional[int]
     ) -> Optional[str]:
         """
-        Saves a finished task's answer as a file in the session's Workspace
-        instead of leaving the Agent Hub trace panel to display the full
-        text inline - user_id/session_id are only absent for a caller
-        without a real Workspace to save into, in which case this is a
-        no-op and the trace panel falls back to showing the answer text
-        directly (see AgentDrawer.jsx).
+        Saves a finished task's answer as a file in the session's Workspace ONLY if
+        the user explicitly asked for a file to be saved/created. Otherwise keeps the
+        answer in the chat/trace without polluting the workspace with .md files.
         """
         if user_id is None or session_id is None:
+            return None
+        task_lower = task.lower()
+        should_save = any(k in task_lower for k in [
+            "speichere als datei", "als datei anlegen", "erstelle datei",
+            "save as file", "create file", "in datei speichern"
+        ])
+        if not should_save:
             return None
         return await asyncio.to_thread(save_artifact, user_id, session_id, task, answer, "Ergebnis")
 

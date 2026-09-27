@@ -192,20 +192,14 @@ def build_consent_required_instructions() -> str:
 
 def build_workspace_artifact_instructions() -> str:
     """
-    Lets a long-form plan/document get saved as a real Workspace file.
+    Instructs the model to format answers, explanations, and plans directly in chat
+    in Markdown, preventing unwanted .md file generation in the workspace.
     """
-    return """WICHTIG - Lange Pläne/Dokumente:
-Wenn du einen längeren, in sich geschlossenen Plan oder ein Dokument erstellst (z.B. auf explizite
-Bitte "erstelle einen Plan für..." oder wenn deine Antwort mehrere Abschnitte/Schritte umfasst und
-eher ein Nachschlage-Dokument als eine Chat-Antwort ist), schreibe ihn NICHT direkt in den Chat.
-Nutze stattdessen GENAU dieses Format:
-<workspace_artifact>
-Titel: <kurzer, prägnanter Titel>
-Inhalt:
-<vollständiger Markdown-Inhalt des Plans/Dokuments>
-</workspace_artifact>
-Für normale, kurze Antworten (auch mehrere Sätze) gilt das NICHT - nur für eigenständige, längere
-Pläne/Dokumente. Du kannst davor/danach ganz normal im Chat kommentieren."""
+    return """WICHTIG - Antworten und Pläne direkt im Chat:
+Formatiere deine Antworten, Erklärungen, Code-Beispiele und Pläne stets direkt und übersichtlich
+in Markdown im Chatverlauf.
+Erstelle KEINE separaten .md-Dateien oder Dateiartefakte für deine Antworten im Workspace,
+es sei denn, der Nutzer fordert dich ausdrücklich dazu auf, eine konkrete Datei im Workspace anzulegen."""
 
 
 def build_agent_roster_instructions() -> str:
