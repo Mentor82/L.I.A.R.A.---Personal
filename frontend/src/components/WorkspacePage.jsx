@@ -9,7 +9,6 @@ import { chatAPI, workspaceAPI, codeExecAPI, preferencesAPI } from '../services/
 import CodeRunResult from './CodeRunResult';
 import DiffView from './DiffView';
 import WorkspaceChatPanel from './WorkspaceChatPanel';
-import AgentDrawer from './AgentDrawer';
 import WorkspaceTerminal from './WorkspaceTerminal';
 import WorkspacePreview from './WorkspacePreview';
 import EditorPane from './EditorPane';
@@ -490,7 +489,7 @@ function WorkspacePage() {
   // (tabs, files, search) lives here in WorkspacePage regardless.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agentPanelOpen, setAgentPanelOpen] = useState(false);
-  const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
+  const [copilotMode, setCopilotMode] = useState('chat');
   // Sandboxed interactive shell (WorkspaceTerminal) - docks below the editor
   // (like a normal IDE terminal), not in the right-hand panel column, so it
   // doesn't need to fight Agent-Chat/Agent Hub for a slot.
@@ -507,8 +506,14 @@ function WorkspacePage() {
   // per-shell-tab SingleTerminalInstance.
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  const toggleAgentPanel = () => setAgentPanelOpen((v) => !v);
-  const toggleAgentDrawer = () => setAgentDrawerOpen((v) => !v);
+  const toggleCopilot = (targetMode = 'chat') => {
+    if (agentPanelOpen && copilotMode === targetMode) {
+      setAgentPanelOpen(false);
+    } else {
+      setCopilotMode(targetMode);
+      setAgentPanelOpen(true);
+    }
+  };
   const toggleShell = () => setShellOpen((v) => !v);
   const togglePreview = () => {
     if (previewOpen && activeTab === PREVIEW_TAB_ID) {
@@ -1137,11 +1142,11 @@ function WorkspacePage() {
         </div>
         <div className="workspace-header-right">
           <button
-            className={`workspace-icon-btn ${agentPanelOpen ? 'active' : ''}`}
-            title={agentPanelOpen ? 'Agent-Chat ausblenden' : 'Agent-Chat einblenden'}
-            onClick={toggleAgentPanel}
+            className={`workspace-icon-btn ${agentPanelOpen && copilotMode === 'chat' ? 'active' : ''}`}
+            title="Copilot Chat ein-/ausblenden"
+            onClick={() => toggleCopilot('chat')}
           >
-            🤖
+            💬
           </button>
           <button
             className={`workspace-icon-btn ${shellOpen ? 'active' : ''}`}
@@ -1234,9 +1239,9 @@ function WorkspacePage() {
             ))}
           </select>
           <button
-            className={`workspace-agent-hub-btn ${agentDrawerOpen ? 'active' : ''}`}
+            className={`workspace-agent-hub-btn ${agentPanelOpen && copilotMode === 'agent' ? 'active' : ''}`}
             title="Autonomous Agents & ACI Engine öffnen"
-            onClick={toggleAgentDrawer}
+            onClick={() => toggleCopilot('agent')}
           >
             🤖 Agent Hub
           </button>
@@ -1298,7 +1303,7 @@ function WorkspacePage() {
         </div>
       )}
 
-      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''} ${agentDrawerOpen ? 'agent-drawer-open' : ''}`}>
+      <div className={`workspace-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${agentPanelOpen ? 'agent-open' : ''}`}>
         {!sidebarCollapsed && (
         <aside
           className={`workspace-sidebar ${dragOverTarget === 'root' ? 'workspace-drag-over' : ''}`}
@@ -1481,6 +1486,7 @@ function WorkspacePage() {
         {agentPanelOpen && (
           <WorkspaceChatPanel
             sessionId={sessionId}
+            initialMode={copilotMode}
             activeTab={activeTab}
             activeTabData={activeTabData}
             files={files}
@@ -1500,18 +1506,17 @@ function WorkspacePage() {
             }}
             onClose={() => setAgentPanelOpen(false)}
             onWorkspaceProposal={() => loadProposals(sessionId)}
-          />
-        )}
-
-        {agentDrawerOpen && (
-          <AgentDrawer
-            sessionId={sessionId}
-            onClose={() => setAgentDrawerOpen(false)}
+            onApproveProposal={handleApproveProposal}
+            onRejectProposal={handleRejectProposal}
             onFilesChanged={() => {
               loadFiles(sessionId);
               loadProposals(sessionId);
             }}
-            onOpenFile={openFile}
+            onSessionCreated={(fresh) => {
+              setSessions((prev) => [fresh, ...prev]);
+              setSessionId(fresh.id);
+              localStorage.setItem('liara_active_session', fresh.id.toString());
+            }}
           />
         )}
       </div>
@@ -1554,11 +1559,11 @@ function WorkspacePage() {
             🌐 Preview {previewOpen ? '▾' : '▴'}
           </button>
           <button
-            className={`status-item agent-tag ${agentDrawerOpen ? 'active' : ''}`}
-            onClick={() => setAgentDrawerOpen((v) => !v)}
+            className={`status-item agent-tag ${agentPanelOpen && copilotMode === 'agent' ? 'active' : ''}`}
+            onClick={() => toggleCopilot('agent')}
             title="Agent Hub öffnen/schließen"
           >
-            🤖 Multi-Agent: {agentDrawerOpen ? 'Aktiv' : 'Bereit'}
+            🤖 Multi-Agent: {agentPanelOpen && copilotMode === 'agent' ? 'Aktiv' : 'Bereit'}
           </button>
         </div>
       </footer>

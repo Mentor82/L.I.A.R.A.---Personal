@@ -257,7 +257,7 @@ async def stream_task_events(
             return
 
         while True:
-            new_events = await asyncio.to_thread(agent_task_store.read_new_events, task_id, last_id, 30000)
+            new_events = await asyncio.to_thread(agent_task_store.read_new_events, task_id, last_id, 1500)
             if new_events:
                 for entry_id, event in new_events:
                     last_id = entry_id
@@ -266,7 +266,11 @@ async def stream_task_events(
                 yield ": keep-alive\n\n"
 
             current = await asyncio.to_thread(agent_task_store.get_task, task_id)
-            if current is None or current["status"] in ("done", "error", "cancelled"):
+            if current is None or current["status"] in ("done", "error", "cancelled", "paused"):
+                # One last drain in case events were appended right before status update
+                final_events = await asyncio.to_thread(agent_task_store.read_new_events, task_id, last_id, 100)
+                for entry_id, event in final_events:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 break
 
     return StreamingResponse(

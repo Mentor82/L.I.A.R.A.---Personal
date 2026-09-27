@@ -182,11 +182,15 @@ def read_events_from_start(task_id: str) -> List[Tuple[str, Dict[str, Any]]]:
     return [(entry_id, json.loads(fields["data"])) for entry_id, fields in entries]
 
 
-def read_new_events(task_id: str, last_id: str, block_ms: int = 30000) -> List[Tuple[str, Dict[str, Any]]]:
+def read_new_events(task_id: str, last_id: str, block_ms: int = 1500) -> List[Tuple[str, Dict[str, Any]]]:
     """Blocks (in the calling thread - always call via asyncio.to_thread from
     async code) up to block_ms for stream entries newer than last_id."""
-    result = get_redis_service().client.xread({_events_key(task_id): last_id}, block=block_ms, count=50)
-    if not result:
+    try:
+        result = get_redis_service().client.xread({_events_key(task_id): last_id}, block=block_ms, count=50)
+        if not result:
+            return []
+        _key, entries = result[0]
+        return [(entry_id, json.loads(fields["data"])) for entry_id, fields in entries]
+    except Exception:
+        # Treats Redis socket timeouts (configured to 5s in redis_service) as empty reads
         return []
-    _key, entries = result[0]
-    return [(entry_id, json.loads(fields["data"])) for entry_id, fields in entries]
