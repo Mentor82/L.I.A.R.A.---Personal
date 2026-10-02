@@ -4,6 +4,7 @@ Structured Incremental Compactor
 Verdichtet ältere Konversations-Turns inkrementell in einen strukturierten
 JSON-State unter strikter Einhaltung der 'Never Remove'-Regeln.
 """
+import asyncio
 import logging
 import json
 import os
@@ -143,6 +144,26 @@ class StructuredCompactor:
 
         return state
 
+    @staticmethod
+    async def _chat_via_cluster(model: str, messages: List[Dict[str, str]]) -> Optional[str]:
+        """Antwort über den LiNeP-Cluster-Trunk (Personal#29 B3), oder None
+        wenn der Cluster nicht konfiguriert ist bzw. fehlschlägt (dann nimmt
+        der Aufrufer den direkten Ollama-Weg). Das Standardmodell wird zum
+        Task "task:json" (strukturierte Ausgabe), ein explizit übergebenes
+        Modell bleibt unverändert."""
+        try:
+            from core.config import settings
+
+            if not (settings.linep_enabled and settings.linep_trunk_host):
+                return None
+            from services.linep_provider import get_linep_provider
+
+            target = "task:json" if model == COMPACTION_MODEL else model
+            return await asyncio.to_thread(get_linep_provider().chat_sync, target, messages, 2000)
+        except Exception as e:
+            logger.warning("Cluster-Kompaktierung fehlgeschlagen (%s) - Fallback auf direktes Ollama", e)
+            return None
+
     @classmethod
     async def compact_via_llm(
         cls,
@@ -165,19 +186,22 @@ class StructuredCompactor:
         )[:12000]
 
         try:
-            base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-            async with httpx.AsyncClient(timeout=90.0) as client:
-                res = await client.post(f"{base_url}/api/chat", json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": COMPACTOR_SYSTEM_PROMPT},
-                        {"role": "user", "content": transcript},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.1},
-                })
-                res.raise_for_status()
-                content = res.json().get("message", {}).get("content", "")
+            messages = [
+                {"role": "system", "content": COMPACTOR_SYSTEM_PROMPT},
+                {"role": "user", "content": transcript},
+            ]
+            content = await cls._chat_via_cluster(model, messages)
+            if content is None:
+                base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    res = await client.post(f"{base_url}/api/chat", json={
+                        "model": model,
+                        "messages": messages,
+                        "stream": False,
+                        "options": {"temperature": 0.1},
+                    })
+                    res.raise_for_status()
+                    content = res.json().get("message", {}).get("content", "")
 
             # Manche Modelle wrappen valides JSON trotz Anweisung in
             # ```json ... ``` - robust genug parsen, statt daran zu scheitern.
