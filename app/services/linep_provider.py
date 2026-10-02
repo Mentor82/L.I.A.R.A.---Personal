@@ -34,6 +34,14 @@ model's own text stream never has to be scraped for <think>/<tool_call>
 tags (task/factcheck/toolcall-tag extraction in chat_streaming.py is kept
 as a defensive fallback for a server that predates this, not the primary
 path).
+
+Cluster trunk mode (Personal#29 B1): with LINEP_TRUNK_HOST set, every call
+goes to linepd on the cluster instead of the local linep-server - lease on the
+control port, SL1-signed SESSION_BIND, signed frames (see services/linep_trunk.py).
+Model ids may then be concrete models or "task:<name>"; linepd picks runtime
+and node. There is no fallback to the local linep-server from inside this
+class: if the trunk is down, health() is false and chat_streaming falls back
+to Ollama-HTTP, as before.
 """
 from __future__ import annotations
 
@@ -41,6 +49,7 @@ import asyncio
 import itertools
 import logging
 import socket
+import time
 from functools import lru_cache
 from typing import AsyncIterator, Optional
 
@@ -76,16 +85,55 @@ def _import_linep():
 
 
 class LinepChatProvider:
-    def __init__(self, host: str, port: int, timeout: float = 180.0) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        timeout: float = 180.0,
+        control_port: int = 0,
+        key_file: str = "",
+    ) -> None:
         self._host = host
         self._port = port
         self._timeout = timeout
+        # control_port + key_file set = cluster trunk mode (lease + SL1)
+        self._control_port = control_port
+        self._key_file = key_file
+        self._health_checked_at = 0.0
+        self._health_ok = False
         # None = not yet queried this process; False = queried and failed
         # (package missing, connection refused, or an old server that
         # doesn't answer CAPABILITIES at all). Capabilities don't change at
         # runtime for a given server, so one successful query is cached for
         # the process lifetime - same pattern as ollama_capabilities.py.
         self._capabilities_cache = None
+        self._capabilities_failed_at = 0.0
+
+    @property
+    def trunk_mode(self) -> bool:
+        return bool(self._control_port and self._key_file)
+
+    def _connect_sync(self, timeout: float):
+        """Connected client, bound to a lease + SL1 session in trunk mode.
+        The caller closes it. The socket timeout is `timeout` afterwards."""
+        LiNePClient, *_rest = _import_linep()
+        if not self.trunk_mode:
+            client = LiNePClient(host=self._host, port=self._port, timeout=timeout)
+            client.connect()
+            return client
+        from services.linep_trunk import TrunkClient, TrunkRoute
+
+        route = TrunkRoute(self._host, self._port, self._control_port, self._key_file)
+        client = TrunkClient(route, timeout=10.0)
+        try:
+            client.connect()
+            client.bind()
+            client.timeout = timeout
+            client._sock.settimeout(timeout)
+        except BaseException:
+            client.close()
+            raise
+        return client
 
     async def health(self) -> bool:
         """Best-effort TCP reachability check, not a protocol handshake -
@@ -100,6 +148,19 @@ class LinepChatProvider:
             _import_linep()
         except LinepUnavailableError:
             return False
+        if self.trunk_mode:
+            # A reachable port says nothing about the lease/SL1 handshake, so
+            # trunk health is a real bind + CAPABILITIES, cached briefly.
+            if time.monotonic() - self._health_checked_at < 15.0:
+                return self._health_ok
+            try:
+                caps = await asyncio.to_thread(self._query_capabilities_sync)
+                ok = caps is not None
+            except Exception as error:
+                logger.warning("LiNeP trunk health check failed: %s", error)
+                ok = False
+            self._health_ok, self._health_checked_at = ok, time.monotonic()
+            return ok
         return await asyncio.to_thread(self._probe_reachable)
 
     def _probe_reachable(self) -> bool:
@@ -120,20 +181,30 @@ class LinepChatProvider:
         return bool(caps and caps.descriptor.supports_reasoning_deltas)
 
     async def _get_capabilities(self):
-        if self._capabilities_cache is not None:
-            return self._capabilities_cache or None
+        if self._capabilities_cache:
+            return self._capabilities_cache
+        # A failed query is retried after 30 s instead of being cached for the
+        # process lifetime: a cluster trunk can be briefly down, the old local
+        # server could only be down or too old.
+        if self._capabilities_cache is False and time.monotonic() - self._capabilities_failed_at < 30.0:
+            return None
         try:
             caps = await asyncio.to_thread(self._query_capabilities_sync)
         except Exception:
             caps = None
-        self._capabilities_cache = caps if caps is not None else False
+        if caps is None:
+            self._capabilities_cache = False
+            self._capabilities_failed_at = time.monotonic()
+        else:
+            self._capabilities_cache = caps
         return caps
 
     def _query_capabilities_sync(self):
-        LiNePClient, *_rest = _import_linep()
-        client = LiNePClient(host=self._host, port=self._port, timeout=5.0)
-        with client:
+        client = self._connect_sync(5.0)
+        try:
             return client.query_capabilities()
+        finally:
+            client.close()
 
     async def generate_stream(
         self, prompt: str, model: str, num_predict: int = 2000
@@ -146,7 +217,7 @@ class LinepChatProvider:
         back to this coroutine via an asyncio.Queue fed through
         call_soon_threadsafe, same bridge pattern as the mw-dresden original.
         """
-        LiNePClient, EventType, RuntimeProfile, RequestEnvelope, StreamIdentity = _import_linep()
+        _client_cls, EventType, RuntimeProfile, RequestEnvelope, StreamIdentity = _import_linep()
 
         request = RequestEnvelope(
             stream=StreamIdentity(
@@ -158,14 +229,14 @@ class LinepChatProvider:
             max_tokens=num_predict,
         )
 
-        host, port, timeout = self._host, self._port, self._timeout
+        timeout = self._timeout
         loop = asyncio.get_running_loop()
         queue: "asyncio.Queue[tuple[Optional[tuple[str, str]], Optional[Exception]]]" = asyncio.Queue()
 
         def _worker():
             try:
-                client = LiNePClient(host=host, port=port, timeout=timeout)
-                with client:
+                client = self._connect_sync(timeout)
+                try:
                     for event in client.execute_stream(request):
                         if event.event_type == EventType.CONTENT_DELTA and event.payload:
                             loop.call_soon_threadsafe(queue.put_nowait, (("content", event.payload), None))
@@ -183,6 +254,8 @@ class LinepChatProvider:
                                 queue.put_nowait, (None, LinepUnavailableError(message))
                             )
                             return
+                finally:
+                    client.close()
                 loop.call_soon_threadsafe(queue.put_nowait, (None, None))
             except Exception as error:
                 err = (
@@ -217,6 +290,14 @@ def linep_enabled() -> bool:
 
 @lru_cache
 def get_linep_provider() -> LinepChatProvider:
+    if settings.linep_trunk_host:
+        return LinepChatProvider(
+            host=settings.linep_trunk_host,
+            port=settings.linep_trunk_port,
+            timeout=settings.linep_timeout_seconds,
+            control_port=settings.linep_trunk_control_port,
+            key_file=settings.linep_sl1_key_file,
+        )
     return LinepChatProvider(
         host=settings.linep_host,
         port=settings.linep_port,

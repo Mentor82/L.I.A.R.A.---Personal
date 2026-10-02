@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     linep_host: str = "127.0.0.1"
     linep_port: int = 11435
     linep_timeout_seconds: float = 180.0
+    # Cluster trunk (Personal#29 B1): when linep_trunk_host is set, chat goes
+    # through linepd on the cluster (lease on linep_trunk_control_port + SL1
+    # signed session, key file with key_id/key lines, mode 0600) instead of the
+    # local linep-server above. No silent fallback to it: health() just turns
+    # false and the caller decides (Ollama-HTTP today).
+    linep_trunk_host: str = ""
+    linep_trunk_port: int = 9000
+    linep_trunk_control_port: int = 9001
+    linep_sl1_key_file: str = ""
 
     # The shared .env carries ~13 other keys (smtp_*, *_password,
     # ollama_base_url, ...) that were never declared as fields here -

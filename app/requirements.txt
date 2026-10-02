@@ -34,4 +34,9 @@ spacy>=3.7.5,<4.0.0
 matplotlib>=3.9.2,<4.0.0
 
 # Experimental LiNeP transport switch (LINEP_ENABLED, see linep_provider.py)
+# linep: not on PyPI. Cluster trunk mode (LINEP_TRUNK_HOST, SL1) needs the pure-Python
+# linep.v0_2 of the L.I.A.R.A. cluster package linep-0.2.8_beta (VM107 /root/*.lpkg):
+# extract usr/lib/python3.14/site-packages/linep into the venv's site-packages.
+# The SL1 key (key_id/key lines) lives in ~/.config/liara/linep-sl1.key, mode 0600;
+# set LINEP_SL1_KEY_FILE to it. Installed on liara 2026-10-02.
 # linep==0.2.0
