@@ -310,6 +310,24 @@ def check_database_connection() -> Dict:
         }
 
 
+def check_linep_cluster() -> Dict:
+    """Check the LiNeP cluster trunk (lease + SL1 + CAPABILITIES), Personal#29 B4."""
+    from services.cluster_info import get_cluster_info
+    info = get_cluster_info()
+    if info is None:
+        return {"name": "LiNeP Cluster", "configured": False, "healthy": True}
+    return {
+        "name": "LiNeP Cluster",
+        "configured": True,
+        "available": info["available"],
+        "healthy": info["available"],
+        "trunk": info["trunk"],
+        "models_count": len(info["models"]),
+        "tasks": [t.removeprefix("task:") for t in info["tasks"]],
+        **({"error": info["error"]} if info.get("error") else {}),
+    }
+
+
 def check_ollama() -> Dict:
     """Check Ollama availability"""
     try:
@@ -406,6 +424,9 @@ async def full_health_check():
     ai_services = {
         "ollama": check_ollama()
     }
+    cluster_check = check_linep_cluster()
+    if cluster_check["configured"]:
+        ai_services["linep_cluster"] = cluster_check
     
     # Network Connectivity
     network = check_network_connectivity()

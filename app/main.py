@@ -374,12 +374,17 @@ def health_full():
         ollama_status = "offline"
         models_available = []
     
+    # LiNeP cluster (Personal#29 B4)
+    from services.cluster_info import get_cluster_info
+    cluster = get_cluster_info()
+
     # System Resources
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     
     return {
         "api": "ok",
+        **({"cluster": {"available": cluster["available"], "models": len(cluster["models"]), "tasks": len(cluster["tasks"])}} if cluster is not None else {}),
         "ollama": ollama_status,
         "models_available": models_available,
         "models_count": len(models_available),

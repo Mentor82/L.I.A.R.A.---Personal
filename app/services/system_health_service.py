@@ -170,6 +170,24 @@ def check_services_status() -> Dict[str, Any]:
     except Exception as e:
         services["ollama"] = {"status": "offline", "healthy": False, "error": str(e)[:100]}
 
+    # 5. LiNeP cluster trunk (Personal#29 B4), only when configured
+    try:
+        from services.cluster_info import get_cluster_info
+        cluster = get_cluster_info()
+        if cluster is not None:
+            if cluster["available"]:
+                services["linep_cluster"] = {
+                    "status": "running", "healthy": True, "host": cluster["trunk"],
+                    "models": len(cluster["models"]), "tasks": len(cluster["tasks"]),
+                }
+            else:
+                services["linep_cluster"] = {
+                    "status": "offline", "healthy": False, "host": cluster["trunk"],
+                    "error": cluster.get("error", "")[:100],
+                }
+    except Exception as e:
+        services["linep_cluster"] = {"status": "offline", "healthy": False, "error": str(e)[:100]}
+
     return services
 
 

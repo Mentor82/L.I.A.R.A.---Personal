@@ -409,8 +409,31 @@ def get_models(current_user: User = Depends(require_active_user)):
             "gpu_recommended": gpu_available  # Alle Models profitieren von GPU wenn verfügbar
         })
 
+    # Cluster (Personal#29 B4): models/tasks the trunk advertises on top of
+    # the local Ollama list; entries the local Ollama already has stay as is.
+    from services.cluster_info import get_cluster_info
+    cluster = get_cluster_info()
+    if cluster and cluster["available"]:
+        local_names = {e["name"] for e in enriched}
+        for name in cluster["tasks"] + cluster["models"]:
+            if name in local_names:
+                continue
+            is_task = name.startswith("task:")
+            enriched.append({
+                "name": name,
+                "size": "Cluster",
+                "ram": "-",
+                "recommended": False,
+                "speed": "-",
+                "quality": "-",
+                "use_case": "Cluster-Task (linepd waehlt Modell und Node)" if is_task else "Cluster-Modell",
+                "tags": ["cluster", "task"] if is_task else ["cluster"],
+                "gpu_support": False,
+                "gpu_recommended": False,
+            })
+
     return {
-        "source": "dynamic-ollama",
+        "source": "dynamic-ollama+cluster" if cluster and cluster["available"] else "dynamic-ollama",
         "total_models": len(enriched),
         "system_ram_gb": round(psutil.virtual_memory().total / (1024**3), 1),
         "gpu_available": gpu_available,
@@ -430,11 +453,16 @@ def get_ollama_status(current_user: User = Depends(require_active_user)):
         is_available = False
         models_count = 0
     
-    return {
+    from services.cluster_info import get_cluster_info
+    cluster = get_cluster_info()
+    result = {
         "ollama_available": is_available,
         "models_installed": models_count,
         "default_model": "llama3.2:3b"
     }
+    if cluster is not None:
+        result["cluster"] = cluster
+    return result
 
 
 @router.get("/guest/welcome")

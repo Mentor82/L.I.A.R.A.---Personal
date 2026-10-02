@@ -472,18 +472,31 @@ async def chat_health():
         ollama_available = False
         model_count = 0
 
+    import asyncio
+    from services.cluster_info import get_cluster_info
+    cluster = await asyncio.to_thread(get_cluster_info)
+    cluster_available = bool(cluster and cluster["available"])
+
     db = SessionLocal()
     try:
         mood_history_total = db.query(MoodHistoryEntry).count()
     finally:
         db.close()
 
+    components = {
+        "ollama": {"available": ollama_available, "models_loaded": model_count},
+        "mood_system": {"available": True, "scope": "per_user", "history_entries_total": mood_history_total}
+    }
+    if cluster is not None:
+        components["cluster"] = {
+            "available": cluster_available,
+            "models": len(cluster["models"]),
+            "tasks": len(cluster["tasks"]),
+        }
+
     return {
-        "status": "healthy" if ollama_available else "degraded",
+        "status": "healthy" if (ollama_available or cluster_available) else "degraded",
         "timestamp": datetime.now().isoformat(),
-        "components": {
-            "ollama": {"available": ollama_available, "models_loaded": model_count},
-            "mood_system": {"available": True, "scope": "per_user", "history_entries_total": mood_history_total}
-        },
+        "components": components,
         "capabilities": {"streaming": True, "error_recovery": True, "mood_detection": True}
     }
