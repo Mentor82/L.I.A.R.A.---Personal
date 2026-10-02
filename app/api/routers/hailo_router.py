@@ -41,7 +41,16 @@ from api.models.base_models import User
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/hailo", tags=["hailo"])
+def _require_hailo_enabled():
+    """Router-wide guard (Personal#29 B7): the RPi5 host is gone, answer fast."""
+    from services.accelerators import AcceleratorDisabledError, require_hailo
+    try:
+        require_hailo()
+    except AcceleratorDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+router = APIRouter(prefix="/hailo", tags=["hailo"], dependencies=[Depends(_require_hailo_enabled)])
 
 
 # ============================================================================

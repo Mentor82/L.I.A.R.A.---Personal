@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     linep_trunk_control_port: int = 9001
     linep_sl1_key_file: str = ""
 
+    # Direct accelerator hosts that no longer exist (Personal#29 B6-B8):
+    # off, so nothing dials a dead host. See services/accelerators.py.
+    hailo_enabled: bool = False
+    edgetpu_enabled: bool = False
+
     # The shared .env carries ~13 other keys (smtp_*, *_password,
     # ollama_base_url, ...) that were never declared as fields here -
     # pydantic-settings rejects any undeclared key by default

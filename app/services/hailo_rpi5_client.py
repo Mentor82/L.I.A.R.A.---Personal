@@ -53,6 +53,11 @@ class HailoRPi5Client:
     
     async def initialize(self):
         """Initialize client and start health check loop"""
+        from services.accelerators import hailo_enabled
+        if not hailo_enabled():
+            self.status = RPi5Status.OFFLINE
+            logger.info("Hailo RPi5 client disabled (HAILO_ENABLED=false), no connection attempted")
+            return
         self._client = httpx.AsyncClient(timeout=RPI5_HEALTH_TIMEOUT)
         await self.health_check()
         logger.info(f"Hailo RPi5 client initialized: {self.status.value}")

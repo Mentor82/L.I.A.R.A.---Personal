@@ -42,6 +42,8 @@ class VisionDetectionService:
         model: str,
         confidence_threshold: Optional[float],
     ) -> Dict[str, Any]:
+        from services.accelerators import require_hailo
+        require_hailo()
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
         result = await self.hailo_service.detect_objects(
             image_base64=image_base64,
@@ -73,6 +75,8 @@ class VisionDetectionService:
         # on edge01). Fall back to the default if the caller passes something
         # edge01 doesn't know (e.g. "yolov8s", the Hailo default).
         model_name = model if model in self.EDGETPU_MODELS else "ssd_mobiledet"
+        from services.accelerators import require_edgetpu
+        require_edgetpu()
         client = await get_edgetpu_client()
 
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")

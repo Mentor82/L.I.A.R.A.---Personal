@@ -54,6 +54,10 @@ class EdgeTpuClient:
 
     async def initialize(self):
         """Initialize client and run an initial health check"""
+        from services.accelerators import edgetpu_enabled
+        if not edgetpu_enabled():
+            logger.info("Edge TPU client disabled (EDGETPU_ENABLED=false), no connection attempted")
+            return
         self._client = httpx.AsyncClient(timeout=EDGETPU_HEALTH_TIMEOUT)
         await self.health_check()
         logger.info(f"Edge TPU client initialized: {self.status.value}")

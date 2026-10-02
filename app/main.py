@@ -113,19 +113,27 @@ async def lifespan(app: FastAPI):
     else:
         logger.error("❌ PostgreSQL connection failed!")
 
-    logger.info("🎬 Initializing Hailo RPi5 Client...")
-    try:
-        await initialize_rpi5_client()
-        logger.info("✅ Hailo RPi5 Client initialized (192.168.178.15:5000)")
-    except Exception as e:
-        logger.warning(f"⚠️  Hailo RPi5 Client initialization failed: {str(e)}")
+    # Hailo/Edge TPU: hosts are gone, off by default (Personal#29 B7/B8, services/accelerators.py)
+    from services.accelerators import hailo_enabled, edgetpu_enabled
+    if hailo_enabled():
+        logger.info("🎬 Initializing Hailo RPi5 Client...")
+        try:
+            await initialize_rpi5_client()
+            logger.info("✅ Hailo RPi5 Client initialized (192.168.178.15:5000)")
+        except Exception as e:
+            logger.warning(f"⚠️  Hailo RPi5 Client initialization failed: {str(e)}")
+    else:
+        logger.info("⏸️  Hailo disabled (HAILO_ENABLED=false) - no RPi5 connection attempt")
 
-    logger.info("🎬 Initializing Edge TPU Client...")
-    try:
-        await initialize_edgetpu_client()
-        logger.info("✅ Edge TPU Client initialized (192.168.178.155:5001)")
-    except Exception as e:
-        logger.warning(f"⚠️  Edge TPU Client initialization failed: {str(e)}")
+    if edgetpu_enabled():
+        logger.info("🎬 Initializing Edge TPU Client...")
+        try:
+            await initialize_edgetpu_client()
+            logger.info("✅ Edge TPU Client initialized (192.168.178.155:5001)")
+        except Exception as e:
+            logger.warning(f"⚠️  Edge TPU Client initialization failed: {str(e)}")
+    else:
+        logger.info("⏸️  Edge TPU disabled (EDGETPU_ENABLED=false) - no connection attempt")
 
     logger.info("🔍 Initializing Multi-Backend Validator...")
     try:

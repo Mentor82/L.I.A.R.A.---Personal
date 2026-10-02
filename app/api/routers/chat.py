@@ -30,6 +30,8 @@ from services.user_preferences_service import get_user_preferences
 from services.prompt_builder import build_temporal_context, build_personality_and_instructions_block, build_diagram_instructions, build_safety_dimensioning_instructions, build_no_fabrication_instructions, build_consent_required_instructions
 from services.chat_persistence import persist_chat_turn
 from services.hailo_rpi5_client import get_rpi5_client, RPi5Status
+from services.accelerators import hailo_enabled
+from services.cluster_info import cluster_configured
 
 # === Hailo-8L Backend Router Integration ===
 from services.backend_router import get_backend_router, BackendRouter, BackendType
@@ -814,22 +816,30 @@ async def chat_with_liara(
         
         # === 4b. HAILO BACKEND ROUTER INTEGRATION ===
         # Intelligente Backend-Auswahl basierend auf Request-Typ
-        backend_router: BackendRouter = get_backend_router()
-        chat_integration = HailoChatIntegration(backend_router)
-        
-        # Überprüfe ob Vision-Request (Bild + Keywords)
-        is_vision_request = detect_vision_request(request.message, request.attachments)
-        
-        # Wähle besten Backend für diesen Request
-        selected_backend, selection_result = await select_backend_for_request(
-            message=request.message,
-            attachments=request.attachments,
-            user_preferred_backend=request.use_accelerator or "auto",
-            allow_fallback=True
-        )
-        
-        mlogger.debug(f"Backend selected: {selected_backend} (vision={is_vision_request}, latency={selection_result.latency_ms}ms)")
-        backend_used = selected_backend.value if selected_backend else "ollama"
+        # Personal#29 B6: linepd routes (model/node by task), so the local
+        # Hailo/vLLM/llama.cpp router is bypassed unless Hailo is switched on.
+        legacy_routing = hailo_enabled()
+        if legacy_routing:
+            backend_router: BackendRouter = get_backend_router()
+            chat_integration = HailoChatIntegration(backend_router)
+
+            # Überprüfe ob Vision-Request (Bild + Keywords)
+            is_vision_request = detect_vision_request(request.message, request.attachments)
+
+            # Wähle besten Backend für diesen Request
+            selected_backend, selection_result = await select_backend_for_request(
+                message=request.message,
+                attachments=request.attachments,
+                user_preferred_backend=request.use_accelerator or "auto",
+                allow_fallback=True
+            )
+
+            mlogger.debug(f"Backend selected: {selected_backend} (vision={is_vision_request}, latency={selection_result.latency_ms}ms)")
+            backend_used = selected_backend.value if selected_backend else "ollama"
+        else:
+            is_vision_request = False
+            selected_backend = None
+            backend_used = "linep" if cluster_configured() else "ollama"
         # === END HAILO INTEGRATION ===
         
         # 5. Personalisiertes System Prompt basierend auf User
@@ -877,7 +887,7 @@ async def chat_with_liara(
         
         # === BACKEND ROUTING DECISION ===
         # Nutze Backend Router um beste Inferenz-Engine zu wählen
-        if selected_backend == BackendType.HAILO and is_vision_request:
+        if legacy_routing and selected_backend == BackendType.HAILO and is_vision_request:
             # Vision über Hailo-8L (6W, 5ms latency)
             try:
                 response_text, used_backend = await chat_integration.process_with_fallback(
@@ -899,7 +909,7 @@ async def chat_with_liara(
                 )
                 backend_used = "ollama"
                 backend_fallback = True
-        elif selected_backend == BackendType.VLLM:
+        elif legacy_routing and selected_backend == BackendType.VLLM:
             # LLM über vLLM (GPU, 50ms)
             try:
                 response_text, used_backend = await chat_integration.process_with_fallback(
@@ -927,7 +937,7 @@ async def chat_with_liara(
                 context=context_with_mood,
                 custom_system_prompt=combined_prompt
             )
-            backend_used = "ollama"
+            backend_used = "linep" if cluster_configured() else "ollama"
             backend_fallback = False
         # === END BACKEND ROUTING ===
         
@@ -1088,7 +1098,13 @@ async def chat_hailo_vision(
     "Assistant"-Antwort im Chat-Verlauf landet. hailo_router.py selbst
     bleibt unverändert - ein eigenständiger, Chat-unabhängiger Vision-Dienst.
     """
-    client = get_rpi5_client()
+    from services.accelerators import AcceleratorDisabledError, require_hailo
+    try:
+        require_hailo()
+    except AcceleratorDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    client = await get_rpi5_client()
 
     if client.status != RPi5Status.HEALTHY:
         raise HTTPException(

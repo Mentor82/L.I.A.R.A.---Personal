@@ -20,6 +20,7 @@ from core.dependencies import require_active_user
 from core.database import get_db
 from services.vision_service import VisionService, get_vision_service
 from services.vision_detection_service import get_vision_detection_service
+from services.accelerators import AcceleratorDisabledError
 from services.chat_persistence import persist_chat_turn
 
 router = APIRouter(
@@ -171,6 +172,8 @@ async def detect_image(
             model=model,
             confidence_threshold=score_threshold,
         )
+    except AcceleratorDisabledError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # pragma: no cover - runtime errors
