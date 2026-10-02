@@ -47,6 +47,13 @@ class ModelRouter:
         return ModelType.CONVERSATION
     
     @staticmethod
+    def get_best_task(message: str) -> str:
+        """Cluster task ("task:<name>") for a message, see OllamaClient.TASK_ROUTING."""
+        from liara_engine.nlp.ollama_client import OllamaClient
+
+        return OllamaClient.TASK_ROUTING[ModelRouter.detect_task_type(message)]
+
+    @staticmethod
     def get_best_model(
         message: str,
         user_preference: Optional[str] = None,

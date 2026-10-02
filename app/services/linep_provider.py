@@ -206,6 +206,52 @@ class LinepChatProvider:
         finally:
             client.close()
 
+    def chat_sync(self, model: str, messages: list[dict], max_tokens: int = 2000) -> str:
+        """Blocking structured chat for the sync call sites (OllamaClient.chat).
+
+        `model` is a concrete model or "task:<name>"; messages go over the wire
+        as {"messages": [...]} (structured, role-separated, no flattening).
+        Raises LinepUnavailableError on any failure: the caller decides about a
+        fallback. Must not be called from inside the event loop's thread
+        without to_thread - same as the requests call it replaces.
+        """
+        import json
+
+        _client_cls, EventType, RuntimeProfile, RequestEnvelope, StreamIdentity = _import_linep()
+        request = RequestEnvelope(
+            stream=StreamIdentity(
+                request_id=next(_request_ids), execution_id=next(_request_ids), output_id=0
+            ),
+            profile=RuntimeProfile.CHAT,
+            model_id=model,
+            payload=json.dumps({"messages": messages}),
+            max_tokens=max_tokens,
+        )
+        parts: list[str] = []
+        try:
+            client = self._connect_sync(self._timeout)
+            try:
+                for event in client.execute_stream(request):
+                    if event.event_type == EventType.CONTENT_DELTA and event.payload:
+                        parts.append(event.payload)
+                    elif event.event_type == EventType.FAILED:
+                        message = (
+                            event.error.message
+                            if event.error and event.error.message
+                            else "LiNeP runtime reported a failure"
+                        )
+                        raise LinepUnavailableError(message)
+            finally:
+                client.close()
+        except LinepUnavailableError:
+            raise
+        except Exception as error:
+            raise LinepUnavailableError(f"LiNeP transport failed: {error}") from error
+        text = "".join(parts).strip()
+        if not text:
+            raise LinepUnavailableError("LiNeP runtime returned an empty response")
+        return text
+
     async def generate_stream(
         self, prompt: str, model: str, num_predict: int = 2000
     ) -> AsyncIterator[tuple[str, str]]:

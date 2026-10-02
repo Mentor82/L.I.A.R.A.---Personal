@@ -1,7 +1,10 @@
 """Ollama Client für Liara - Multi-Model KI-Integration."""
+import logging
 import requests
 from typing import Optional, Dict, Any, List
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class ModelType(Enum):
@@ -27,6 +30,18 @@ class OllamaClient:
         ModelType.MULTILANG: "qwen2.5:7b",      # Multi-Language
     }
     
+    # Cluster tasks (Personal#29 B2): with the LiNeP trunk configured the
+    # task type is sent as "task:<name>" and linepd picks model and node
+    # (cloud-first today); MODEL_ROUTING above stays as the local fallback.
+    TASK_ROUTING = {
+        ModelType.INTENT: "task:fast",
+        ModelType.CONVERSATION: "task:fast",
+        ModelType.CODE: "task:code",
+        ModelType.REASONING: "task:reason",
+        ModelType.PREMIUM: "task:reason",
+        ModelType.MULTILANG: "task:translate",
+    }
+
     def __init__(self, base_url: str = "http://localhost:11434"):
         """
         Initialisiere Ollama Client.
@@ -37,6 +52,15 @@ class OllamaClient:
         self.base_url = base_url
         self.default_model = "llama3.2:3b"
     
+    @staticmethod
+    def _cluster_enabled() -> bool:
+        try:
+            from core.config import settings
+
+            return bool(settings.linep_enabled and settings.linep_trunk_host)
+        except Exception:
+            return False
+
     def is_available(self) -> bool:
         """Prüfe ob Ollama Server erreichbar ist."""
         try:
@@ -80,6 +104,24 @@ class OllamaClient:
         Returns:
             Antwort vom Modell
         """
+        # Cluster-Task: nur ohne explizites Modell und mit konfiguriertem Trunk
+        if model is None and model_type and self._cluster_enabled():
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            user_content = f"{context}\n\n{message}" if context else message
+            messages.append({"role": "user", "content": user_content})
+            if not stream:
+                try:
+                    from services.linep_provider import get_linep_provider
+
+                    return get_linep_provider().chat_sync(self.TASK_ROUTING[model_type], messages)
+                except Exception as e:
+                    logger.warning(
+                        "Cluster-Task %s fehlgeschlagen (%s) - Fallback auf lokales Ollama",
+                        self.TASK_ROUTING[model_type], e,
+                    )
+
         # Model-Auswahl
         if model is None:
             if model_type:

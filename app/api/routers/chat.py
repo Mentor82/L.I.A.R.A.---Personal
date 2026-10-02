@@ -542,7 +542,7 @@ Das ist wie der Zugang zu geschützten Daten – nur mit den richtigen Berechtig
 Sei warmherzig, wissenschaftlich neugierig, aber nicht ausschweifend."""
 
     try:
-        from liara_engine.nlp.ollama_client import ask_liara, ModelType
+        from liara_engine.nlp.ollama_client import ask_liara, ModelType, OllamaClient
         
         # Vereinfachter Call ohne Mood/Intent
         response_text = ask_liara(
@@ -553,7 +553,7 @@ Sei warmherzig, wissenschaftlich neugierig, aber nicht ausschweifend."""
         
         return {
             "response": response_text,
-            "model_used": "llama3.2:1b",
+            "model_used": ("task:fast" if OllamaClient._cluster_enabled() else "llama3.2:1b"),
             "mode": "guest",
             "hint": "💡 Registriere dich für erweiterte Funktionen und personalisierte Gespräche!"
         }
