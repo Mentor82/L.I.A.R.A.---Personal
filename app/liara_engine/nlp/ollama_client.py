@@ -115,7 +115,9 @@ class OllamaClient:
                 try:
                     from services.linep_provider import get_linep_provider
 
-                    return get_linep_provider().chat_sync(self.TASK_ROUTING[model_type], messages)
+                    return get_linep_provider().chat_sync(
+                        self.TASK_ROUTING[model_type], messages, temperature=temperature
+                    )
                 except Exception as e:
                     logger.warning(
                         "Cluster-Task %s fehlgeschlagen (%s) - Fallback auf lokales Ollama",

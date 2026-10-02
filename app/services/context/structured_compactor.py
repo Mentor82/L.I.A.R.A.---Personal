@@ -145,7 +145,9 @@ class StructuredCompactor:
         return state
 
     @staticmethod
-    async def _chat_via_cluster(model: str, messages: List[Dict[str, str]]) -> Optional[str]:
+    async def _chat_via_cluster(
+        model: str, messages: List[Dict[str, str]], temperature: Optional[float] = None
+    ) -> Optional[str]:
         """Antwort über den LiNeP-Cluster-Trunk (Personal#29 B3), oder None
         wenn der Cluster nicht konfiguriert ist bzw. fehlschlägt (dann nimmt
         der Aufrufer den direkten Ollama-Weg). Das Standardmodell wird zum
@@ -159,7 +161,9 @@ class StructuredCompactor:
             from services.linep_provider import get_linep_provider
 
             target = "task:json" if model == COMPACTION_MODEL else model
-            return await asyncio.to_thread(get_linep_provider().chat_sync, target, messages, 2000)
+            return await asyncio.to_thread(
+                get_linep_provider().chat_sync, target, messages, 2000, temperature
+            )
         except Exception as e:
             logger.warning("Cluster-Kompaktierung fehlgeschlagen (%s) - Fallback auf direktes Ollama", e)
             return None
@@ -190,7 +194,7 @@ class StructuredCompactor:
                 {"role": "system", "content": COMPACTOR_SYSTEM_PROMPT},
                 {"role": "user", "content": transcript},
             ]
-            content = await cls._chat_via_cluster(model, messages)
+            content = await cls._chat_via_cluster(model, messages, temperature=0.1)
             if content is None:
                 base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
                 async with httpx.AsyncClient(timeout=90.0) as client:

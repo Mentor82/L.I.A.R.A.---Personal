@@ -206,7 +206,13 @@ class LinepChatProvider:
         finally:
             client.close()
 
-    def chat_sync(self, model: str, messages: list[dict], max_tokens: int = 2000) -> str:
+    def chat_sync(
+        self,
+        model: str,
+        messages: list[dict],
+        max_tokens: int = 2000,
+        temperature: Optional[float] = None,
+    ) -> str:
         """Blocking structured chat for the sync call sites (OllamaClient.chat).
 
         `model` is a concrete model or "task:<name>"; messages go over the wire
@@ -227,6 +233,8 @@ class LinepChatProvider:
             payload=json.dumps({"messages": messages}),
             max_tokens=max_tokens,
         )
+        if temperature is not None:
+            request.temperature = float(temperature)
         parts: list[str] = []
         try:
             client = self._connect_sync(self._timeout)
@@ -253,7 +261,11 @@ class LinepChatProvider:
         return text
 
     async def generate_stream(
-        self, prompt: str, model: str, num_predict: int = 2000
+        self,
+        prompt: str,
+        model: str,
+        num_predict: int = 2000,
+        temperature: Optional[float] = None,
     ) -> AsyncIterator[tuple[str, str]]:
         """Streams (kind, payload) tuples from a LiNeP-routed GENERATE call,
         kind being "content", "thinking", or "tool_call" (see module
@@ -274,6 +286,8 @@ class LinepChatProvider:
             payload=prompt,
             max_tokens=num_predict,
         )
+        if temperature is not None:
+            request.temperature = float(temperature)
 
         timeout = self._timeout
         loop = asyncio.get_running_loop()
