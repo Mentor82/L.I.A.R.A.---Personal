@@ -29,7 +29,7 @@ class ValidationRequest(BaseModel):
 class TextGenerationRequest(BaseModel):
     """Text generation request"""
     prompt: str
-    model: str = "mistral:7b"
+    model: Optional[str] = None  # None = Cluster-Task task:judge (Fallback lokal: llama3.2:3b)
 
 # ============================================================================
 # ENDPOINTS
@@ -44,7 +44,7 @@ async def validate_code(request: ValidationRequest, current_user: User = Depends
     """Validate code snippet
     
     Supports: python, javascript, bash, json, yaml, c, cpp, go, rust, php, ruby, sql, html, css, java, typescript
-    Uses liara-core as primary, liara as fallback, ai-validator for syntax checking
+    Syntax checking via ai-validator (.150); text/grading backends: LiNeP cluster (task:judge), fallback liara
     """
     validator = await get_validator()
     
@@ -185,7 +185,7 @@ async def get_available_models(current_user: User = Depends(require_active_user)
 
 @router.post("/generate")
 async def generate_text(request: TextGenerationRequest, current_user: User = Depends(require_active_user)):
-    """Generate text using active backend (liara-core or liara)"""
+    """Generate text using the active backend (LiNeP cluster task:judge, fallback liara)"""
     validator = await get_validator()
     
     result = await validator.generate_text(

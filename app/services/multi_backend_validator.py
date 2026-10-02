@@ -1,7 +1,12 @@
 """
 AI Validator Service - Multi-Backend with Fallback
-Primär: liara-core (192.168.178.60:11434)
-Fallback: liara (192.168.178.50:11434)
+Primär: LiNeP-Cluster (Trunk, "task:judge" - Personal#29 B5)
+Fallback: liara (192.168.178.50:11434, lokales Ollama)
+
+liara-core (192.168.178.60) existiert nicht mehr und wird nicht mehr angefragt.
+Bewertungen laufen ueber task:judge, das per distinct_from nie ein Modell von
+task:reason nimmt: wer erzeugt, bewertet sich nicht selbst. Die Syntax-Pruefung
+(AI-Validator auf .150) ist davon unberuehrt.
 """
 
 import httpx
@@ -11,16 +16,17 @@ from pydantic import BaseModel
 from datetime import datetime
 import asyncio
 
+from core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
-# Primary Validator (liara-core)
-PRIMARY_VALIDATOR_HOST = "192.168.178.60"
-PRIMARY_VALIDATOR_PORT = 11434
-PRIMARY_VALIDATOR_URL = f"http://{PRIMARY_VALIDATOR_HOST}:{PRIMARY_VALIDATOR_PORT}"
+# Primary Validator: LiNeP cluster trunk (host/port come from core.config)
+JUDGE_TASK = "task:judge"
+LOCAL_JUDGE_MODEL = "llama3.2:3b"  # Notfall-Modell auf liara (CPU: mistral:7b braucht dort ~85 s Kaltstart)
 
 # Fallback Validator (liara)
 FALLBACK_VALIDATOR_HOST = "192.168.178.50"
@@ -94,14 +100,15 @@ class MultiBackendValidatorService:
         if not self.client:
             self.client = httpx.AsyncClient(timeout=VALIDATOR_TIMEOUT)
         
-        # Check primary (liara-core)
+        # Check primary (LiNeP cluster)
         try:
-            response = await self.client.get(f"{PRIMARY_VALIDATOR_URL}/api/tags", timeout=10)
-            self.primary_healthy = response.status_code == 200
-            logger.info(f"🟢 Primary Backend (liara-core): {'✅ Healthy' if self.primary_healthy else '❌ Unhealthy'}")
+            from services.cluster_info import get_cluster_info
+            cluster = await asyncio.to_thread(get_cluster_info)
+            self.primary_healthy = bool(cluster and cluster["available"] and JUDGE_TASK in cluster["tasks"])
+            logger.info(f"🟢 Primary Backend (LiNeP cluster): {'✅ Healthy' if self.primary_healthy else '❌ Unhealthy/not configured'}")
         except Exception as e:
             self.primary_healthy = False
-            logger.warning(f"🔴 Primary Backend (liara-core) error: {str(e)}")
+            logger.warning(f"🔴 Primary Backend (LiNeP cluster) error: {str(e)}")
         
         # Check fallback (liara)
         try:
@@ -115,7 +122,7 @@ class MultiBackendValidatorService:
     async def _get_active_backend(self) -> Tuple[str, str]:
         """Get active backend URL and name"""
         if self.primary_healthy:
-            return PRIMARY_VALIDATOR_URL, "liara-core (primary)"
+            return "cluster", "LiNeP cluster (primary)"
         elif self.fallback_healthy:
             logger.warning("⚠️ Primary backend unavailable, using fallback (liara)")
             return FALLBACK_VALIDATOR_URL, "liara (fallback)"
@@ -133,9 +140,9 @@ class MultiBackendValidatorService:
         return {
             "timestamp": datetime.utcnow().isoformat(),
             "primary": {
-                "name": "liara-core",
-                "host": PRIMARY_VALIDATOR_HOST,
-                "port": PRIMARY_VALIDATOR_PORT,
+                "name": "LiNeP cluster (task:judge)",
+                "host": settings.linep_trunk_host or None,
+                "port": settings.linep_trunk_port if settings.linep_trunk_host else None,
                 "status": "healthy" if self.primary_healthy else "unhealthy"
             },
             "fallback": {
@@ -187,7 +194,13 @@ class MultiBackendValidatorService:
                 await self.initialize()
             
             backend_url, backend_name = await self._get_active_backend()
-            
+            if backend_url == "cluster":
+                from services.cluster_info import get_cluster_info
+                cluster = await asyncio.to_thread(get_cluster_info)
+                models = [{"name": n} for n in (cluster["tasks"] + cluster["models"])] if cluster else []
+                logger.info(f"📦 Retrieved {len(models)} models/tasks from {backend_name}")
+                return models
+
             response = await self.client.get(
                 f"{backend_url}/api/tags",
                 timeout=VALIDATOR_TIMEOUT
@@ -206,15 +219,32 @@ class MultiBackendValidatorService:
     async def generate_text(
         self,
         prompt: str,
-        model: str = "mistral:7b"
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Generate text using active backend"""
+        """Generate text using active backend. Without an explicit model the
+        cluster grades via task:judge (never a task:reason model)."""
         try:
             if not self.client:
                 await self.initialize()
             
-            print(f"[DEBUG] About to get active backend...")
             backend_url, backend_name = await self._get_active_backend()
+            if backend_url == "cluster":
+                target = model or JUDGE_TASK
+                try:
+                    from services.linep_provider import get_linep_provider
+                    text = await asyncio.to_thread(
+                        get_linep_provider().chat_sync, target,
+                        [{"role": "user", "content": prompt}], 2000, 0.2,
+                    )
+                    logger.info(f"✅ Generated text using {target} on {backend_name}")
+                    return {"model": target, "response": text, "done": True, "backend": backend_name}
+                except Exception as e:
+                    logger.warning(f"Cluster-Bewertung fehlgeschlagen ({e}) - Fallback auf liara")
+                    if not self.fallback_healthy:
+                        raise
+                    backend_url, backend_name = FALLBACK_VALIDATOR_URL, "liara (fallback)"
+            if model is None or model.startswith("task:"):
+                model = LOCAL_JUDGE_MODEL
             print(f"[DEBUG] 🔍 Generating text with {model} on {backend_name} ({backend_url})")
             
             payload = {
