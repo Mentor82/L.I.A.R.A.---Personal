@@ -9,9 +9,19 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from typing import List, Dict, Optional, Union
 import logging
+import math
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+
+class EmbeddingError(RuntimeError):
+    """No usable embedding could be produced (empty text, model failure, bad vector).
+
+    Raised instead of returning a zero vector: a zero vector has no direction,
+    so cosine search ranks it arbitrarily, and once stored in the index it can
+    never be told apart from a real embedding (Personal#29 B10 prerequisite).
+    """
 
 
 class EmbeddingService:
@@ -39,26 +49,40 @@ class EmbeddingService:
             logger.info("Model loaded successfully")
         return self._model
     
+    def _validate(self, vector: List[float]) -> List[float]:
+        """Dimension, finiteness and non-zero norm, or EmbeddingError."""
+        if len(vector) != self.dimension:
+            raise EmbeddingError(f"embedding has {len(vector)} dims, expected {self.dimension}")
+        if not all(math.isfinite(x) for x in vector):
+            raise EmbeddingError("embedding contains NaN/Infinity")
+        if not any(vector):
+            raise EmbeddingError("embedding is the zero vector")
+        return vector
+
     def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding for a single text
-        
+
         Args:
             text: Input text to embed
-            
+
         Returns:
             List of floats representing the embedding vector
+
+        Raises:
+            EmbeddingError: empty text, model failure, or an unusable vector
         """
         if not text or not text.strip():
-            logger.warning("Empty text provided for embedding")
-            return [0.0] * self.dimension
-        
+            raise EmbeddingError("empty text")
+
         try:
             embedding = self.model.encode(text, convert_to_numpy=True)
-            return embedding.tolist()
+            return self._validate(embedding.tolist())
+        except EmbeddingError:
+            raise
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
-            return [0.0] * self.dimension
+            raise EmbeddingError(f"embedding failed: {e}") from e
     
     def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
@@ -69,16 +93,23 @@ class EmbeddingService:
             
         Returns:
             List of embedding vectors
+
+        Raises:
+            EmbeddingError: model failure or any unusable vector in the batch
         """
         if not texts:
             return []
-        
+        if any(not t or not t.strip() for t in texts):
+            raise EmbeddingError("empty text in batch")
+
         try:
             embeddings = self.model.encode(texts, convert_to_numpy=True, show_progress_bar=len(texts) > 10)
-            return embeddings.tolist()
+            return [self._validate(v) for v in embeddings.tolist()]
+        except EmbeddingError:
+            raise
         except Exception as e:
             logger.error(f"Error generating batch embeddings: {e}")
-            return [[0.0] * self.dimension] * len(texts)
+            raise EmbeddingError(f"batch embedding failed: {e}") from e
     
     def cosine_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
         """
@@ -276,9 +307,17 @@ def analyze_content(text: str, context: Optional[Dict] = None) -> Dict:
         Dict with embedding, topics, intent, emotion, importance
     """
     service = get_embedding_service()
-    
+
+    # No embedding is better than a bogus one: callers store NULL (the rest of
+    # the metadata is rule-based and still valid) instead of a zero vector.
+    try:
+        embedding = service.generate_embedding(text)
+    except EmbeddingError as e:
+        logger.warning("No embedding for content (%s) - storing metadata without one", e)
+        embedding = None
+
     return {
-        'embedding': service.generate_embedding(text),
+        'embedding': embedding,
         'topics': service.extract_keywords(text, top_n=5),
         'intent': service.detect_intent(text),
         'emotion': service.detect_emotion(text),

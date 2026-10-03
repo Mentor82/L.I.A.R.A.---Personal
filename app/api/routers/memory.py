@@ -11,7 +11,7 @@ from datetime import datetime
 
 from core.database import get_db
 from core.dependencies import get_current_user
-from services.embedding_service import get_embedding_service, analyze_content
+from services.embedding_service import get_embedding_service, analyze_content, EmbeddingError
 from services.neo4j_service import get_neo4j_service
 from services.redis_service import get_redis_service
 
@@ -104,7 +104,10 @@ async def semantic_search(
     embedding_service = get_embedding_service()
     
     # Generate query embedding
-    query_embedding = embedding_service.generate_embedding(request.query)
+    try:
+        query_embedding = embedding_service.generate_embedding(request.query)
+    except EmbeddingError as e:
+        raise HTTPException(status_code=503, detail=f"Embedding nicht verfuegbar: {e}")
     
     # Build SQL query for vector similarity search
     content_type_filter = ""

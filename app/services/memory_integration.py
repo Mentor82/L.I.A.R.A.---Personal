@@ -16,7 +16,7 @@ import logging
 import re
 from collections import Counter
 
-from services.embedding_service import get_embedding_service, analyze_content
+from services.embedding_service import get_embedding_service, analyze_content, EmbeddingError
 from services.neo4j_service import get_neo4j_service
 from services.redis_service import get_redis_service
 
@@ -207,7 +207,11 @@ def store_in_4d_memory(
              :emotion, :importance, :content_summary, :model, :version)
         ON CONFLICT (user_id, content_type, content_id) 
         DO UPDATE SET
-            embedding = EXCLUDED.embedding,
+            embedding = COALESCE(EXCLUDED.embedding, semantic_metadata.embedding),
+            embedding_model = CASE WHEN EXCLUDED.embedding IS NULL
+                                   THEN semantic_metadata.embedding_model ELSE EXCLUDED.embedding_model END,
+            embedding_version = CASE WHEN EXCLUDED.embedding IS NULL
+                                     THEN semantic_metadata.embedding_version ELSE EXCLUDED.embedding_version END,
             topics = EXCLUDED.topics,
             intent = EXCLUDED.intent,
             emotion = EXCLUDED.emotion,
@@ -221,7 +225,7 @@ def store_in_4d_memory(
             'user_id': user_id,
             'content_type': content_type,
             'content_id': content_id,
-            'embedding': str(analysis['embedding']),
+            'embedding': str(analysis['embedding']) if analysis['embedding'] is not None else None,
             'topics': analysis['topics'],
             'intent': analysis['intent'],
             'emotion': analysis['emotion'],
@@ -365,8 +369,12 @@ def search_semantic_memory(
         List of similar content with metadata
     """
     embedding_service = get_embedding_service()
-    query_embedding = embedding_service.generate_embedding(query)
-    
+    try:
+        query_embedding = embedding_service.generate_embedding(query)
+    except EmbeddingError as e:
+        logger.warning(f"Semantic search skipped, no query embedding: {e}")
+        return []
+
     # content_types filter as a bind parameter, not string interpolation
     # (issue #7 item 7) - expanding=True lets SQLAlchemy turn the list into
     # a safely parameterized IN (...) regardless of its contents.
@@ -646,8 +654,13 @@ def store_message_with_concepts(
     # 3. Embeddings generieren (batch)
     concept_embeddings = {}
     if concepts:
-        embeddings = embedding_service.generate_embeddings_batch(concepts)
-        concept_embeddings = dict(zip(concepts, embeddings))
+        try:
+            embeddings = embedding_service.generate_embeddings_batch(concepts)
+            concept_embeddings = dict(zip(concepts, embeddings))
+        except EmbeddingError as e:
+            # Concepts are still stored, just without an embedding (NULL), never with a bogus one.
+            logger.warning(f"Concept embeddings unavailable ({e}) - storing concepts without embedding")
+            concept_embeddings = {c: None for c in concepts}
     
     # 4. Concept Nodes erstellen + Verbinden
     stored_concepts = 0
@@ -722,7 +735,11 @@ def get_relevant_context(
     embedding_service = get_embedding_service()
 
     # 1. Query Embedding generieren
-    query_embedding = embedding_service.generate_embedding(query_text)
+    try:
+        query_embedding = embedding_service.generate_embedding(query_text)
+    except EmbeddingError as e:
+        logger.warning(f"Concept search skipped, no query embedding: {e}")
+        return []
 
     # 2. Alle Concepts des Users abrufen - ORDER BY created_at DESC vor dem
     # LIMIT (Bug gefunden 2026-09-03 beim Live-Test des Korrektur-Triggers,
