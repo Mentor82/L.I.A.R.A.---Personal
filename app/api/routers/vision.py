@@ -257,10 +257,10 @@ async def get_vision_models(current_user: User = Depends(require_active_user)):
     
     return {
         'available_models': models,
-        'default_model': 'qwen3.5:cloud',
+        'default_model': 'gemma4:cloud',
         'recommended': {
             'fast': 'qwen3.5:0.8b',
-            'cloud': 'qwen3.5:cloud',
+            'cloud': 'gemma4:cloud',
             'expert': 'kimi-k3:cloud'
         }
     }
@@ -278,7 +278,7 @@ async def get_vision_status():
     
     return {
         'vision_available': is_available,
-        'model': 'qwen3.5:cloud',
+        'model': 'gemma4:cloud',
         'fallback_model': 'qwen3.5:0.8b',
         'capabilities': [
             'Bildbeschreibung',

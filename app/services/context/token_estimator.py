@@ -25,18 +25,25 @@ MODEL_CONTEXT_LIMITS: Dict[str, int] = {
     "deepseek-r1:7b": 32768,
     "llava:7b": 4096,
     
-    # Cloud-Modelle (Ollama Cloud / Remote)
-    "gemma4:cloud": 32768,
-    "qwen3.5:cloud": 131072,
-    "kimi-k3:cloud": 131072,
-    "kimi-k2.7-code:cloud": 131072,
-    "deepseek-v4-pro:cloud": 131072,
-    "deepseek-v4-flash:cloud": 65536,
-    "deepseek-v4-flash:0731-cloud": 65536,
-    "glm-5.1:cloud": 131072,
-    "nemotron-3-ultra:cloud": 131072,
+    # Cloud-Modelle (Ollama Cloud / Remote) - Stand ollama.com/api/tags 2026-10-05
+    # Werte sind konservative Praxis-Budgets, nicht die Modell-Maxima.
+    "gemma4:cloud": 65536,
     "gpt-oss:120b-cloud": 65536,
     "gpt-oss:20b-cloud": 32768,
+    "kimi-k3:cloud": 131072,
+    "kimi-k2.7-code:cloud": 131072,
+    "kimi-k2.6:cloud": 131072,
+    "glm-5.3:cloud": 131072,
+    "glm-5.3-flash:cloud": 131072,
+    "glm-5.2:cloud": 131072,
+    "deepseek-v4-pro:0813-cloud": 131072,
+    "deepseek-v4.1-flash:cloud": 131072,
+    "minimax-m3:cloud": 131072,
+    "minimax-m2.7:cloud": 131072,
+    "mistral-large-3:675b-cloud": 131072,
+    "nemotron-3-ultra:cloud": 131072,
+    "nemotron-3-super:cloud": 131072,
+    "nemotron-3-nano:30b-cloud": 65536,
 }
 
 DEFAULT_FALLBACK_CONTEXT_LIMIT = 8192

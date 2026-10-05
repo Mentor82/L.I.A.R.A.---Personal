@@ -65,7 +65,7 @@ class TestContextBudgetManager(unittest.TestCase):
 
     def test_structured_compactor_preservation(self):
         turns = [
-            {"role": "user", "content": "Wir nutzen ab jetzt Port 8100 und qwen3.5:cloud als Vision-Sensor."},
+            {"role": "user", "content": "Wir nutzen ab jetzt Port 8100 und gemma4:cloud als Vision-Sensor."},
             {"role": "assistant", "content": "Verstanden, Port 8100 ist beschlossen."},
             {"role": "user", "content": "Bitte nur auf Deutsch antworten und niemals jQuery einbinden."}
         ]

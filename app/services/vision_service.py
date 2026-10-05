@@ -1,7 +1,7 @@
 """
 Vision Service - Multimodal Hybrid Context Pipeline & Vision API
 ================================================================
-Analysiert Bilder standardmäßig via qwen3.5:cloud (Ollama Cloud)
+Analysiert Bilder standardmäßig via gemma4:cloud (Ollama Cloud)
 mit automatischem Fallback auf qwen3.5:0.8b (lokal, blitzschnell auf CPU).
 """
 
@@ -18,7 +18,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-VISION_MODEL = os.getenv("VISION_MODEL", "qwen3.5:cloud")
+VISION_MODEL = os.getenv("VISION_MODEL", "gemma4:cloud")
 VISION_FALLBACK_MODEL = os.getenv("VISION_FALLBACK_MODEL", "qwen3.5:0.8b")
 
 VISION_SYSTEM_PROMPT = """Du bist der spezialisierte visuelle Sensor-Agent für LIARA.
@@ -39,7 +39,7 @@ Antworte präzise auf Deutsch, klar strukturiert und trenne Fakten strikt von In
 
 def analyze_image_with_vision(image_base64_or_path: str, user_question: str = "") -> str:
     """
-    Analysiert ein Bild über Ollama mit Primärmodell (qwen3.5:cloud)
+    Analysiert ein Bild über Ollama mit Primärmodell (gemma4:cloud)
     und automatischem Fallback auf lokales Modell (qwen3.5:0.8b).
     """
     if not image_base64_or_path:
@@ -72,7 +72,7 @@ def analyze_image_with_vision(image_base64_or_path: str, user_question: str = ""
         }
     }
 
-    # 1. Versuch: qwen3.5:cloud
+    # 1. Versuch: gemma4:cloud
     try:
         logger.info(f"Sending image to Primary Vision model '{VISION_MODEL}'...")
         req = urllib.request.Request(
@@ -107,10 +107,10 @@ def analyze_image_with_vision(image_base64_or_path: str, user_question: str = ""
     except Exception as fb_err:
         logger.error(f"Local vision fallback '{VISION_FALLBACK_MODEL}' also failed: {fb_err}")
 
-    # 3. Versuch: gemma4:cloud als sekundärer Cloud-Fallback
+    # 3. Versuch: glm-5.3-flash:cloud als sekundärer Cloud-Fallback
     try:
-        logger.info("Attempting secondary cloud fallback 'gemma4:cloud'...")
-        payload["model"] = "gemma4:cloud"
+        logger.info("Attempting secondary cloud fallback 'glm-5.3-flash:cloud'...")
+        payload["model"] = "glm-5.3-flash:cloud"
         req_gemma = urllib.request.Request(
             f"{OLLAMA_URL}/api/chat",
             data=json.dumps(payload).encode("utf-8"),
@@ -144,7 +144,7 @@ def format_vision_context_block(vision_analysis: str) -> str:
 
 
 class VisionService:
-    """Service für Bildanalyse mit qwen3.5:cloud / qwen3.5:0.8b"""
+    """Service für Bildanalyse mit gemma4:cloud / qwen3.5:0.8b"""
 
     def __init__(self, ollama_url: str = OLLAMA_URL):
         self.ollama_url = ollama_url
@@ -159,7 +159,7 @@ class VisionService:
                 if resp.status_code != 200:
                     return False
                 models = resp.json().get("models", [])
-                return any("qwen3.5" in m["name"].lower() or "gemma4" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() for m in models)
+                return any("qwen3.5" in m["name"].lower() or "gemma4" in m["name"].lower() or "glm-5.3-flash" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() for m in models)
             except Exception:
                 return False
         return await asyncio.to_thread(_check)
@@ -174,7 +174,7 @@ class VisionService:
                 models = resp.json().get("models", [])
                 return [
                     m["name"] for m in models
-                    if "qwen3.5" in m["name"].lower() or "gemma4" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() or "kimi" in m["name"].lower()
+                    if "qwen3.5" in m["name"].lower() or "gemma4" in m["name"].lower() or "glm-5.3-flash" in m["name"].lower() or "llava" in m["name"].lower() or "vision" in m["name"].lower() or "kimi" in m["name"].lower()
                 ]
             except Exception:
                 return []

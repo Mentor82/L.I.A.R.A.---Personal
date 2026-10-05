@@ -81,7 +81,7 @@ class AgentRegistry:
             "id": "vision",
             "name": "Vision Agent",
             "description": "Optischer Sensor- & Wahrnehmungs-Agent mit 2-Stufen-Befund (VISION_FACTS vs. VISION_INTERPRETATION), OCR und NPU-Objekterkennung.",
-            "default_model": "qwen3.5:cloud",
+            "default_model": "gemma4:cloud",
             "icon": "👁️",
             "category": "multimodal",
             "tools": [

@@ -36,7 +36,7 @@ class VisionAgent(BaseAgent):
         self,
         user_id: Optional[int] = None,
         session_id: Optional[int] = None,
-        model: str = "qwen3.5:cloud",
+        model: str = "gemma4:cloud",
         max_steps: int = 8
     ):
         super().__init__(
