@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Optional, AsyncGenerator, List, Dict
+from typing import Optional, AsyncGenerator, List, Dict, Any
 
 import httpx
 
@@ -20,6 +20,7 @@ from liara_engine.memory.mood_system import MoodSystem
 from services.config_service import get_config_service
 from services.factcheck_splitter import FactCheckBlockExtractor, parse_factcheck_items
 from services.linep_provider import get_linep_provider, linep_enabled, LinepUnavailableError
+from services.cluster_info import cluster_configured
 from services.ollama_capabilities import model_supports_tools, get_model_num_predict
 from services.task_splitter import TaskBlockExtractor, parse_task_items
 from services.thinking_splitter import ThinkingSplitter
@@ -54,7 +55,6 @@ from services.chat_stream.persistence_stage import (
 from services.chat_persistence import persist_assistant_message
 from services.chat_stream.generator_helpers import (
     _resolve_symbol,
-    _flatten_messages_for_linep,
     _append_linep_tool_call,
     _handle_workspace_artifact_blocks,
     calculate_usage_stats,
@@ -84,7 +84,7 @@ async def _run_background_context_compaction(
 
         latest = await asyncio.to_thread(load_structured_session_state, session_id)
         merge_base = latest or base_state
-        enriched = await StructuredCompactor.compact_via_llm(turns, merge_base, model=model)
+        enriched = await StructuredCompactor.compact_via_llm(turns, merge_base)
         await asyncio.to_thread(persist_structured_session_state, session_id, enriched)
     except Exception as e:
         logger.error(f"Background context compaction failed for session {session_id}: {e}")
@@ -114,6 +114,8 @@ async def stream_ollama_response(
     images: Optional[List[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streame Ollama-Response via Server-Sent Events."""
+    use_cluster = cluster_configured()
+    model = model or ("task:tool" if use_cluster else "llama3.2:3b")
     lock_watchdog_task = None
     lock_lost_event = asyncio.Event()
 
@@ -185,7 +187,7 @@ async def stream_ollama_response(
         except Exception as vis_err:
             logger.error("Gemma Vision analysis error: %s", vis_err)
 
-    supports_tools = await model_supports_tools(model)
+    supports_tools = use_cluster or await model_supports_tools(model)
     system_prompt = assemble_streaming_system_prompt(
         username=username,
         personality=personality,
@@ -340,10 +342,12 @@ async def stream_ollama_response(
             configured_max_tokens = cfg_fn(db_config).get_max_tokens()
         finally:
             db_config.close()
-        num_predict = await num_predict_fn(model, configured_max_tokens)
+        num_predict = configured_max_tokens if use_cluster else await num_predict_fn(model, configured_max_tokens)
 
         transport = "ollama"
-        if linep_enabled():
+        if use_cluster:
+            transport = "linep"
+        elif linep_enabled():
             if await get_linep_provider().health():
                 transport = "linep"
                 logger.info("[LiNeP-Switch] Chat turn (session=%s) using LiNeP transport", session_id)
@@ -382,9 +386,10 @@ async def stream_ollama_response(
             turn_tool_calls = []
 
             if transport == "linep":
-                prompt_text = _flatten_messages_for_linep(messages, bool(iteration_tools))
                 async for event_kind, event_payload in _with_lock_lost_guard(
-                    get_linep_provider().generate_stream(prompt_text, model, num_predict),
+                    get_linep_provider().chat_stream(
+                        model, messages, num_predict, temperature, tools=iteration_tools
+                    ),
                     lock_lost_event
                 ):
                     _check_lock_held()
@@ -394,12 +399,16 @@ async def stream_ollama_response(
                         continue
 
                     if event_kind == "tool_call":
+                        if not iteration_tools:
+                            raise LinepUnavailableError("Unexpected tool call without enabled tools")
                         try:
                             native_call = json.loads(event_payload)
-                        except json.JSONDecodeError:
-                            native_call = None
+                        except json.JSONDecodeError as error:
+                            raise LinepUnavailableError("Invalid tool-call JSON") from error
                         if isinstance(native_call, dict) and native_call.get("function"):
                             turn_tool_calls.append(native_call)
+                        else:
+                            raise LinepUnavailableError("Invalid tool-call structure")
                         continue
 
                     content = event_payload
@@ -764,7 +773,7 @@ async def stream_ollama_response(
 
     except LinepUnavailableError as e:
         logger.error(f"LiNeP transport failed mid-stream: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'error': {'error_type': 'linep_error', 'message': 'LiNeP-Transport nicht erreichbar (experimentell)', 'timestamp': datetime.now().isoformat(), 'recoverable': True, 'suggestion': 'Erneut versuchen - fällt bei Bedarf auf Ollama-HTTP zurück'}})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'error': {'error_type': 'linep_error', 'message': 'Die KI-Anfrage konnte über LiNeP nicht abgeschlossen werden.', 'timestamp': datetime.now().isoformat(), 'recoverable': True, 'suggestion': 'Bitte erneut versuchen.'}})}\n\n"
 
     except httpx_mod.HTTPStatusError as e:
         yield f"data: {json.dumps({'type': 'error', 'error': {'error_type': 'http_error', 'message': f'Ollama HTTP Error: {e.response.status_code}', 'timestamp': datetime.now().isoformat(), 'recoverable': False, 'suggestion': 'Model existiert möglicherweise nicht.'}})}\n\n"

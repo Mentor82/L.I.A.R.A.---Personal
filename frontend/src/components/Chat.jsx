@@ -11,6 +11,7 @@ import { MemoryIndicator, MemoryBadge } from './MemoryIndicator';
 import liaraLogo from '../assets/LIARA-LOGO.png';
 import { compressAndFormatImage } from '../utils/imageCompressor';
 import './Chat.css';
+import { normalizeChatTask, chatTaskOptions, FALLBACK_CHAT_TASKS, selectOptimalModel } from '../utils/chatTasks';
 
 // Collapsible display for reasoning-model output (deepseek-r1 etc.), kept
 // separate from the answer by the backend's thinking_splitter. Auto-expanded
@@ -109,7 +110,7 @@ function Chat() {
   const [searchIntent, setSearchIntent] = useState(null);
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem('liara_selected_model') || 'llama3.2:3b';
+    return normalizeChatTask(localStorage.getItem('liara_selected_model'));
   });
   const [autoModelSelection, setAutoModelSelection] = useState(() => {
     const saved = localStorage.getItem('liara_auto_model');
@@ -188,12 +189,14 @@ function Chat() {
         const data = await chatAPI.getModels();
         console.log('Models loaded:', data);
         if (data.models && data.models.length > 0) {
-          setModels(data.models);
+          const tasks = chatTaskOptions(data.models);
+          setModels(tasks);
+          setSelectedModel(current => tasks.some(t => t.name === current) ? current : tasks[0].name);
           
           // NUR setze empfohlenes Model wenn User noch KEIN Model gewählt hat
           const savedModel = localStorage.getItem('liara_selected_model');
           if (!savedModel) {
-            const recommended = data.models.find(m => m.recommended);
+            const recommended = tasks.find(m => m.recommended);
             if (recommended) {
               setSelectedModel(recommended.name);
             }
@@ -201,18 +204,12 @@ function Chat() {
         } else {
           // Fallback: Zeige zumindest das aktuell ausgewählte Model
           console.warn('No models returned from API, using fallback');
-          setModels([
-            { name: 'llama3.2:3b', speed: '⚡ Schnell', recommended: true },
-            { name: 'llama3.2:1b', speed: '⚡⚡ Sehr schnell', recommended: false }
-          ]);
+          setModels(FALLBACK_CHAT_TASKS);
         }
       } catch (error) {
         console.error('Error loading models:', error);
         // Fallback bei Fehler
-        setModels([
-          { name: 'llama3.2:3b', speed: '⚡ Schnell', recommended: true },
-          { name: 'llama3.2:1b', speed: '⚡⚡ Sehr schnell', recommended: false }
-        ]);
+        setModels(FALLBACK_CHAT_TASKS);
       }
     };
 
@@ -375,57 +372,6 @@ function Chat() {
     }
   };
 
-  // Auto-Model-Selection: Wähle optimales Model basierend auf Anfrage
-  const selectOptimalModel = (text) => {
-    const lower = text.toLowerCase();
-    
-    // Entscheidungsmatrix
-    const matrix = {
-      // Komplexe Aufgaben → llama3.2:3b (größeres Model)
-      complex: [
-        'erkläre', 'explain', 'schreibe', 'write', 'code', 'funktion', 'function',
-        'programmier', 'develop', 'erstelle eine', 'create a', 'implementier',
-        'analyse', 'analyze', 'vergleiche', 'compare', 'zusammenfass', 'summarize',
-        'übersetze', 'translate', 'berechne', 'calculate', 'löse', 'solve'
-      ],
-      
-      // Schnelle Antworten → llama3.2:1b (kleineres Model)
-      quick: [
-        'hallo', 'hi', 'hey', 'guten tag', 'wie geht', 'danke', 'thanks',
-        'ok', 'okay', 'ja', 'yes', 'nein', 'no', 'was ist', 'what is',
-        'kurz', 'quick', 'einfach', 'simple'
-      ],
-      
-      // Code-Generierung → llama3.2:3b
-      code: [
-        'javascript', 'python', 'php', 'html', 'css', 'sql', 'bash',
-        'react', 'vue', 'django', 'flask', 'laravel', 'node',
-        'class', 'def ', 'function', 'const ', 'let ', 'var '
-      ]
-    };
-    
-    // Prüfe Code-Keywords (höchste Priorität)
-    if (matrix.code.some(kw => lower.includes(kw))) {
-      return 'llama3.2:3b';
-    }
-    
-    // Prüfe komplexe Aufgaben
-    if (matrix.complex.some(kw => lower.includes(kw))) {
-      return 'llama3.2:3b';
-    }
-    
-    // Prüfe schnelle Anfragen
-    if (matrix.quick.some(kw => lower.includes(kw))) {
-      return 'llama3.2:1b';
-    }
-    
-    // Länge als Fallback-Kriterium
-    // Kurze Messages (<20 Wörter) → schnelles Model
-    // Lange Messages (>20 Wörter) → großes Model
-    const wordCount = text.split(/\s+/).length;
-    return wordCount < 20 ? 'llama3.2:1b' : 'llama3.2:3b';
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -461,7 +407,7 @@ function Chat() {
     }
 
     // Auto-Model-Selection basierend auf Intent
-    let modelToUse = selectedModel;
+    let modelToUse = normalizeChatTask(selectedModel);
     if (autoModelSelection) {
       modelToUse = selectOptimalModel(trimmedMessage);
       console.log(`Auto-selected model: ${modelToUse} for message: "${trimmedMessage.substring(0, 50)}..."`);

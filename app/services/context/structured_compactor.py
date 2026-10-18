@@ -7,12 +7,9 @@ JSON-State unter strikter Einhaltung der 'Never Remove'-Regeln.
 import asyncio
 import logging
 import json
-import os
 import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
-
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +18,7 @@ logger = logging.getLogger(__name__)
 # (Tool-Calling, delegate_research). Läuft nur als Hintergrund-Task, nie im
 # kritischen Pfad einer Chat-Antwort, daher zählt Zuverlässigkeit hier mehr
 # als Modellgröße/Latenz.
-COMPACTION_MODEL = "gpt-oss:120b-cloud"
+COMPACTION_MODEL = "task:json"
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 COMPACTOR_SYSTEM_PROMPT = """Du bist der strukturierte Context-Kompaktor für L.I.A.R.A.
@@ -149,10 +146,10 @@ class StructuredCompactor:
         model: str, messages: List[Dict[str, str]], temperature: Optional[float] = None
     ) -> Optional[str]:
         """Antwort über den LiNeP-Cluster-Trunk (Personal#29 B3), oder None
-        wenn der Cluster nicht konfiguriert ist bzw. fehlschlägt (dann nimmt
-        der Aufrufer den direkten Ollama-Weg). Das Standardmodell wird zum
-        Task "task:json" (strukturierte Ausgabe), ein explizit übergebenes
-        Modell bleibt unverändert."""
+        wenn der Cluster nicht konfiguriert ist bzw. fehlschlägt (dann nutzt
+        der Aufrufer ausschließlich die Heuristik). Verdichtung nutzt immer
+        task:json, unabhängig vom Chat-Modell. Der model-Parameter bleibt
+        zur Kompatibilität mit älteren Aufrufern erhalten."""
         try:
             from core.config import settings
 
@@ -160,12 +157,12 @@ class StructuredCompactor:
                 return None
             from services.linep_provider import get_linep_provider
 
-            target = "task:json" if model == COMPACTION_MODEL else model
+            target = COMPACTION_MODEL
             return await asyncio.to_thread(
                 get_linep_provider().chat_sync, target, messages, 2000, temperature
             )
         except Exception as e:
-            logger.warning("Cluster-Kompaktierung fehlgeschlagen (%s) - Fallback auf direktes Ollama", e)
+            logger.warning("Cluster-Kompaktierung fehlgeschlagen (%s) - Fallback auf Heuristik", e)
             return None
 
     @classmethod
@@ -196,16 +193,7 @@ class StructuredCompactor:
             ]
             content = await cls._chat_via_cluster(model, messages, temperature=0.1)
             if content is None:
-                base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-                async with httpx.AsyncClient(timeout=90.0) as client:
-                    res = await client.post(f"{base_url}/api/chat", json={
-                        "model": model,
-                        "messages": messages,
-                        "stream": False,
-                        "options": {"temperature": 0.1},
-                    })
-                    res.raise_for_status()
-                    content = res.json().get("message", {}).get("content", "")
+                return cls.extract_heuristic_facts(turns, current_state)
 
             # Manche Modelle wrappen valides JSON trotz Anweisung in
             # ```json ... ``` - robust genug parsen, statt daran zu scheitern.
@@ -213,6 +201,17 @@ class StructuredCompactor:
             if not match:
                 raise ValueError("Keine JSON-Struktur in der LLM-Antwort gefunden")
             facts = json.loads(match.group(0))
+            # Malformed fields must not become character-by-character facts
+            # or partially contaminate the existing state.
+            if not isinstance(facts, dict) or any(
+                key in facts and (
+                    not isinstance(facts[key], list)
+                    or any(not isinstance(item, str) for item in facts[key])
+                )
+                for key in ("active_topics", "decisions", "user_constraints",
+                            "open_tasks", "technical_state", "uncertainties")
+            ):
+                raise ValueError("Ungültige Struktur in der Kompaktierungsantwort")
 
             state = StructuredSessionState.from_dict(current_state.to_dict())
             state.merge(facts)

@@ -1,3 +1,4 @@
+import { normalizeChatTask, chatTaskOptions } from '../utils/chatTasks';
 import { useState, useEffect } from 'react';
 import { chatAPI } from '../services/api';
 import WorkspaceChatView from './WorkspaceChatView';
@@ -32,12 +33,16 @@ export default function WorkspaceChatPanel({
 
   // Model selection (persisted to localStorage)
   const [models, setModels] = useState([]);
-  const [model, setModel] = useState(() => localStorage.getItem('liara_selected_model') || 'llama3.2:3b');
+  const [model, setModel] = useState(() => normalizeChatTask(localStorage.getItem('liara_selected_model')));
 
   useEffect(() => {
     chatAPI.getModels()
-      .then((data) => setModels(data?.models || []))
-      .catch(() => setModels([]));
+      .then((data) => {
+        const tasks = chatTaskOptions(data?.models);
+        setModels(tasks);
+        setModel(current => tasks.some(t => t.name === current) ? current : tasks[0].name);
+      })
+      .catch(() => setModels(chatTaskOptions([])));
   }, []);
 
   useEffect(() => {
@@ -47,8 +52,8 @@ export default function WorkspaceChatPanel({
   }, [initialMode]);
 
   const changeModel = (value) => {
-    setModel(value);
-    localStorage.setItem('liara_selected_model', value);
+    setModel(normalizeChatTask(value));
+    localStorage.setItem('liara_selected_model', normalizeChatTask(value));
   };
 
   const handleNewSession = async () => {

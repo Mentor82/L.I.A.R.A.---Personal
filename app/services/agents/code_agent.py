@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 
 from services.agents.base_agent import BaseAgent
+from services.cluster_info import cluster_configured
 import services.aci as aci
 
 logger = logging.getLogger(__name__)
@@ -464,7 +465,7 @@ async def run_delegated_code_task(task: str, user_id: Optional[int], session_id:
     sub_agent = CodeAgent(
         user_id=user_id,
         session_id=session_id,
-        model=CODE_DELEGATION_MODEL,
+        model=("task:tool" if cluster_configured() else CODE_DELEGATION_MODEL),
         max_steps=CODE_DELEGATION_MAX_STEPS,
         propose_only=True,
     )

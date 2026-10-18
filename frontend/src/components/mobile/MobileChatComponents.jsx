@@ -1,3 +1,4 @@
+import { modelDisplayName } from '../../utils/chatTasks';
 import React, { useState, useEffect, useRef } from 'react';
 import MarkdownMessage from '../MarkdownMessage';
 import {
@@ -55,7 +56,7 @@ export function MobileBubbleFooter({ model, mood, tokens, content, thinking }) {
   return (
     <div className="mobile-bubble-footer">
       <div className="mobile-bubble-footer-left">
-        {model && <span className="mobile-bubble-model">🤖 {model.split(':')[0]}</span>}
+        {model && <span className="mobile-bubble-model">🤖 {modelDisplayName(model)}</span>}
         {mood && <span className="mobile-bubble-mood"> · 🌙 {mood}</span>}
       </div>
       {tok && (
@@ -168,7 +169,7 @@ export function MobileTopBar({
 
       <div className="mobile-model-pill-wrapper">
         <button className="mobile-model-pill" onClick={() => setModelPickerOpen((v) => !v)}>
-          <span>{selectedModel.split(':')[0]}</span>
+          <span>{modelDisplayName(selectedModel)}</span>
           <span className="mobile-pill-arrow">▾</span>
         </button>
 

@@ -148,7 +148,7 @@ function GuestChat() {
       id: assistantMsgId,
       role: 'assistant',
       content: '',
-      model: 'llama3.2:1b',
+      model: 'task:fast',
       webSearchResults: null,
       searchType: null,
       timestamp: new Date().toISOString()

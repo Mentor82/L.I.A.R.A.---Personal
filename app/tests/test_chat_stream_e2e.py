@@ -112,7 +112,7 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
              patch("api.routers.chat_streaming.httpx.AsyncClient", return_value=mock_client), \
              patch("api.routers.chat_streaming.get_model_num_predict", new_callable=AsyncMock, return_value=2048), \
              patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False), \
-             patch("services.chat_stream.generator_stage.save_artifact", return_value="architecture.md"):
+             patch("services.chat_stream.generator_helpers.save_artifact", return_value="architecture.md") as save_artifact:
 
             events = []
             generator = stream_ollama_response(
@@ -159,6 +159,8 @@ class TestChatStreamE2E(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(artifact_events), 1)
         self.assertEqual(artifact_events[0]["title"], "Architecture")
         self.assertEqual(artifact_events[0]["filename"], "architecture.md")
+        save_artifact.assert_called_once()
+        self.assertEqual(save_artifact.call_args.args[:3], (1, 42, "Architecture"))
 
         # Verify visible content does NOT contain raw tags
         full_visible_content = "".join([e.get("text", "") for e in events if e.get("type") == "content"])

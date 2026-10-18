@@ -119,6 +119,9 @@ class AgentRegistry:
         Optional `db`: merged Admin-Overrides (agent_profiles-Tabelle) über
         die Code-Defaults - siehe _apply_override.
         """
+        from services.cluster_info import cluster_configured
+
+        use_cluster = cluster_configured()
         result = []
         for agent_id, profile in cls._PROFILES.items():
             merged = cls._apply_override(agent_id, profile, db)
@@ -126,7 +129,7 @@ class AgentRegistry:
                 "id": merged["id"],
                 "name": merged["name"],
                 "description": merged["description"],
-                "default_model": merged["default_model"],
+                "default_model": "task:tool" if use_cluster else merged["default_model"],
                 "icon": merged["icon"],
                 "category": merged["category"],
                 "tools": merged["tools"]
@@ -158,7 +161,9 @@ class AgentRegistry:
 
         merged = cls._apply_override(agent_id, profile, db)
         agent_cls = profile["class"]
-        chosen_model = model or merged["default_model"]
+        from services.cluster_info import cluster_configured
+
+        chosen_model = model or ("task:tool" if cluster_configured() else merged["default_model"])
         steps = max_steps or 12
         uid = user_id or 1
 

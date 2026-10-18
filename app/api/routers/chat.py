@@ -376,6 +376,19 @@ def get_models(current_user: User = Depends(require_active_user)):
     Gibt dynamische Modell-Liste zurück mit GPU-Info.
     Nutzt fallback auf static models.json, wenn Ollama offline ist.
     """
+    # Personal's cluster identity permits tasks only, including during outages.
+    from services.cluster_info import cluster_configured, get_cluster_info
+    if cluster_configured():
+        cluster = get_cluster_info() or {}
+        tasks = [t for t in cluster.get("tasks", []) if t.startswith("task:")]
+        tasks = tasks or ["task:tool", "task:fast"]
+        return {
+            "source": "cluster-tasks" if cluster.get("available") else "cluster-task-fallback",
+            "models": [{"name": t, "recommended": t == "task:tool",
+                        "tags": ["cluster", "task"], "speed": "Cluster"} for t in tasks],
+            "total_models": len(tasks),
+        }
+
     dynamic = parse_ollama_list()
     gpu_detector = get_gpu_detector()
     gpu_available = gpu_detector.is_available()
@@ -981,6 +994,8 @@ async def chat_with_liara(
         
     except ImportError:
         # Fallback: Direkter Ollama-Call
+        if cluster_configured():
+            raise HTTPException(status_code=503, detail="Cluster-Chat ist momentan nicht verfügbar")
         payload = {
             "model": request.model or "llama3.2:3b",
             "messages": [

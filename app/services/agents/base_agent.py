@@ -14,6 +14,8 @@ from typing import Dict, List, Any, Optional, Callable, Awaitable
 
 from services.ollama_capabilities import model_supports_tools
 from services.workspace_artifacts import save_artifact
+from services.cluster_info import cluster_configured
+from services.linep_provider import get_linep_provider
 
 logger = logging.getLogger(__name__)
 
@@ -199,9 +201,18 @@ class BaseAgent:
 
     async def call_llm(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
-        Sendet Chat-Nachrichten an Ollama asynchron via httpx. Gibt das komplette
-        message-Objekt zurück. Unterstützt saubere Task-Cancellation.
+        Liefert die vollständige Assistant-Nachricht über den Cluster-Adapter
+        oder, ohne Cluster-Konfiguration, den lokalen HTTP-Client.
+        Der blockierende Cluster-Aufruf läuft in einem Worker-Thread.
         """
+        if cluster_configured():
+            # Preserve roles/tool results and return the full assistant message.
+            # A cluster failure must not silently reroute the agent to local Ollama.
+            return await asyncio.to_thread(
+                get_linep_provider().chat_message_sync,
+                model=self.model, messages=messages, temperature=0.2, tools=tools,
+            )
+
         payload = {
             "model": self.model,
             "messages": messages,
@@ -293,7 +304,11 @@ class BaseAgent:
         # all, which the text parser below has no choice but to treat as a
         # final answer - confirmed live with gpt-oss:120b-cloud). Models
         # without native tool support keep the existing text convention.
-        use_native_tools = bool(self.tools) and await model_supports_tools(self.model)
+        # Cluster tool requests use the native tool contract; local /api/show
+        # cannot describe a task whose model is selected remotely by linepd.
+        use_native_tools = bool(self.tools) and (
+            cluster_configured() or await model_supports_tools(self.model)
+        )
         native_tools_schema = self._build_native_tools_schema() if use_native_tools else None
 
         full_system = self.system_prompt if use_native_tools else f"{self.system_prompt}\n\n{self._build_tools_prompt()}"
