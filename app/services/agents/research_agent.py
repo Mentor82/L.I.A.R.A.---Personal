@@ -4,6 +4,7 @@ Spezialist für mehrstufige Recherchen, Faktenabgleiche und Quellenextraktion.
 """
 from typing import Optional, Dict, Any
 from services.agents.base_agent import BaseAgent
+from services.cluster_info import cluster_configured
 from services.web_search_service import WebSearchService
 from services.search_broker import get_search_broker
 from services.github_service import get_github_service
@@ -192,7 +193,7 @@ async def run_delegated_research(task: str) -> Dict[str, Any]:
     that hint in place, while a narrower single-fact lookup finished in 2
     steps regardless. A system-level instruction carries more weight.
     """
-    sub_agent = ResearchAgent(model=DELEGATION_MODEL, max_steps=DELEGATION_MAX_STEPS)
+    sub_agent = ResearchAgent(model=("task:tool" if cluster_configured() else DELEGATION_MODEL), max_steps=DELEGATION_MAX_STEPS)
     sub_agent.system_prompt += DELEGATION_BUDGET_INSTRUCTION
     result = await sub_agent.run(task=task)
     if result.get("success"):

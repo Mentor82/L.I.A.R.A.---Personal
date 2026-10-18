@@ -1,3 +1,4 @@
+import { normalizeChatTask, chatTaskOptions, FALLBACK_CHAT_TASKS } from '../../utils/chatTasks';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -52,7 +53,7 @@ export default function MobileChat({ onLogout }) {
   const [generating, setGenerating] = useState(false);
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem('liara_selected_model') || 'llama3.2:3b';
+    return normalizeChatTask(localStorage.getItem('liara_selected_model'));
   });
 
   const messagesEndRef = useRef(null);
@@ -103,18 +104,14 @@ export default function MobileChat({ onLogout }) {
       try {
         const res = await chatAPI.getModels();
         if (res?.models && res.models.length > 0) {
-          setModels(res.models);
+          const tasks = chatTaskOptions(res.models);
+          setModels(tasks);
+          setSelectedModel(current => tasks.some(t => t.name === current) ? current : tasks[0].name);
         } else {
-          setModels([
-            { name: 'llama3.2:3b', speed: '⚡ Schnell', recommended: true },
-            { name: 'llama3.2:1b', speed: '⚡⚡ Sehr schnell', recommended: false },
-          ]);
+          setModels(FALLBACK_CHAT_TASKS);
         }
       } catch {
-        setModels([
-          { name: 'llama3.2:3b', speed: '⚡ Schnell', recommended: true },
-          { name: 'llama3.2:1b', speed: '⚡⚡ Sehr schnell', recommended: false },
-        ]);
+        setModels(FALLBACK_CHAT_TASKS);
       }
     };
     fetchModels();
@@ -304,7 +301,7 @@ export default function MobileChat({ onLogout }) {
       content: '',
       thinking: '',
       timestamp,
-      model: selectedModel,
+      model: normalizeChatTask(selectedModel),
       isStreaming: true,
     };
 
@@ -329,7 +326,7 @@ export default function MobileChat({ onLogout }) {
         '/api/chat/stream',
         {
           message: textToSend,
-          model: selectedModel,
+          model: normalizeChatTask(selectedModel),
           session_id: currSessionId,
           images: imageToSend ? [imageToSend.base64] : undefined,
         },

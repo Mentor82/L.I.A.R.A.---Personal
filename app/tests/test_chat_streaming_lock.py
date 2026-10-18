@@ -2,7 +2,7 @@ import sys
 import json
 import asyncio
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 for mod in ("sentence_transformers", "neo4j"):
     if mod not in sys.modules:
@@ -420,7 +420,18 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
         mock_client_instance.stream.return_value = mock_stream_ctx
         mock_http_client.return_value = mock_client_instance
 
-        with patch("api.routers.chat_streaming.SESSION_GENERATION_LOCK_RENEW_INTERVAL", 0.02):
+        # Exercise the real generator/watchdog, isolating unrelated DB and
+        # model-discovery I/O at the modules that actually call them.
+        with patch("api.routers.chat_streaming.SESSION_GENERATION_LOCK_RENEW_INTERVAL", 0.02), \
+             patch("services.chat_stream.generator_stage.SessionLocal") as session_factory, \
+             patch("core.database.get_db_context") as db_context, \
+             patch("services.chat_stream.generator_stage.load_structured_session_state", return_value=None) as load_state, \
+             patch("services.chat_stream.generator_stage.cluster_configured", return_value=False), \
+             patch("services.chat_stream.generator_stage.linep_enabled", return_value=False), \
+             patch("services.chat_stream.generator_stage.model_supports_tools", new_callable=AsyncMock, return_value=False):
+            # The roster prompt opens an independent DB context for profile
+            # overrides; patching generator_stage.SessionLocal alone misses it.
+            db_context.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = None
             generator = stream_ollama_response(
                 message="Test message",
                 session_id=123,
@@ -439,6 +450,11 @@ class TestChatStreamingLock(unittest.IsolatedAsyncioTestCase):
                 any("Sitzungskoordination wurde während der Anfrage unterbrochen" in err for err in parsed_errors),
                 f"Events yielded: {events}"
             )
+            load_state.assert_called_once_with(123)
+            session_factory.return_value.close.assert_called_once()
+            mock_renew.assert_called_once_with(mock_lock)
+            self.assertTrue(mock_client_instance.stream.called)
+            self.assertFalse(any('"type": "done"' in event for event in events))
 
     async def test_race_with_lock_lost_normal_completion(self):
         """Verify _race_with_lock_lost completes normally when lock is held."""

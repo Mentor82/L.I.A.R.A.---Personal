@@ -104,25 +104,22 @@ class OllamaClient:
         Returns:
             Antwort vom Modell
         """
-        # Cluster-Task: nur ohne explizites Modell und mit konfiguriertem Trunk
-        if model is None and model_type and self._cluster_enabled():
+        # Explicit models also go through the cluster; failures must not silently
+        # switch the authenticated chat to a different, local backend.
+        if self._cluster_enabled():
+            from services.linep_provider import get_linep_provider, LinepUnavailableError
+
+            if stream:
+                raise LinepUnavailableError("Use the structured chat_stream interface for cluster streaming")
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             user_content = f"{context}\n\n{message}" if context else message
             messages.append({"role": "user", "content": user_content})
-            if not stream:
-                try:
-                    from services.linep_provider import get_linep_provider
-
-                    return get_linep_provider().chat_sync(
-                        self.TASK_ROUTING[model_type], messages, temperature=temperature
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Cluster-Task %s fehlgeschlagen (%s) - Fallback auf lokales Ollama",
-                        self.TASK_ROUTING[model_type], e,
-                    )
+            target = model or self.TASK_ROUTING[model_type or ModelType.CONVERSATION]
+            return get_linep_provider().chat_sync(
+                target, messages, temperature=temperature
+            )
 
         # Model-Auswahl
         if model is None:

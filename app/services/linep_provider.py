@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import socket
 import time
@@ -221,7 +222,46 @@ class LinepChatProvider:
         fallback. Must not be called from inside the event loop's thread
         without to_thread - same as the requests call it replaces.
         """
-        import json
+        message = self.chat_message_sync(model, messages, max_tokens, temperature)
+        text = message["content"].strip()
+        if not text:
+            raise LinepUnavailableError("LiNeP runtime returned an empty response")
+        return text
+
+    @staticmethod
+    def _chat_payload(messages: list[dict], tools: Optional[list[dict]] = None) -> str:
+        """Keep roles, tool results and tool schemas intact; model belongs in the envelope."""
+        payload = {"messages": messages}
+        if tools is not None:
+            payload["tools"] = tools
+        return json.dumps(payload, ensure_ascii=False, allow_nan=False)
+
+    @staticmethod
+    def _parse_tool_call(payload: str) -> dict:
+        try:
+            call = json.loads(payload)
+            function = call["function"]
+            if not isinstance(function["name"], str) or not function["name"]:
+                raise ValueError("missing function name")
+            if not isinstance(function.get("arguments", {}), dict):
+                raise ValueError("function arguments must be an object")
+            return call
+        except (ValueError, TypeError, KeyError) as error:
+            raise LinepUnavailableError("Invalid LiNeP tool-call payload") from error
+
+    def chat_message_sync(
+        self,
+        model: str,
+        messages: list[dict],
+        max_tokens: int = 2000,
+        temperature: Optional[float] = None,
+        tools: Optional[list[dict]] = None,
+    ) -> dict:
+        """Return an assistant message with content, thinking and ordered tool_calls.
+
+        Tool-only replies are valid. Transport/runtime failures and missing completion
+        raise rather than returning a partial answer. Use asyncio.to_thread in async callers.
+        """
 
         _client_cls, EventType, RuntimeProfile, RequestEnvelope, StreamIdentity = _import_linep()
         request = RequestEnvelope(
@@ -230,19 +270,29 @@ class LinepChatProvider:
             ),
             profile=RuntimeProfile.CHAT,
             model_id=model,
-            payload=json.dumps({"messages": messages}),
+            payload=self._chat_payload(messages, tools),
             max_tokens=max_tokens,
         )
         if temperature is not None:
             request.temperature = float(temperature)
         parts: list[str] = []
+        thinking: list[str] = []
+        tool_calls: list[dict] = []
+        completed = False
         try:
             client = self._connect_sync(self._timeout)
             try:
                 for event in client.execute_stream(request):
                     if event.event_type == EventType.CONTENT_DELTA and event.payload:
                         parts.append(event.payload)
-                    elif event.event_type == EventType.FAILED:
+                    elif event.event_type == EventType.REASONING_DELTA and event.payload:
+                        thinking.append(event.payload)
+                    elif event.event_type == EventType.TOOL_CALL:
+                        tool_calls.append(self._parse_tool_call(event.payload))
+                    elif event.event_type == EventType.COMPLETED:
+                        completed = True
+                        break
+                    elif event.event_type in (EventType.FAILED, EventType.CANCELLED, EventType.ERROR):
                         message = (
                             event.error.message
                             if event.error and event.error.message
@@ -255,10 +305,24 @@ class LinepChatProvider:
             raise
         except Exception as error:
             raise LinepUnavailableError(f"LiNeP transport failed: {error}") from error
-        text = "".join(parts).strip()
-        if not text:
+        if not completed:
+            raise LinepUnavailableError("LiNeP stream ended without completion")
+        if not parts and not tool_calls:
             raise LinepUnavailableError("LiNeP runtime returned an empty response")
-        return text
+        return {
+            "role": "assistant", "content": "".join(parts),
+            "thinking": "".join(thinking), "tool_calls": tool_calls,
+        }
+
+    async def chat_stream(
+        self, model: str, messages: list[dict], max_tokens: int = 2000,
+        temperature: Optional[float] = None, tools: Optional[list[dict]] = None,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """Structured CHAT stream using the existing content/thinking/tool_call events."""
+        async for event in self.generate_stream(
+            self._chat_payload(messages, tools), model, max_tokens, temperature
+        ):
+            yield event
 
     async def generate_stream(
         self,
@@ -267,7 +331,7 @@ class LinepChatProvider:
         num_predict: int = 2000,
         temperature: Optional[float] = None,
     ) -> AsyncIterator[tuple[str, str]]:
-        """Streams (kind, payload) tuples from a LiNeP-routed GENERATE call,
+        """Streams (kind, payload) tuples from a LiNeP-routed CHAT call,
         kind being "content", "thinking", or "tool_call" (see module
         docstring for the native REASONING_DELTA/TOOL_CALL event mapping).
 
@@ -295,6 +359,7 @@ class LinepChatProvider:
 
         def _worker():
             try:
+                completed = False
                 client = self._connect_sync(timeout)
                 try:
                     for event in client.execute_stream(request):
@@ -302,20 +367,23 @@ class LinepChatProvider:
                             loop.call_soon_threadsafe(queue.put_nowait, (("content", event.payload), None))
                         elif event.event_type == EventType.REASONING_DELTA and event.payload:
                             loop.call_soon_threadsafe(queue.put_nowait, (("thinking", event.payload), None))
-                        elif event.event_type == EventType.TOOL_CALL and event.payload:
+                        elif event.event_type == EventType.TOOL_CALL:
+                            self._parse_tool_call(event.payload)
                             loop.call_soon_threadsafe(queue.put_nowait, (("tool_call", event.payload), None))
-                        elif event.event_type == EventType.FAILED:
+                        elif event.event_type == EventType.COMPLETED:
+                            completed = True
+                            break
+                        elif event.event_type in (EventType.FAILED, EventType.CANCELLED, EventType.ERROR):
                             message = (
                                 event.error.message
                                 if event.error and event.error.message
                                 else "LiNeP runtime reported a failure"
                             )
-                            loop.call_soon_threadsafe(
-                                queue.put_nowait, (None, LinepUnavailableError(message))
-                            )
-                            return
+                            raise LinepUnavailableError(message)
                 finally:
                     client.close()
+                if not completed:
+                    raise LinepUnavailableError("LiNeP stream ended without completion")
                 loop.call_soon_threadsafe(queue.put_nowait, (None, None))
             except Exception as error:
                 err = (

@@ -38,6 +38,8 @@ from services.neo4j_service import get_neo4j_service
 from services.ollama_capabilities import get_model_num_predict
 from services.redis_service import get_redis_service
 from services.thinking_splitter import ThinkingSplitter
+from services.cluster_info import cluster_configured
+from services.linep_provider import get_linep_provider, LinepUnavailableError
 from services.user_preferences_service import get_user_preferences
 
 # Modular Chat Stream Stages (Issue #23)
@@ -75,7 +77,7 @@ router = APIRouter(prefix="/chat", tags=["Chat Streaming"])
 class StreamChatRequest(BaseModel):
     """Request für Streaming Chat."""
     message: str
-    model: Optional[str] = "llama3.2:3b"
+    model: Optional[str] = None
     temperature: float = 0.7
     context: Optional[str] = None
     max_tokens: Optional[int] = 2000
@@ -342,7 +344,7 @@ async def stream_chat(
     )
 
 
-async def stream_guest_response(query: str, model: str = "llama3.2:1b") -> AsyncGenerator[str, None]:
+async def stream_guest_response(query: str, model: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Streaming Response für Guest-Modus."""
     try:
         embedding_service = get_embedding_service()
@@ -379,8 +381,21 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
         if web_search_result:
             context += f"\n\nAktuelle Information:\n{web_search_result}"
 
+        if cluster_configured():
+            messages = [{"role": "system", "content": context},
+                        {"role": "user", "content": query}]
+            async for kind, value in get_linep_provider().chat_stream(
+                model or "task:fast", messages, 300, 0.7, tools=None
+            ):
+                if kind == "tool_call":
+                    raise LinepUnavailableError("Guest chat does not execute model tool calls")
+                if kind in ("content", "thinking"):
+                    yield f"data: {json.dumps({'type': kind, 'text': value})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return
+
         payload = {
-            "model": model,
+            "model": model or "llama3.2:1b",
             "prompt": f"{context}\n\nUser: {query}\nLiara:",
             "stream": True,
             "options": {
@@ -421,6 +436,8 @@ Bei Fragen zu Features erkläre, dass erweiterte Funktionen nur für registriert
                 except json.JSONDecodeError:
                     continue
 
+    except LinepUnavailableError:
+        yield f"data: {json.dumps({'type': 'error', 'error': 'Die KI-Anfrage konnte über den Cluster nicht abgeschlossen werden.'})}\n\n"
     except requests.Timeout:
         yield f"data: {json.dumps({'type': 'error', 'error': 'Timeout - Anfrage dauerte zu lange'})}\n\n"
     except Exception as e:
