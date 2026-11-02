@@ -34,6 +34,20 @@ class Settings(BaseSettings):
     linep_trunk_control_port: int = 9001
     linep_sl1_key_file: str = ""
 
+    # Embeddings (services/embedding_service.py). "sentence_transformers" runs
+    # embedding_model in every worker process; "linep" asks the cluster trunk
+    # above for embedding_linep_model (a task like task:embed-bge, bge-m3 on
+    # the RPi5) and accepts only vectors from embedding_model with
+    # embedding_dimension dims. Stored vectors carry embedding_model/_version:
+    # switching changes the vector space, so it needs the v2 columns and a
+    # backfill first (Planner d6c34a07). No silent fallback between backends.
+    embedding_backend: str = "sentence_transformers"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_dimension: int = 384
+    embedding_version: int = 1
+    embedding_linep_model: str = "task:embed-bge"
+    embedding_linep_timeout_seconds: float = 10.0
+
     # Direct accelerator hosts that no longer exist (Personal#29 B6-B8):
     # off, so nothing dials a dead host. See services/accelerators.py.
     hailo_enabled: bool = False

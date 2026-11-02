@@ -773,7 +773,17 @@ def get_relevant_context(
                     'created_at': record['created_at']
                 })
     
-    # 3. Similarity berechnen
+    # 3. Similarity berechnen - nur Concepts aus demselben Vektorraum. Während
+    # des Umstiegs 384 -> 1024 (Planner d6c34a07) liegen beide Längen im Graph;
+    # früher lieferte cosine_similarity dafür still 0.0, jetzt wird gezählt.
+    dim = len(query_embedding)
+    mismatched = sum(1 for c in concepts if len(c['embedding']) != dim)
+    if mismatched:
+        logger.warning(
+            f"Concept search: {mismatched} of {len(concepts)} concepts have embeddings "
+            f"of another dimension than the query ({dim}) and are skipped")
+        concepts = [c for c in concepts if len(c['embedding']) == dim]
+
     concept_similarities = []
     for concept_data in concepts:
         similarity = embedding_service.cosine_similarity(
